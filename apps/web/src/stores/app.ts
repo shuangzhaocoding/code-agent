@@ -51,8 +51,6 @@ export const useAppStore = defineStore('app', () => {
     confirmLabel?: string
     cancelLabel?: string
     danger?: boolean
-    approvalId?: string
-    runId?: string
   } | null>(null)
   const activeRunId = ref<string | null>(null)
   let confirmResolver: ((ok: boolean) => void) | null = null
@@ -468,29 +466,6 @@ export const useAppStore = defineStore('app', () => {
     lastEventId.value = event.event_id
     messages.value = applyEvent(messages.value, event)
     const type = String(event.payload?.block_type || '')
-    if (event.type === 'block.started' && type === 'approval') {
-      confirmResolver?.(false)
-      confirmResolver = null
-      const meta = (event.payload?.meta as Record<string, unknown>) || {}
-      const details = meta.details
-      confirmDialog.value = {
-        title: '需要确认危险操作',
-        summary: String(meta.summary || 'Agent 想执行一项可能有风险的操作'),
-        details: typeof details === 'string' ? details : details ? JSON.stringify(details, null, 2) : '',
-        confirmLabel: '允许执行',
-        cancelLabel: '拒绝',
-        danger: true,
-        approvalId: String(meta.approval_id || ''),
-        runId: event.run_id,
-      }
-    }
-    if (event.type === 'block.completed' && confirmDialog.value?.approvalId) {
-      const blocks = messages.value.flatMap((m) => m.blocks)
-      const block = blocks.find((b) => b.id === event.payload?.block_id)
-      if (block && String(block.meta.approval_id || '') === confirmDialog.value.approvalId && block.meta.decision) {
-        confirmDialog.value = null
-      }
-    }
     if (
       (event.type === 'block.started' || event.type === 'block.completed') &&
       (type === 'file.diff' || type === 'file.delete')
@@ -514,7 +489,6 @@ export const useAppStore = defineStore('app', () => {
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
       runStatus.value = event.type.replace('run.', '')
       refreshTree()
-      if (confirmDialog.value?.runId === event.run_id) confirmDialog.value = null
     }
     if (event.type === 'block.started' || event.type === 'block.completed') {
       const type = String(event.payload?.block_type || '')
@@ -554,24 +528,13 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function closeConfirm(ok: boolean) {
-    const req = confirmDialog.value
     confirmDialog.value = null
     const resolver = confirmResolver
     confirmResolver = null
-    if (req?.approvalId && req.runId) {
-      api(`/api/runs/${req.runId}/approvals/${req.approvalId}`, {
-        method: 'POST',
-        body: JSON.stringify({ allowed: ok }),
-      }).catch(() => undefined)
-    }
     resolver?.(ok)
   }
 
   function decideApproval(approvalId: string, allowed: boolean) {
-    if (confirmDialog.value?.approvalId === approvalId) {
-      closeConfirm(allowed)
-      return
-    }
     const runId = activeRunId.value
     if (!runId) return
     api(`/api/runs/${runId}/approvals/${approvalId}`, {

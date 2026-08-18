@@ -18,7 +18,7 @@
   --scrollbar-thumb-hover: rgba(15, 23, 42, 0.38);
   --radius: 12px;
   --radius-sm: 8px;
-  --header-h: 60px;
+  --header-h: 42px;
   --aside-w: 220px;
   --font: 'Source Sans 3', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   --mono: 'IBM Plex Mono', ui-monospace, monospace;
@@ -128,15 +128,15 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px 0 20px;
-  gap: 16px;
+  padding: 0 12px 0 14px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
 .layout-header-left {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 14px;
   min-width: 0;
   flex: 1;
 }
@@ -144,27 +144,27 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
 .layout-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .layout-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-weight: 700;
-  font-size: 18px;
+  font-size: 14px;
   letter-spacing: -0.02em;
   flex-shrink: 0;
 }
 
 .brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   display: grid;
   place-items: center;
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 700;
   color: #fff;
   background: var(--primary);
@@ -193,15 +193,15 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 36px;
-  padding: 0 10px;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   transition: background 0.15s ease, color 0.15s ease;
@@ -219,9 +219,23 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
 
 .header-divider {
   width: 1px;
-  height: 20px;
+  height: 14px;
   background: var(--border);
   flex-shrink: 0;
+}
+
+.layout-header .icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.layout-header .btn {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  gap: 4px;
 }
 
 .icon-btn.active {

@@ -209,7 +209,7 @@ const regionToggles = [
             :title="item.label"
             @click="openPanel(item.id, item.component, item.title)"
           >
-            <AppIcon :name="item.icon" :size="16" />
+            <AppIcon :name="item.icon" :size="14" />
             <span>{{ item.label }}</span>
           </button>
         </nav>
@@ -224,15 +224,15 @@ const regionToggles = [
           :title="item.title"
           @click="toggleRegion(item.id)"
         >
-          <AppIcon :name="item.icon" :size="18" />
+          <AppIcon :name="item.icon" :size="14" />
         </button>
         <span class="header-divider" />
         <button type="button" class="icon-btn" title="切换主题" @click="theme = toggleTheme()">
-          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
+          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="14" />
         </button>
         <span class="ws-name" :title="store.workspace?.root_path">{{ store.workspace?.name }}</span>
         <button type="button" class="btn" @click="workspaceOpen = true">
-          <AppIcon name="folder" :size="15" />
+          <AppIcon name="folder" :size="13" />
           打开工作区
         </button>
       </div>
@@ -289,6 +289,6 @@ const regionToggles = [
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
 }
 </style>

@@ -23,8 +23,9 @@ function toggle() {
 }
 
 function onHeadClick() {
-  if (props.activatable) emit('activate')
-  else toggle()
+  const next = !open.value
+  open.value = next
+  if (props.activatable && next) emit('activate')
 }
 
 function onChevron(e: Event) {
@@ -36,22 +37,24 @@ function onChevron(e: Event) {
 
 <template>
   <div class="card" :class="[tone, status, { open }]">
-    <div class="head" :class="{ activatable }" @click="onHeadClick">
-      <span class="glyph" aria-hidden="true">
-        <AppIcon :name="icon" :size="14" />
-      </span>
-      <span class="titles">
-        <span class="title">{{ title }}</span>
-        <span v-if="subtitle" class="sub">{{ subtitle }}</span>
-      </span>
-      <span class="dots" :class="{ on: status === 'streaming' }" aria-hidden="true"><i /><i /><i /></span>
-      <span v-if="status === 'error'" class="pill error">失败</span>
-      <button type="button" class="chev-btn" @click="onChevron">
-        <AppIcon class="chev" name="chevron" :size="14" />
-      </button>
-    </div>
-    <div v-show="open" class="body">
-      <slot />
+    <div class="row">
+      <div class="head" :class="{ activatable }" @click="onHeadClick">
+        <span class="glyph" aria-hidden="true">
+          <AppIcon :name="icon" :size="14" />
+        </span>
+        <span class="titles">
+          <span class="title">{{ title }}</span>
+          <span v-if="subtitle" class="sub">{{ subtitle }}</span>
+        </span>
+        <span class="dots" :class="{ on: status === 'streaming' }" aria-hidden="true"><i /><i /><i /></span>
+        <span v-if="status === 'error'" class="pill error">失败</span>
+        <button type="button" class="chev-btn" @click="onChevron">
+          <AppIcon class="chev" name="chevron" :size="14" />
+        </button>
+      </div>
+      <div v-show="open" class="body">
+        <slot />
+      </div>
     </div>
     <div v-if="$slots.footer" class="foot">
       <slot name="footer" />
@@ -70,11 +73,13 @@ function onChevron(e: Event) {
   contain: layout style;
   box-shadow: var(--shadow);
 }
-.card.think { border-color: color-mix(in srgb, #8b5cf6 32%, var(--border)); }
-.card.danger { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
-.card.tool { border-color: color-mix(in srgb, var(--primary) 26%, var(--border)); }
+.row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+}
 .head {
-  width: 100%;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -85,7 +90,19 @@ function onChevron(e: Event) {
   color: var(--text);
   cursor: pointer;
   text-align: left;
+  min-width: 0;
+  flex: 1;
 }
+.open .head {
+  flex: 0 0 196px;
+  width: 196px;
+  max-width: 42%;
+  align-items: flex-start;
+  border-right: 1px solid var(--border);
+}
+.card.think { border-color: color-mix(in srgb, #8b5cf6 32%, var(--border)); }
+.card.danger { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
+.card.tool { border-color: color-mix(in srgb, var(--primary) 26%, var(--border)); }
 .head:hover { background: var(--bg-muted); }
 .head.activatable .titles { cursor: pointer; }
 .head.activatable .sub { color: var(--primary); }
@@ -115,10 +132,16 @@ function onChevron(e: Event) {
   min-width: 0;
   flex: 1;
   display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 20px;
+}
+.open .titles {
   flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  min-height: 32px;
+  align-items: flex-start;
+  gap: 2px;
+  padding-top: 3px;
 }
 .title {
   font-size: 13px;
@@ -181,10 +204,11 @@ function onChevron(e: Event) {
   padding: 0;
 }
 .chev-btn:hover { background: var(--bg-elevated); color: var(--text); }
-.chev { transition: transform 0.16s ease; }
-.open .chev { transform: rotate(180deg); }
+.chev { transition: transform 0.16s ease; transform: rotate(-90deg); }
+.open .chev { transform: rotate(0deg); }
 .body {
-  border-top: 1px solid var(--border);
+  flex: 1;
+  min-width: 0;
   padding: 10px 12px 12px;
   background: var(--bg);
 }
