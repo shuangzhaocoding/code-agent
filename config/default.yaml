@@ -1,0 +1,73 @@
+server:
+  host: 127.0.0.1
+  port: 8000
+  cors_origins:
+    - http://127.0.0.1:5173
+    - http://localhost:5173
+
+paths:
+  data_dir: ~/.code-agent/data
+  user_config: ~/.code-agent/config.yaml
+  user_plugins: ~/.code-agent/plugins
+  user_skills: ~/.code-agent/skills
+
+agent:
+  max_steps: 40
+  tool_timeout_sec: 90
+  run_timeout_sec: 900
+  max_tool_output_chars: 12000
+  default_mode: agent
+  system_prompt_extra: ""
+
+workspace:
+  max_file_bytes: 1048576
+  tree_max_children: 400
+  grep_max_hits: 200
+  default_ignores:
+    - .git
+    - node_modules
+    - dist
+    - build
+    - .venv
+    - venv
+    - __pycache__
+    - .code-agent/data
+    - .cursor
+    - target
+    - coverage
+
+policy:
+  auto_run: sandbox
+  deny_network: false
+  command_blacklist:
+    - rm -rf /
+    - sudo
+    - mkfs
+    - shutdown
+    - reboot
+    - dd if=
+    - :(){
+    - chmod -R 777 /
+  protected_globs:
+    - .env
+    - .env.*
+    - "*.pem"
+    - "*.key"
+    - id_rsa
+    - id_ed25519
+    - "*.p12"
+
+terminal:
+  shell: /bin/bash
+  scrollback_bytes: 204800
+  default_cols: 120
+  default_rows: 32
+
+llm:
+  request_timeout_sec: 120
+  default_temperature: 0.2
+
+ui:
+  theme: dark
+  font_size: 13
+  send_on_enter: true

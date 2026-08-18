@@ -1,0 +1,391 @@
+<script setup lang="ts">
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useAppStore } from '@/stores/app'
+import { currentTheme, type Theme } from '@/theme'
+import FileGlyph from '@/components/FileGlyph.vue'
+
+const store = useAppStore()
+const host = ref<HTMLDivElement | null>(null)
+const diffHost = ref<HTMLDivElement | null>(null)
+let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
+let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
+let monacoMod: typeof import('monaco-editor') | null = null
+const models = new Map<string, import('monaco-editor').editor.ITextModel>()
+const origModels = new Map<string, import('monaco-editor').editor.ITextModel>()
+const review = computed(() => store.pendingReview(store.activePath))
+const pendingCount = computed(() => store.pendingReviews.length)
+const reviewIndex = computed(() => {
+  const i = store.pendingReviews.findIndex((r) => r.path === store.activePath)
+  return i < 0 ? 0 : i + 1
+})
+
+function monacoTheme(t: Theme) {
+  return t === 'dark' ? 'vs-dark' : 'vs'
+}
+
+function langOf(path: string) {
+  const ext = path.split('.').pop() || ''
+  const langMap: Record<string, string> = {
+    ts: 'typescript',
+    tsx: 'typescript',
+    js: 'javascript',
+    vue: 'html',
+    py: 'python',
+    md: 'markdown',
+    json: 'json',
+    css: 'css',
+    html: 'html',
+    yaml: 'yaml',
+    yml: 'yaml',
+  }
+  return langMap[ext] || 'plaintext'
+}
+
+function fileName(path: string) {
+  return path.split('/').pop() || path
+}
+
+function uriOf(path: string, original = false) {
+  return monacoMod!.Uri.from({
+    scheme: 'inmemory',
+    authority: original ? 'ca-orig' : 'ca',
+    path: `/${path}`,
+  })
+}
+
+function ensureModel(path: string, content: string) {
+  if (!monacoMod) return null
+  let model = models.get(path)
+  if (!model || model.isDisposed()) {
+    const existing = monacoMod.editor.getModel(uriOf(path))
+    model = existing || monacoMod.editor.createModel(content, langOf(path), uriOf(path))
+    monacoMod.editor.setModelLanguage(model, langOf(path))
+    model.onDidChangeContent(() => {
+      store.updateOpenContent(path, model!.getValue())
+    })
+    models.set(path, model)
+  }
+  if (model.getValue() !== content) model.setValue(content)
+  return model
+}
+
+function ensureOrigModel(path: string, content: string) {
+  if (!monacoMod) return null
+  let model = origModels.get(path)
+  if (!model || model.isDisposed()) {
+    const existing = monacoMod.editor.getModel(uriOf(path, true))
+    model = existing || monacoMod.editor.createModel(content, langOf(path), uriOf(path, true))
+    origModels.set(path, model)
+  }
+  if (model.getValue() !== content) model.setValue(content)
+  return model
+}
+
+const editorOptions = {
+  automaticLayout: true,
+  minimap: { enabled: false },
+  fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+  fontSize: 13,
+  scrollBeyondLastLine: false,
+  padding: { top: 12 },
+  scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+}
+
+function showPath(path: string | null) {
+  if (!monacoMod) return
+  if (review.value && path) {
+    showDiff(path, review.value.before, review.value.after)
+    return
+  }
+  diffEditor?.setModel(null)
+  if (!editor) return
+  if (!path) {
+    editor.setModel(null)
+    return
+  }
+  const file = store.openFiles.find((f) => f.path === path)
+  const model = ensureModel(path, file?.content ?? '')
+  if (model) editor.setModel(model)
+  requestAnimationFrame(() => editor?.layout())
+}
+
+function showDiff(path: string, before: string, after: string) {
+  if (!monacoMod || !diffHost.value) return
+  if (!diffEditor) {
+    diffEditor = monacoMod.editor.createDiffEditor(diffHost.value, {
+      ...editorOptions,
+      theme: monacoTheme(currentTheme()),
+      readOnly: true,
+      originalEditable: false,
+      renderSideBySide: true,
+      ignoreTrimWhitespace: false,
+    })
+  }
+  const original = ensureOrigModel(path, before)
+  const modified = ensureModel(path, after)
+  if (original && modified) diffEditor.setModel({ original, modified })
+  requestAnimationFrame(() => diffEditor?.layout())
+}
+
+onMounted(async () => {
+  monacoMod = await import('monaco-editor')
+  const { default: editorWorker } = await import('monaco-editor/editor/editor.worker.js?worker')
+  self.MonacoEnvironment = {
+    getWorker: () => new editorWorker(),
+  }
+  if (!host.value) return
+  editor = monacoMod.editor.create(host.value, {
+    value: '',
+    language: 'plaintext',
+    theme: monacoTheme(currentTheme()),
+    ...editorOptions,
+  })
+  showPath(store.activePath)
+  window.addEventListener('ca-theme', onTheme as EventListener)
+  window.addEventListener('keydown', onKey)
+  window.addEventListener('ca-file-reload', onReload as EventListener)
+})
+
+function onTheme(e: Event) {
+  monacoMod?.editor.setTheme(monacoTheme((e as CustomEvent<Theme>).detail))
+}
+
+function onKey(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    save()
+  }
+}
+
+function onReload(e: Event) {
+  const detail = (e as CustomEvent<{ path: string; content: string }>).detail
+  if (!detail?.path) return
+  const model = models.get(detail.path)
+  if (model && model.getValue() !== detail.content) model.setValue(detail.content)
+  const current = store.pendingReview(detail.path)
+  if (current && store.activePath === detail.path) {
+    showDiff(detail.path, current.before, current.after)
+  }
+}
+
+watch(
+  () => [store.activePath, review.value?.blockId, review.value?.status] as const,
+  async () => {
+    await nextTick()
+    showPath(store.activePath)
+  },
+)
+
+watch(
+  () => store.openFiles.map((f) => f.path).join('\0'),
+  () => {
+    const keep = new Set(store.openFiles.map((f) => f.path))
+    for (const [path, model] of models) {
+      if (!keep.has(path)) {
+        if (editor?.getModel() === model) editor.setModel(null)
+        model.dispose()
+        models.delete(path)
+      }
+    }
+    for (const [path, model] of origModels) {
+      if (!keep.has(path)) {
+        model.dispose()
+        origModels.delete(path)
+      }
+    }
+  },
+)
+
+onBeforeUnmount(() => {
+  window.removeEventListener('ca-theme', onTheme as EventListener)
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('ca-file-reload', onReload as EventListener)
+  for (const model of models.values()) model.dispose()
+  for (const model of origModels.values()) model.dispose()
+  models.clear()
+  origModels.clear()
+  diffEditor?.dispose()
+  editor?.dispose()
+})
+
+async function save() {
+  await store.saveOpenFile()
+}
+
+function onTabWheel(e: WheelEvent) {
+  const el = e.currentTarget as HTMLElement
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    el.scrollLeft += e.deltaY
+    e.preventDefault()
+  }
+}
+
+function onTabAux(path: string, e: MouseEvent) {
+  if (e.button === 1) {
+    e.preventDefault()
+    store.closeFile(path)
+  }
+}
+</script>
+
+<template>
+  <div class="panel-shell editor-shell">
+    <header class="file-bar">
+      <div class="tabs" @wheel="onTabWheel">
+        <button
+          v-for="file in store.openFiles"
+          :key="file.path"
+          type="button"
+          class="ftab"
+          :class="{ active: store.activePath === file.path }"
+          :title="file.path"
+          @click="store.activateFile(file.path)"
+          @auxclick="onTabAux(file.path, $event)"
+        >
+          <FileGlyph :name="fileName(file.path)" :size="13" />
+          <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
+          <span v-if="store.pendingReview(file.path)" class="mark">diff</span>
+          <span class="x" title="关闭" @click.stop="store.closeFile(file.path)">×</span>
+        </button>
+      </div>
+      <button type="button" class="btn" :disabled="!store.openFile || !!review" @click="save">保存</button>
+    </header>
+    <div v-if="pendingCount" class="review-bar">
+      <span>{{ review ? '请确认当前文件 diff' : '有待确认的改动' }}</span>
+      <span class="count">{{ review ? `${reviewIndex}/${pendingCount}` : `${pendingCount} 个文件` }}</span>
+      <button type="button" class="btn ghost" :disabled="pendingCount < 2" @click="store.cycleReview(-1)">上一个</button>
+      <button type="button" class="btn ghost" :disabled="pendingCount < 2" @click="store.cycleReview(1)">下一个</button>
+      <span class="spacer" />
+      <button v-if="review" type="button" class="btn ghost" @click="store.rejectReview(review.path)">拒绝</button>
+      <button v-if="review" type="button" class="btn primary" @click="store.acceptReview(review.path)">接受</button>
+      <button type="button" class="btn primary" @click="store.acceptAllReviews()">全部接受</button>
+    </div>
+    <div class="host-wrap">
+      <div ref="host" class="host" :class="{ hidden: !!review }" />
+      <div ref="diffHost" class="host" :class="{ hidden: !review }" />
+      <div v-if="!store.openFile" class="empty">从左侧打开文件</div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.editor-shell { background: var(--bg-elevated); }
+.file-bar {
+  display: flex;
+  align-items: stretch;
+  min-height: 36px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+.tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.ftab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 8px 0 12px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 12.5px;
+  max-width: 200px;
+  flex-shrink: 0;
+}
+.ftab:hover { background: var(--bg-muted); color: var(--text); }
+.ftab.active {
+  background: var(--bg-elevated);
+  color: var(--text);
+  box-shadow: inset 0 -2px 0 var(--primary);
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mark {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primary);
+  background: var(--primary-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+  line-height: 16px;
+}
+.review-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--primary-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.count {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.review-bar .btn { margin: 0; height: 26px; }
+.spacer { flex: 1; }
+.btn.ghost {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+}
+.btn.primary {
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: var(--bg-elevated);
+  color: var(--primary);
+}
+.x {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+.ftab:hover .x,
+.ftab.active .x { opacity: 0.55; }
+.x:hover { opacity: 1 !important; background: var(--bg-muted); }
+.btn {
+  height: auto;
+  margin: 4px 8px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.host-wrap {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+.host {
+  height: 100%;
+}
+.host.hidden { display: none; }
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  background: var(--bg-elevated);
+}
+</style>

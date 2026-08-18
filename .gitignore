@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+.DS_Store
+*.sqlite3
+.vite/
+apps/web/dist/
+apps/api/*.egg-info/
+*.egg-info/
+.python-version
