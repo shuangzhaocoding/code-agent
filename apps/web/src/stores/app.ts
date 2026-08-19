@@ -60,6 +60,7 @@ export const useAppStore = defineStore('app', () => {
   const activity = ref('files')
   const gitChangedPaths = ref<Record<string, string>>({})
   const sessionTreeMarks = ref<Record<string, string>>({})
+  const ackedTreeMarks = ref<Record<string, true>>({})
   let stopStream: (() => void) | null = null
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   const pendingTreePaths = new Set<string>()
@@ -100,6 +101,7 @@ export const useAppStore = defineStore('app', () => {
     treePath.value = ''
     gitChangedPaths.value = {}
     sessionTreeMarks.value = {}
+    ackedTreeMarks.value = {}
     runStatus.value = 'idle'
   }
 
@@ -111,6 +113,7 @@ export const useAppStore = defineStore('app', () => {
     expanded.value = new Set()
     gitChangedPaths.value = {}
     sessionTreeMarks.value = {}
+    ackedTreeMarks.value = {}
     await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
     if (conversations.value[0]) {
       await openConversation(conversations.value[0].id)
@@ -390,6 +393,11 @@ export const useAppStore = defineStore('app', () => {
     if (isNew) {
       sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: '新增待确认' }
     }
+    if (ackedTreeMarks.value[path]) {
+      const acked = { ...ackedTreeMarks.value }
+      delete acked[path]
+      ackedTreeMarks.value = acked
+    }
   }
 
   async function syncOpenFile(path: string, content: string, dirty = false) {
@@ -406,6 +414,10 @@ export const useAppStore = defineStore('app', () => {
     if (!review || review.status !== 'pending') return
     reviews.value = { ...reviews.value, [path]: { ...review, status: 'accepted' } }
     await syncOpenFile(path, review.after, false)
+    const session = { ...sessionTreeMarks.value }
+    delete session[path]
+    sessionTreeMarks.value = session
+    ackedTreeMarks.value = { ...ackedTreeMarks.value, [path]: true }
     void loadGitChangedPaths()
   }
 
@@ -456,11 +468,35 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function closeOtherFiles(path: string) {
+    const keep = openFiles.value.find((f) => f.path === path)
+    if (!keep) return
+    openFiles.value = [keep]
+    activePath.value = path
+  }
+
+  function closeFilesToTheRight(path: string) {
+    const i = openFiles.value.findIndex((f) => f.path === path)
+    if (i < 0) return
+    openFiles.value = openFiles.value.slice(0, i + 1)
+    if (!openFiles.value.some((f) => f.path === activePath.value)) activePath.value = path
+  }
+
+  function closeAllFiles() {
+    openFiles.value = []
+    activePath.value = null
+  }
+
   function updateOpenContent(path: string, content: string) {
     const file = openFiles.value.find((f) => f.path === path)
     if (!file || file.content === content) return
     file.content = content
     file.dirty = true
+    if (ackedTreeMarks.value[path]) {
+      const acked = { ...ackedTreeMarks.value }
+      delete acked[path]
+      ackedTreeMarks.value = acked
+    }
   }
 
   async function saveOpenFile() {
@@ -555,6 +591,10 @@ export const useAppStore = defineStore('app', () => {
     if (event.type === 'run.started') runStatus.value = 'running'
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
       runStatus.value = event.type.replace('run.', '')
+      const now = new Date().toISOString()
+      messages.value = messages.value.map((m) =>
+        m.run_id === event.run_id ? { ...m, ended_at: now } : m,
+      )
       refreshTree()
     }
     if (event.type === 'block.started' || event.type === 'block.completed') {
@@ -622,6 +662,7 @@ export const useAppStore = defineStore('app', () => {
       {
         id: `local-${Date.now()}`,
         role: 'user',
+        created_at: new Date().toISOString(),
         blocks: [
           {
             id: 'u',
@@ -690,6 +731,7 @@ export const useAppStore = defineStore('app', () => {
       const isNew = review.action === 'create' || !review.before
       return { show: true, title: isNew ? '新增待确认' : '修改待确认' }
     }
+    if (ackedTreeMarks.value[path]) return { show: false, title: '' }
     const gitTitle = gitChangedPaths.value[path]
     if (gitTitle) return { show: true, title: gitTitle }
     const sessionTitle = sessionTreeMarks.value[path]
@@ -749,6 +791,9 @@ export const useAppStore = defineStore('app', () => {
     rejectReview,
     activateFile,
     closeFile,
+    closeOtherFiles,
+    closeFilesToTheRight,
+    closeAllFiles,
     updateOpenContent,
     saveOpenFile,
     isFileDirty,

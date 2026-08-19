@@ -12,7 +12,7 @@ paths:
   user_skills: ~/.code-agent/skills
 
 agent:
-  max_steps: 40
+  max_steps: 80
   tool_timeout_sec: 90
   run_timeout_sec: 900
   max_tool_output_chars: 12000
@@ -58,7 +58,7 @@ policy:
     - "*.p12"
 
 terminal:
-  shell: /bin/bash
+  shell: ""
   scrollback_bytes: 204800
   default_cols: 120
   default_rows: 32

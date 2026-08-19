@@ -7,7 +7,7 @@ from uuid import UUID
 from langchain_core.messages import AIMessage, HumanMessage
 
 from code_agent.config import settings
-from code_agent.db.models import Conversation, Message, Run, Workspace
+from code_agent.db.models import Conversation, Message, Run, Setting, Workspace
 from code_agent.llm.hub import resolve_chat_model
 from code_agent.plugins.base import registry
 from code_agent.protocol.events import new_id
@@ -138,6 +138,7 @@ async def _execute(run_id: str) -> None:
     conv = await Conversation.get(id=run.conversation_id)
     workspace = await Workspace.get(id=conv.workspace_id)
     register_builtin_tools()
+    recursion_limit = int(settings.get("agent.max_steps") or 80)
     try:
         run.status = "running"
         await run.save(update_fields=["status"])
@@ -160,7 +161,16 @@ async def _execute(run_id: str) -> None:
         lc_messages = _history_messages(list(history))
 
         timeout = int(settings.get("agent.run_timeout_sec") or 900)
-        await asyncio.wait_for(_stream_graph(run_id, graph, lc_messages, thinking), timeout=timeout)
+        stored_limit = await Setting.get_or_none(key="agent.max_steps")
+        if stored_limit is not None and stored_limit.value_json is not None:
+            try:
+                recursion_limit = int(stored_limit.value_json)
+            except (TypeError, ValueError):
+                pass
+        await asyncio.wait_for(
+            _stream_graph(run_id, graph, lc_messages, thinking, recursion_limit),
+            timeout=timeout,
+        )
         if _cancel[run_id].is_set():
             return
         run = await Run.get(id=run_id)
@@ -174,6 +184,13 @@ async def _execute(run_id: str) -> None:
     except asyncio.CancelledError:
         await broker.publish(run_id, "run.cancelled", {})
     except Exception as exc:
+        if type(exc).__name__ == "GraphRecursionError" or "GRAPH_RECURSION_LIMIT" in str(exc):
+            await _fail(
+                run_id,
+                "run.recursion_limit",
+                f"已达到最大步数 {recursion_limit}。可在设置中提高「Agent 最大步数」。",
+            )
+            return
         await _fail(run_id, "run.error", str(exc))
     finally:
         broker.close_run(run_id)
@@ -244,7 +261,13 @@ async def _emit_thinking(run_id: str, think_block: str | None, text: str) -> str
     return think_block
 
 
-async def _stream_graph(run_id: str, graph, messages: list, thinking: bool = False) -> None:
+async def _stream_graph(
+    run_id: str,
+    graph,
+    messages: list,
+    thinking: bool = False,
+    recursion_limit: int = 80,
+) -> None:
     del thinking
     cancel = _cancel[run_id]
     md_block: str | None = None
@@ -252,7 +275,11 @@ async def _stream_graph(run_id: str, graph, messages: list, thinking: bool = Fal
     tool_blocks: dict[str, str] = {}
     got_thought = False
 
-    async for event in graph.astream_events({"messages": messages}, version="v2"):
+    async for event in graph.astream_events(
+        {"messages": messages},
+        version="v2",
+        config={"recursion_limit": max(1, recursion_limit)},
+    ):
         if cancel.is_set():
             break
         kind = event.get("event")

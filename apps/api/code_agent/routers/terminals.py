@@ -41,6 +41,20 @@ async def new_terminal(body: TerminalIn):
     return {"id": str(row.id), "title": row.title, "cwd": row.cwd, "alive": True}
 
 
+class TerminalRenameIn(BaseModel):
+    title: str
+
+
+@router.patch("/{terminal_id}")
+async def rename_terminal(terminal_id: str, body: TerminalRenameIn):
+    row = await TerminalSession.get_or_none(id=terminal_id)
+    if not row:
+        raise HTTPException(status_code=404, detail={"code": "terminal.not_found"})
+    row.title = body.title.strip() or row.title
+    await row.save(update_fields=["title"])
+    return {"id": str(row.id), "title": row.title}
+
+
 @router.delete("/{terminal_id}")
 async def kill_terminal(terminal_id: str):
     row = await TerminalSession.get_or_none(id=terminal_id)

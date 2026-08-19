@@ -98,7 +98,7 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "title": "Agent 最大步数",
             "minimum": 1,
             "maximum": 200,
-            "default": 40,
+            "default": 80,
         },
         "agent.tool_timeout_sec": {
             "type": "integer",

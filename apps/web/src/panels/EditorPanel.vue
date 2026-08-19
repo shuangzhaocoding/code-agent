@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { currentTheme, type Theme } from '@/theme'
+import { currentTheme } from '@/theme'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
 const mdPreview = ref(false)
+const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
 let monacoMod: typeof import('monaco-editor') | null = null
@@ -21,8 +23,33 @@ const reviewIndex = computed(() => {
   return i < 0 ? 0 : i + 1
 })
 
-function monacoTheme(t: Theme) {
-  return t === 'dark' ? 'vs-dark' : 'vs'
+function cssColor(name: string, fallback: string) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  if (raw.startsWith('#')) {
+    if (raw.length === 4) return `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
+    return raw
+  }
+  const m = raw.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/)
+  if (!m) return fallback
+  return `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`
+}
+
+function applyEditorTheme() {
+  if (!monacoMod) return
+  const dark = currentTheme() === 'dark'
+  const bg = cssColor('--editor-bg', dark ? '#161a22' : '#ffffff')
+  monacoMod.editor.defineTheme('ca-editor', {
+    base: dark ? 'vs-dark' : 'vs',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': bg,
+      'editorGutter.background': bg,
+      'editorStickyScroll.background': bg,
+      'minimap.background': bg,
+    },
+  })
+  monacoMod.editor.setTheme('ca-editor')
 }
 
 function langOf(path: string) {
@@ -123,7 +150,7 @@ function showDiff(path: string, before: string, after: string) {
   if (!diffEditor) {
     diffEditor = monacoMod.editor.createDiffEditor(diffHost.value, {
       ...editorOptions,
-      theme: monacoTheme(currentTheme()),
+      theme: 'ca-editor',
       readOnly: true,
       originalEditable: false,
       renderSideBySide: true,
@@ -143,10 +170,11 @@ onMounted(async () => {
     getWorker: () => new editorWorker(),
   }
   if (!host.value) return
+  applyEditorTheme()
   editor = monacoMod.editor.create(host.value, {
     value: '',
     language: 'plaintext',
-    theme: monacoTheme(currentTheme()),
+    theme: 'ca-editor',
     ...editorOptions,
   })
   showPath(store.activePath)
@@ -155,8 +183,8 @@ onMounted(async () => {
   window.addEventListener('ca-file-reload', onReload as EventListener)
 })
 
-function onTheme(e: Event) {
-  monacoMod?.editor.setTheme(monacoTheme((e as CustomEvent<Theme>).detail))
+function onTheme() {
+  applyEditorTheme()
 }
 
 function onKey(e: KeyboardEvent) {
@@ -242,6 +270,47 @@ function onTabAux(path: string, e: MouseEvent) {
     store.closeFile(path)
   }
 }
+
+function onTabContext(path: string, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  tabMenu.value = { x: e.clientX, y: e.clientY, path }
+}
+
+const tabMenuItems = computed((): ContextMenuItem[] => {
+  const path = tabMenu.value?.path
+  if (!path) return []
+  const files = store.openFiles
+  const index = files.findIndex((f) => f.path === path)
+  return [
+    { id: 'close', label: '关闭' },
+    { id: 'close-others', label: '关闭其他', disabled: files.length < 2 },
+    { id: 'close-right', label: '关闭右侧', disabled: index < 0 || index >= files.length - 1 },
+    { id: 'close-all', label: '关闭全部', disabled: files.length === 0 },
+    { id: 'sep-copy', separator: true },
+    { id: 'copy-path', label: '复制路径' },
+  ]
+})
+
+const tabMenuActions: Record<string, (path: string) => void | Promise<void>> = {
+  close: (path) => store.closeFile(path),
+  'close-others': (path) => store.closeOtherFiles(path),
+  'close-right': (path) => store.closeFilesToTheRight(path),
+  'close-all': () => store.closeAllFiles(),
+  'copy-path': async (path) => {
+    try {
+      await navigator.clipboard.writeText(path)
+    } catch {
+      /* ignore */
+    }
+  },
+}
+
+async function onTabMenuSelect(id: string) {
+  const path = tabMenu.value?.path
+  if (!path) return
+  await tabMenuActions[id]?.(path)
+}
 </script>
 
 <template>
@@ -257,6 +326,7 @@ function onTabAux(path: string, e: MouseEvent) {
           :title="file.path"
           @click="store.activateFile(file.path)"
           @auxclick="onTabAux(file.path, $event)"
+          @contextmenu="onTabContext(file.path, $event)"
         >
           <FileTreeIcon kind="file" :path="file.path" :size="16" />
           <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
@@ -291,11 +361,19 @@ function onTabAux(path: string, e: MouseEvent) {
       <div ref="diffHost" class="host" :class="{ hidden: !review }" />
       <div v-if="!store.openFile" class="empty">从左侧打开文件</div>
     </div>
+    <ContextMenu
+      v-if="tabMenu"
+      :x="tabMenu.x"
+      :y="tabMenu.y"
+      :items="tabMenuItems"
+      @select="onTabMenuSelect"
+      @close="tabMenu = null"
+    />
   </div>
 </template>
 
 <style scoped>
-.editor-shell { background: var(--bg-elevated); }
+.editor-shell { background: var(--editor-bg); }
 .file-bar {
   display: flex;
   align-items: center;
@@ -330,7 +408,7 @@ function onTabAux(path: string, e: MouseEvent) {
 }
 .ftab:hover { background: var(--bg-muted); color: var(--text); }
 .ftab.active {
-  background: var(--bg-elevated);
+  background: var(--editor-bg);
   color: var(--text);
   box-shadow: inset 0 -2px 0 var(--primary);
 }
@@ -428,9 +506,11 @@ function onTabAux(path: string, e: MouseEvent) {
   flex: 1;
   min-height: 0;
   position: relative;
+  background: var(--editor-bg);
 }
 .host {
   height: 100%;
+  background: var(--editor-bg);
 }
 .host.hidden { display: none; }
 .empty {
@@ -441,6 +521,6 @@ function onTabAux(path: string, e: MouseEvent) {
   justify-content: center;
   color: var(--text-muted);
   font-size: 13px;
-  background: var(--bg-elevated);
+  background: var(--editor-bg);
 }
 </style>

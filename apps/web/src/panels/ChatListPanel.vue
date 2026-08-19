@@ -3,12 +3,22 @@ import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 
 const store = useAppStore()
+
+async function openHistory(id: string) {
+  await store.openConversation(id)
+  window.dispatchEvent(new Event('ca-focus-agent'))
+}
+
+async function startNewChat() {
+  await store.newChat()
+  window.dispatchEvent(new Event('ca-focus-agent'))
+}
 </script>
 
 <template>
   <div class="panel-shell">
     <div class="list">
-      <button class="btn btn-primary" type="button" @click="store.newChat()">
+      <button class="btn btn-primary" type="button" @click="startNewChat">
         <AppIcon name="plus" :size="14" />
         新会话
       </button>
@@ -18,7 +28,7 @@ const store = useAppStore()
         type="button"
         class="menu-item"
         :class="{ active: c.id === store.conversationId }"
-        @click="store.openConversation(c.id)"
+        @click="openHistory(c.id)"
       >
         <AppIcon name="chat" :size="14" />
         {{ c.title }}

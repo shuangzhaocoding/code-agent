@@ -6,6 +6,8 @@ export type Block = {
   text: string
   meta: Record<string, unknown>
   status: string
+  started_at?: number
+  ended_at?: number
 }
 
 export type ChatMessage = {
@@ -13,6 +15,8 @@ export type ChatMessage = {
   role: string
   blocks: Block[]
   run_id?: string | null
+  created_at?: string | null
+  ended_at?: string | null
 }
 
 export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): ChatMessage[] {
@@ -36,7 +40,11 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
         text: '',
         meta: (payload.meta as Record<string, unknown>) || {},
         status: 'streaming',
+        started_at: Date.now(),
       })
+      if (!assistant.created_at) {
+        assistant.created_at = new Date().toISOString()
+      }
     }
     return next
   }
@@ -53,6 +61,7 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
             if (payload.meta) Object.assign(copy.meta, payload.meta)
           } else {
             copy.status = String(payload.status || 'ok')
+            copy.ended_at = Date.now()
             if (payload.meta) Object.assign(copy.meta, payload.meta)
           }
           return copy

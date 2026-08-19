@@ -59,12 +59,17 @@ async def get_conversation(conversation_id: str):
     if not row:
         raise HTTPException(status_code=404, detail={"code": "conversation.not_found"})
     messages = await Message.filter(conversation_id=conversation_id).order_by("sort_key")
+    run_ids = {m.run_id for m in messages if m.run_id}
+    runs_map: dict[str, Run] = {}
+    if run_ids:
+        runs = await Run.filter(id__in=list(run_ids))
+        runs_map = {str(r.id): r for r in runs}
     run = None
     if row.active_run_id:
-        run = await Run.get_or_none(id=row.active_run_id)
+        run = runs_map.get(row.active_run_id) or await Run.get_or_none(id=row.active_run_id)
     return {
         **_conv(row),
-        "messages": [_msg(m) for m in messages],
+        "messages": [_msg(m, runs_map.get(str(m.run_id)) if m.run_id else None) for m in messages],
         "active_run": _run(run) if run else None,
     }
 
@@ -140,8 +145,8 @@ def _conv(row: Conversation) -> dict:
     }
 
 
-def _msg(row: Message) -> dict:
-    return {
+def _msg(row: Message, run: Run | None = None) -> dict:
+    d: dict = {
         "id": str(row.id),
         "role": row.role,
         "blocks": row.blocks,
@@ -149,6 +154,9 @@ def _msg(row: Message) -> dict:
         "sort_key": row.sort_key,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+    if run and row.role == "assistant":
+        d["ended_at"] = run.ended_at.isoformat() if run.ended_at else None
+    return d
 
 
 def _run(row: Run) -> dict:

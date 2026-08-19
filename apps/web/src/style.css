@@ -32,6 +32,7 @@ html[data-theme='light'] {
   --bg: var(--page-bg);
   --bg-elevated: var(--panel-bg);
   --bg-muted: var(--code-bg);
+  --editor-bg: var(--panel-bg);
   --tr-color-primary: var(--primary);
   --tr-sender-bg-color: var(--code-bg);
   --tr-sender-text-color: var(--text-h);

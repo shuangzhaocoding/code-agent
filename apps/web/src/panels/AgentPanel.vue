@@ -18,6 +18,71 @@ import {
 
 const store = useAppStore()
 const scroller = ref<HTMLElement | null>(null)
+
+/* ---- message actions ---- */
+const editingMsgId = ref<string | null>(null)  // kept for compat, unused
+const editingText = ref('')
+const copyToast = ref(false)
+let copyToastTimer: ReturnType<typeof setTimeout> | null = null
+
+function msgPlainText(msg: (typeof store.messages)[0]): string {
+  return msg.blocks
+    .filter((b) => b.type === 'user.text' || b.type === 'assistant.markdown')
+    .map((b) => b.text)
+    .join('\n')
+    .trim()
+}
+
+async function copyMsg(msg: (typeof store.messages)[0]) {
+  await navigator.clipboard.writeText(msgPlainText(msg)).catch(() => {})
+  if (copyToastTimer) clearTimeout(copyToastTimer)
+  copyToast.value = true
+  copyToastTimer = setTimeout(() => { copyToast.value = false }, 2000)
+}
+
+function startEdit(msg: (typeof store.messages)[0]) {
+  const text = msgPlainText(msg)
+  // Put text into the sender input box
+  draft.value = text
+  sender.value?.setContent?.(text)
+  nextTick(() => {
+    // Focus the sender
+    const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
+    el?.focus()
+  })
+}
+
+function cancelEdit() {
+  editingMsgId.value = null
+  editingText.value = ''
+}
+
+async function submitEdit() {
+  const text = editingText.value.trim()
+  if (!text) { cancelEdit(); return }
+  cancelEdit()
+  stick.value = true
+  const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
+  store.send(text, refs, [])
+}
+
+function fmtDuration(msg: (typeof store.messages)[0]): string {
+  if (!msg.created_at || !msg.ended_at) return ''
+  const ms = new Date(msg.ended_at).getTime() - new Date(msg.created_at).getTime()
+  if (ms < 0) return ''
+  const sec = ms / 1000
+  if (sec < 60) return `${sec.toFixed(1)}s`
+  const min = Math.floor(sec / 60)
+  const s = (sec % 60).toFixed(0)
+  return `${min}m ${s}s`
+}
+
+function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 const timelineInner = ref<HTMLElement | null>(null)
 const sender = ref<{ clear: () => void; setContent: (content: string) => void } | null>(null)
 const draft = ref('')
@@ -172,8 +237,17 @@ function clearSender() {
   sender.value?.setContent?.('')
 }
 
+function normalizeSubmitText(text: string) {
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/\n\n/g, '\n')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .trim()
+}
+
 function onSubmit(text: string) {
-  const value = text?.trim()
+  const value = normalizeSubmitText(text || '')
   if (!value || hasUploadingAttachments()) return
   stick.value = true
   const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
@@ -212,6 +286,12 @@ function openContextUsageDialog() {
 
 <template>
   <div class="panel-shell agent">
+    <Transition name="toast-fade">
+      <div v-if="copyToast" class="copy-toast">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        已复制
+      </div>
+    </Transition>
     <header class="panel-head">
       <span class="panel-title">对话</span>
       <span class="spacer" />
@@ -223,10 +303,31 @@ function openContextUsageDialog() {
         <div v-if="!store.messages.length" class="empty">
           描述你想改的代码。可用 Skill、自备模型，刷新后生成会继续。
         </div>
-        <article v-for="msg in store.messages" :key="msg.id" :class="msg.role">
-          <section v-for="block in msg.blocks" :key="block.id" class="block">
-            <component :is="rendererFor(block.type)" :block="block as Block" />
-          </section>
+        <article v-for="msg in store.messages" :key="msg.id" :class="['msg-wrap', msg.role]">
+          <div v-if="msg.role === 'user'" class="msg-bubble">
+            <section v-for="block in msg.blocks" :key="block.id" class="block">
+              <component :is="rendererFor(block.type)" :block="block as Block" />
+            </section>
+          </div>
+          <template v-else>
+            <section v-for="block in msg.blocks" :key="block.id" class="block">
+              <component :is="rendererFor(block.type)" :block="block as Block" />
+            </section>
+          </template>
+          <div class="msg-bar" :class="msg.role">
+            <span class="msg-time">
+              <template v-if="msg.created_at">{{ fmtTime(msg.created_at) }}</template>
+              <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · 耗时 {{ fmtDuration(msg) }}</template>
+            </span>
+            <div class="msg-actions">
+              <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" title="编辑" @click="startEdit(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button>
+              <button type="button" class="msg-icon-btn" title="复制" @click="copyMsg(msg)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+            </div>
+          </div>
         </article>
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
@@ -309,7 +410,7 @@ function openContextUsageDialog() {
 </template>
 
 <style scoped>
-.agent { background: var(--bg); }
+.agent { background: var(--bg); position: relative; }
 .panel-head { flex-wrap: wrap; }
 .panel-title {
   font-size: 13px;
@@ -327,6 +428,8 @@ function openContextUsageDialog() {
 .timeline-inner {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
   min-height: min-content;
 }
 .empty {
@@ -335,23 +438,116 @@ function openContextUsageDialog() {
   text-align: center;
   line-height: 1.6;
 }
-article.user {
+article.msg-wrap.user {
   align-self: flex-end;
+  margin-left: auto;
   max-width: min(82%, 560px);
-  width: fit-content;
-  margin: 10px 0 10px 40px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  margin-right: 0;
+  overflow-anchor: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+.msg-bubble {
   background: var(--primary-soft);
   color: var(--text);
   padding: 10px 14px;
   border-radius: 12px 12px 4px 12px;
-  overflow-anchor: none;
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
 }
-article.assistant {
+.msg-bubble :deep(.markdown-body p) {
+  margin: 0;
+}
+article.msg-wrap.assistant {
   align-self: stretch;
+  width: 100%;
   margin: 10px 28px 10px 0;
   overflow-anchor: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .block + .block { margin-top: 4px; }
+
+/* message action bar */
+.msg-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 20px;
+}
+.msg-bar.user {
+  flex-direction: row-reverse;
+  align-self: flex-end;
+}
+.msg-time {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.msg-actions {
+  display: flex;
+  gap: 2px;
+}
+.msg-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.msg-icon-btn:hover { background: var(--bg-muted); color: var(--text-h); }
+.msg-act-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  padding: 2px 7px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.msg-act-btn:hover { background: var(--bg-muted); color: var(--text-h); }
+.msg-act-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.msg-act-primary:hover { opacity: 0.85; }
+
+/* edit textarea */
+.msg-edit-wrap.msg-bubble {
+  padding: 8px 10px;
+}
+.msg-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  font-size: 13px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-h);
+  resize: vertical;
+  outline: none;
+  font-family: inherit;
+  line-height: 1.5;
+}
+.msg-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  justify-content: flex-end;
+}
 .typing {
   display: flex;
   align-items: center;
@@ -482,6 +678,29 @@ footer.agent-footer {
 .agent-attachments {
   padding: 8px 10px 0;
 }
+
+.copy-toast {
+  position: absolute;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.2s, transform 0.2s; }
+.toast-fade-enter-from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+.toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-6px); }
 
 .agent-upload-error {
   margin: 6px 0 0;

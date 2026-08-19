@@ -44,10 +44,12 @@ function onTheme(e: Event) {
 onMounted(() => {
   window.addEventListener('ca-theme', onTheme)
   window.addEventListener('ca-focus-editor', focusEditor)
+  window.addEventListener('ca-focus-agent', focusAgent)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-focus-editor', focusEditor)
+  window.removeEventListener('ca-focus-agent', focusAgent)
 })
 
 function showHeaders(apiRef: DockviewApi) {
@@ -58,6 +60,10 @@ function showHeaders(apiRef: DockviewApi) {
 
 function focusEditor() {
   openPanel('editor', 'editor', '编辑器')
+}
+
+function focusAgent() {
+  openPanel('agent', 'agent', 'Agent')
 }
 
 function seed(apiRef: DockviewApi) {

@@ -125,7 +125,18 @@ class PtyManager:
         handle = self._sessions.get(session_id)
         if handle and handle.alive:
             return handle
-        shell = settings.get("terminal.shell") or "/bin/bash"
+        import shutil
+        configured = settings.get("terminal.shell") or ""
+        if configured:
+            shell = configured
+        else:
+            # prefer the user's $SHELL, fall back to zsh → bash
+            shell = (
+                os.environ.get("SHELL")
+                or shutil.which("zsh")
+                or shutil.which("bash")
+                or "/bin/bash"
+            )
         handle = PtyHandle(session_id, cwd, shell)
         handle.spawn(cols, rows)
         self._sessions[session_id] = handle

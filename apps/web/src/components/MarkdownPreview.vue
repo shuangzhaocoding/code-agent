@@ -143,7 +143,7 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   min-width: 0;
-  background: var(--panel-bg);
+  background: var(--editor-bg);
 }
 
 .md-preview__toc {
@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: auto;
   padding: 20px 24px 32px;
-  background: var(--panel-bg);
+  background: var(--editor-bg);
   scroll-behavior: smooth;
 }
 
