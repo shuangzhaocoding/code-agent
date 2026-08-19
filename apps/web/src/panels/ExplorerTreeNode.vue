@@ -1,15 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { FsItem } from '@/stores/app'
 import { useAppStore } from '@/stores/app'
-import FileGlyph from '@/components/FileGlyph.vue'
+import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 
-defineProps<{
+const props = defineProps<{
   item: FsItem
   depth: number
 }>()
 
 const store = useAppStore()
+const mark = computed(() => store.fileTreeMark(props.item.path, props.item.is_dir))
 const emit = defineEmits<{
   context: [e: MouseEvent, item: FsItem]
 }>()
@@ -26,8 +28,19 @@ const emit = defineEmits<{
       @contextmenu="emit('context', $event, item)"
     >
       <span class="twist" :class="{ on: item.is_dir && store.isExpanded(item.path), hidden: !item.is_dir }" />
-      <FileGlyph :name="item.name" :is-dir="item.is_dir" :size="15" />
+      <FileTreeIcon
+        :kind="item.is_dir ? 'dir' : 'file'"
+        :path="item.path"
+        :expanded="store.isExpanded(item.path)"
+        :size="16"
+      />
       <span class="label">{{ item.name }}</span>
+      <span
+        v-if="mark.show"
+        class="tree-dot"
+        :title="mark.title"
+        :aria-label="mark.title"
+      />
     </button>
     <template v-if="item.is_dir && store.isExpanded(item.path)">
       <ExplorerTreeNode
@@ -70,8 +83,19 @@ const emit = defineEmits<{
 .twist.on { transform: rotate(45deg); margin-top: -2px; }
 .twist.hidden { visibility: hidden; }
 .label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.tree-dot {
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  border-radius: 99px;
+  background: var(--primary);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
 }
 </style>

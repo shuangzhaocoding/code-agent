@@ -9,6 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@iconify-json/material-icon-theme": "^1.2.70",
+    "@iconify/vue": "^5.0.1",
     "@opentiny/tiny-robot": "^0.5.1",
     "@opentiny/tiny-robot-kit": "^0.5.1",
     "@opentiny/vue": "^3.31.0",

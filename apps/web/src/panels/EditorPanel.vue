@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, type Theme } from '@/theme'
-import FileGlyph from '@/components/FileGlyph.vue'
+import FileTreeIcon from '@/components/FileTreeIcon.vue'
+import MarkdownPreview from '@/components/MarkdownPreview.vue'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
+const mdPreview = ref(false)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
 let monacoMod: typeof import('monaco-editor') | null = null
@@ -44,6 +46,13 @@ function langOf(path: string) {
 function fileName(path: string) {
   return path.split('/').pop() || path
 }
+
+function isMarkdownFile(path: string) {
+  return /\.(md|mdx|markdown)$/i.test(path)
+}
+
+const canMarkdownPreview = computed(() => Boolean(store.activePath && isMarkdownFile(store.activePath)))
+const showMarkdownPreview = computed(() => mdPreview.value && canMarkdownPreview.value && !review.value)
 
 function uriOf(path: string, original = false) {
   return monacoMod!.Uri.from({
@@ -177,6 +186,13 @@ watch(
 )
 
 watch(
+  () => store.activePath,
+  (path, prev) => {
+    if (!path || !prev || !isMarkdownFile(path) || !isMarkdownFile(prev)) mdPreview.value = false
+  },
+)
+
+watch(
   () => store.openFiles.map((f) => f.path).join('\0'),
   () => {
     const keep = new Set(store.openFiles.map((f) => f.path))
@@ -242,13 +258,17 @@ function onTabAux(path: string, e: MouseEvent) {
           @click="store.activateFile(file.path)"
           @auxclick="onTabAux(file.path, $event)"
         >
-          <FileGlyph :name="fileName(file.path)" :size="13" />
+          <FileTreeIcon kind="file" :path="file.path" :size="16" />
           <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
           <span v-if="store.pendingReview(file.path)" class="mark">diff</span>
           <span class="x" title="关闭" @click.stop="store.closeFile(file.path)">×</span>
         </button>
       </div>
-      <button type="button" class="btn" :disabled="!store.openFile || !!review" @click="save">保存</button>
+      <div v-if="canMarkdownPreview" class="md-toggle" role="group" aria-label="Markdown 预览">
+        <button type="button" class="md-toggle-btn" :class="{ 'is-on': !mdPreview }" @click="mdPreview = false">Markdown</button>
+        <button type="button" class="md-toggle-btn" :class="{ 'is-on': mdPreview }" @click="mdPreview = true">预览</button>
+      </div>
+      <button type="button" class="btn" :disabled="!store.openFile || !!review || showMarkdownPreview" @click="save">保存</button>
     </header>
     <div v-if="pendingCount" class="review-bar">
       <span>{{ review ? '请确认当前文件 diff' : '有待确认的改动' }}</span>
@@ -261,7 +281,13 @@ function onTabAux(path: string, e: MouseEvent) {
       <button type="button" class="btn primary" @click="store.acceptAllReviews()">全部接受</button>
     </div>
     <div class="host-wrap">
-      <div ref="host" class="host" :class="{ hidden: !!review }" />
+      <MarkdownPreview
+        v-if="showMarkdownPreview && store.openFile"
+        :content="store.openFile.content"
+        :path="store.openFile.path"
+        class="host"
+      />
+      <div ref="host" class="host" :class="{ hidden: !!review || showMarkdownPreview }" />
       <div ref="diffHost" class="host" :class="{ hidden: !review }" />
       <div v-if="!store.openFile" class="empty">从左侧打开文件</div>
     </div>
@@ -272,9 +298,11 @@ function onTabAux(path: string, e: MouseEvent) {
 .editor-shell { background: var(--bg-elevated); }
 .file-bar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 8px;
   min-height: 36px;
-  border-bottom: 1px solid var(--border);
+  padding-right: 8px;
+  border-bottom: var(--border-width) solid var(--border);
   background: var(--bg);
 }
 .tabs {
@@ -292,7 +320,7 @@ function onTabAux(path: string, e: MouseEvent) {
   height: 36px;
   padding: 0 8px 0 12px;
   border: 0;
-  border-right: 1px solid var(--border);
+  border-right: var(--border-width) solid var(--border);
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
@@ -321,13 +349,40 @@ function onTabAux(path: string, e: MouseEvent) {
   padding: 0 4px;
   line-height: 16px;
 }
+.md-toggle {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+  flex-shrink: 0;
+}
+.md-toggle-btn {
+  height: 22px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.md-toggle-btn.is-on {
+  background: var(--panel-bg);
+  color: var(--text-h);
+}
 .review-bar {
   display: flex;
   align-items: center;
   gap: 8px;
   min-height: 36px;
   padding: 0 10px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width) solid var(--border);
   background: var(--primary-soft);
   color: var(--text);
   font-size: 12.5px;

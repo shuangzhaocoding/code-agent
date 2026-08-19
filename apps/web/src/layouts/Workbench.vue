@@ -1,13 +1,13 @@
 <script setup lang="ts">
 import { DockviewVue } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import AppIcon from '@/components/AppIcon.vue'
 import PanelTab from '@/components/PanelTab.vue'
-import WorkspaceSwitch from '@/components/WorkspaceSwitch.vue'
+import WorkspacePanel from '@/panels/WorkspacePanel.vue'
 import ExplorerPanel from '@/panels/ExplorerPanel.vue'
 import EditorPanel from '@/panels/EditorPanel.vue'
 import AgentPanel from '@/panels/AgentPanel.vue'
@@ -22,6 +22,7 @@ import GitPanel from '@/panels/GitPanel.vue'
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
 const components = {
+  workspace: WorkspacePanel,
   explorer: ExplorerPanel,
   editor: EditorPanel,
   agent: AgentPanel,
@@ -35,7 +36,6 @@ const components = {
 
 const dock = ref<DockviewApi | null>(null)
 const regions = ref({ explorer: true, terminal: true, agent: true })
-const workspaceOpen = ref(false)
 
 function onTheme(e: Event) {
   theme.value = (e as CustomEvent<Theme>).detail
@@ -61,7 +61,13 @@ function focusEditor() {
 }
 
 function seed(apiRef: DockviewApi) {
-  apiRef.addPanel({ id: 'explorer', component: 'explorer', title: '文件' })
+  apiRef.addPanel({ id: 'workspace', component: 'workspace', title: '工作区' })
+  apiRef.addPanel({
+    id: 'explorer',
+    component: 'explorer',
+    title: '文件',
+    position: { referencePanel: 'workspace', direction: 'right' },
+  })
   apiRef.addPanel({
     id: 'editor',
     component: 'editor',
@@ -111,6 +117,17 @@ async function onReady(event: DockviewReadyEvent) {
     restored = false
   }
   if (!restored) seed(event.api)
+  else if (!event.api.getPanel('workspace')) {
+    const anchor = event.api.getPanel('explorer') ?? event.api.getPanel('editor')
+    if (anchor) {
+      event.api.addPanel({
+        id: 'workspace',
+        component: 'workspace',
+        title: '工作区',
+        position: { referencePanel: anchor.id, direction: 'left' },
+      })
+    }
+  }
   showHeaders(event.api)
   syncRegions()
   event.api.onDidLayoutChange(() => {
@@ -124,6 +141,7 @@ async function onReady(event: DockviewReadyEvent) {
 }
 
 const placements: Record<string, { referencePanel: string; direction: 'left' | 'right' | 'below' }> = {
+  workspace: { referencePanel: 'explorer', direction: 'left' },
   explorer: { referencePanel: 'editor', direction: 'left' },
   terminal: { referencePanel: 'editor', direction: 'below' },
   agent: { referencePanel: 'editor', direction: 'right' },
@@ -154,6 +172,10 @@ function openPanel(id: string, component: string, title: string) {
   syncRegions()
 }
 
+function openWorkspacePanel() {
+  openPanel('workspace', 'workspace', '工作区')
+}
+
 function toggleRegion(id: 'explorer' | 'terminal' | 'agent') {
   const apiRef = dock.value
   if (!apiRef) return
@@ -174,21 +196,26 @@ function toggleRegion(id: 'explorer' | 'terminal' | 'agent') {
 }
 
 const items = [
+  { id: 'workspace', component: 'workspace', title: '工作区', label: '工作区', icon: 'home' },
   { id: 'explorer', component: 'explorer', title: '文件', label: '文件', icon: 'folder' },
   { id: 'git', component: 'git', title: 'Git', label: 'Git', icon: 'git' },
   { id: 'chats', component: 'chats', title: '会话', label: '会话', icon: 'chat' },
-  { id: 'agent', component: 'agent', title: 'Agent', label: 'Agent', icon: 'spark' },
+  { id: 'agent', component: 'agent', title: 'Agent', label: 'Agent', icon: 'atom' },
   { id: 'terminal', component: 'terminal', title: '终端', label: '终端', icon: 'terminal' },
   { id: 'skills', component: 'skills', title: 'Skill', label: 'Skill', icon: 'book' },
   { id: 'models', component: 'models', title: '模型', label: '模型', icon: 'chip' },
-  { id: 'settings', component: 'settings', title: '设置', label: '设置', icon: 'gear' },
+  { id: 'settings', component: 'settings', title: '设置', label: '设置', icon: 'settings' },
 ]
 
 const regionToggles = [
-  { id: 'explorer' as const, title: '折叠文件区', icon: 'layout-left' },
-  { id: 'terminal' as const, title: '折叠终端区', icon: 'layout-bottom' },
-  { id: 'agent' as const, title: '折叠对话区', icon: 'layout-right' },
+  { id: 'explorer' as const, title: '折叠文件区', icon: 'panel-left' },
+  { id: 'terminal' as const, title: '折叠终端区', icon: 'panel-bottom' },
+  { id: 'agent' as const, title: '折叠对话区', icon: 'panel-right' },
 ]
+
+const dockThemeClass = computed(() =>
+  theme.value === 'dark' ? 'dockview-theme-dark' : 'dockview-theme-light',
+)
 </script>
 
 <template>
@@ -231,7 +258,7 @@ const regionToggles = [
           <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="14" />
         </button>
         <span class="ws-name" :title="store.workspace?.root_path">{{ store.workspace?.name }}</span>
-        <button type="button" class="btn" @click="workspaceOpen = true">
+        <button type="button" class="btn" @click="openWorkspacePanel">
           <AppIcon name="folder" :size="13" />
           打开工作区
         </button>
@@ -240,14 +267,13 @@ const regionToggles = [
     <div class="workbench-body">
       <div class="dock">
         <DockviewVue
-          class="dockview-theme-light dockview-theme-codeagent"
+          :class="[dockThemeClass, 'dockview-theme-codeagent']"
           :components="components"
           :default-tab-component="PanelTab"
           @ready="onReady"
         />
       </div>
     </div>
-    <WorkspaceSwitch v-if="workspaceOpen" @close="workspaceOpen = false" />
     <ConfirmCard
       v-if="store.confirmDialog"
       :title="store.confirmDialog.title"
@@ -267,7 +293,7 @@ const regionToggles = [
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--page-bg);
 }
 .workbench-body {
   flex: 1;

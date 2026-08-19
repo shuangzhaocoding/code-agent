@@ -15,12 +15,13 @@ const props = defineProps<{
 const meta: Record<string, { icon: string; label: string }> = {
   explorer: { icon: 'folder', label: '文件' },
   editor: { icon: 'file', label: '编辑器' },
-  agent: { icon: 'spark', label: 'Agent' },
+  agent: { icon: 'atom', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },
   chats: { icon: 'chat', label: '会话' },
+  git: { icon: 'git', label: 'Git' },
   skills: { icon: 'book', label: 'Skill' },
   models: { icon: 'chip', label: '模型' },
-  settings: { icon: 'gear', label: '设置' },
+  settings: { icon: 'settings', label: '设置' },
 }
 
 const panelApi = computed(() => props.api || props.params?.api || props.params?.params?.api)
@@ -62,6 +63,7 @@ function close(e: MouseEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: inherit;
 }
 .x {
   width: 16px;

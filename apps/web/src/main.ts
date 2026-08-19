@@ -5,6 +5,7 @@ import { initTheme } from './theme'
 import 'dockview-vue/dist/styles/dockview.css'
 import '@opentiny/tiny-robot/dist/style.css'
 import './style.css'
+import './styles/markdown.css'
 
 initTheme()
 

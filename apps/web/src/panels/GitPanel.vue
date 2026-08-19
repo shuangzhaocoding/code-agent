@@ -160,7 +160,7 @@ function openFile(path: string) {
 .pill {
   font-size: 11px;
   color: var(--primary);
-  background: var(--primary-soft);
+  background: var(--code-bg);
   border-radius: 999px;
   padding: 1px 7px;
 }

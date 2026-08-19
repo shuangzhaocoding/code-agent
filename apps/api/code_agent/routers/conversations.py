@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from code_agent.context_usage import compute_context_usage
 from code_agent.db.models import Conversation, Message, Run, Workspace
 from code_agent.streaming.run_manager import start_run
 
@@ -22,6 +23,14 @@ class MessageIn(BaseModel):
     model_id: str | None = None
     thinking: bool = False
     references: list[dict] = Field(default_factory=list)
+    files: list[dict] = Field(default_factory=list)
+
+
+class ContextUsageIn(BaseModel):
+    user_content: str = ""
+    thinking: bool = False
+    mode: str = "agent"
+    files: list[dict] = Field(default_factory=list)
 
 
 @router.get("/workspaces/{workspace_id}/conversations")
@@ -82,6 +91,21 @@ async def delete_conversation(conversation_id: str):
     return {"ok": True}
 
 
+@router.post("/conversations/{conversation_id}/context-usage")
+async def estimate_context_usage(conversation_id: str, body: ContextUsageIn):
+    row = await Conversation.get_or_none(id=conversation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail={"code": "conversation.not_found"})
+    data = await compute_context_usage(
+        conversation_id=conversation_id,
+        user_content=body.user_content,
+        thinking=body.thinking,
+        mode=body.mode or row.mode,
+        files=body.files,
+    )
+    return data
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(conversation_id: str, body: MessageIn):
     row = await Conversation.get_or_none(id=conversation_id)
@@ -98,6 +122,7 @@ async def send_message(conversation_id: str, body: MessageIn):
         body.model_id or row.model_id,
         body.references,
         body.thinking,
+        body.files,
     )
     return {"run_id": str(run.id), "conversation_id": conversation_id}
 

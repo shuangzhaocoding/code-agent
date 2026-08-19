@@ -12,6 +12,7 @@ export function getStoredTheme(): Theme {
 export function applyTheme(theme: Theme): Theme {
   const next = theme === 'dark' ? 'dark' : 'light'
   document.documentElement.setAttribute('data-theme', next)
+  document.documentElement.setAttribute('data-tr-color-mode', next)
   localStorage.setItem(KEY, next)
   window.dispatchEvent(new CustomEvent('ca-theme', { detail: next }))
   return next

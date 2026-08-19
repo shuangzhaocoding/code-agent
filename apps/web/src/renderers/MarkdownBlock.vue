@@ -9,28 +9,18 @@ const html = computed(() => DOMPurify.sanitize(marked.parse(props.block.text || 
 </script>
 
 <template>
-  <div class="md">
+  <div class="md markdown-body">
     <div v-html="html" />
     <span v-if="block.status === 'streaming'" class="dots" aria-hidden="true"><i /><i /><i /></span>
   </div>
 </template>
 
 <style scoped>
-.md :deep(pre) {
-  background: var(--bg-muted);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  overflow: auto;
-  font-family: var(--mono);
-  font-size: 12px;
+.md {
+  color: var(--text-h);
+  font-size: 14px;
+  line-height: 1.7;
 }
-.md :deep(code) {
-  font-family: var(--mono);
-  font-size: 12px;
-}
-.md :deep(p) { margin: 0.4em 0; }
-.md :deep(a) { color: var(--primary); }
 .dots {
   display: inline-flex;
   align-items: center;

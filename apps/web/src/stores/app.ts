@@ -58,6 +58,8 @@ export const useAppStore = defineStore('app', () => {
   const skills = ref<any[]>([])
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
   const activity = ref('files')
+  const gitChangedPaths = ref<Record<string, string>>({})
+  const sessionTreeMarks = ref<Record<string, string>>({})
   let stopStream: (() => void) | null = null
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   const pendingTreePaths = new Set<string>()
@@ -96,6 +98,8 @@ export const useAppStore = defineStore('app', () => {
     childrenMap.value = {}
     expanded.value = new Set()
     treePath.value = ''
+    gitChangedPaths.value = {}
+    sessionTreeMarks.value = {}
     runStatus.value = 'idle'
   }
 
@@ -105,7 +109,9 @@ export const useAppStore = defineStore('app', () => {
     treePath.value = ''
     childrenMap.value = {}
     expanded.value = new Set()
-    await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders()])
+    gitChangedPaths.value = {}
+    sessionTreeMarks.value = {}
+    await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
     if (conversations.value[0]) {
       await openConversation(conversations.value[0].id)
     } else {
@@ -140,9 +146,45 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshTree() {
-    await loadTree('')
+    await Promise.all([loadTree(''), loadGitChangedPaths()])
     for (const path of [...expanded.value]) {
       await loadTree(path)
+    }
+  }
+
+  function gitMarkLabel(code: string) {
+    if (code.includes('?')) return '新增（未跟踪）'
+    if (code.includes('A')) return '新增'
+    if (code.includes('D')) return '已删除'
+    if (code.includes('M')) return '已修改'
+    return '有改动'
+  }
+
+  async function loadGitChangedPaths() {
+    if (!workspaceId.value) {
+      gitChangedPaths.value = {}
+      return
+    }
+    try {
+      const status = await api<{ ok: boolean; files: { path: string; code: string }[] }>(
+        `/api/workspaces/${workspaceId.value}/git/status`,
+      )
+      if (!status.ok) {
+        gitChangedPaths.value = {}
+        return
+      }
+      const next: Record<string, string> = {}
+      for (const file of status.files) {
+        next[file.path] = gitMarkLabel(file.code)
+      }
+      gitChangedPaths.value = next
+      if (Object.keys(next).length) {
+        const session = { ...sessionTreeMarks.value }
+        for (const path of Object.keys(next)) delete session[path]
+        sessionTreeMarks.value = session
+      }
+    } catch {
+      gitChangedPaths.value = {}
     }
   }
 
@@ -201,7 +243,11 @@ export const useAppStore = defineStore('app', () => {
     } else if (parentPath(relPath)) {
       expanded.value = new Set([...expanded.value, parentPath(relPath)])
     }
-    if (kind === 'file') await openPath(relPath, false)
+    if (kind === 'file') {
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [relPath]: '新增' }
+      await openPath(relPath, false)
+    }
+    void loadGitChangedPaths()
   }
 
   async function renameEntry(from: string, to: string) {
@@ -214,7 +260,14 @@ export const useAppStore = defineStore('app', () => {
       openFiles.value = openFiles.value.map((f) => (f.path === from ? { ...f, path: to } : f))
       if (activePath.value === from) activePath.value = to
     }
+    const session = { ...sessionTreeMarks.value }
+    if (session[from]) {
+      session[to] = session[from]
+      delete session[from]
+      sessionTreeMarks.value = session
+    }
     await loadTree(parentPath(to) || '')
+    void loadGitChangedPaths()
   }
 
   async function deleteEntry(relPath: string) {
@@ -233,6 +286,13 @@ export const useAppStore = defineStore('app', () => {
       expanded.value = next
     }
     await loadTree(parent)
+    const session = { ...sessionTreeMarks.value }
+    delete session[relPath]
+    for (const key of Object.keys(session)) {
+      if (key.startsWith(`${relPath}/`)) delete session[key]
+    }
+    sessionTreeMarks.value = session
+    void loadGitChangedPaths()
   }
 
   async function openPath(path: string, isDir: boolean) {
@@ -326,6 +386,10 @@ export const useAppStore = defineStore('app', () => {
         blockId: block.id,
       },
     }
+    const isNew = !before && after
+    if (isNew) {
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: '新增待确认' }
+    }
   }
 
   async function syncOpenFile(path: string, content: string, dirty = false) {
@@ -342,6 +406,7 @@ export const useAppStore = defineStore('app', () => {
     if (!review || review.status !== 'pending') return
     reviews.value = { ...reviews.value, [path]: { ...review, status: 'accepted' } }
     await syncOpenFile(path, review.after, false)
+    void loadGitChangedPaths()
   }
 
   async function rejectReview(path: string) {
@@ -373,6 +438,7 @@ export const useAppStore = defineStore('app', () => {
       await syncOpenFile(path, review.before, false)
     }
     reviews.value = { ...reviews.value, [path]: { ...review, status: 'rejected' } }
+    void loadGitChangedPaths()
   }
 
   function activateFile(path: string) {
@@ -405,6 +471,7 @@ export const useAppStore = defineStore('app', () => {
       body: JSON.stringify({ content: file.content }),
     })
     file.dirty = false
+    void loadGitChangedPaths()
   }
 
   async function loadConversations() {
@@ -543,7 +610,11 @@ export const useAppStore = defineStore('app', () => {
     }).catch(() => undefined)
   }
 
-  async function send(text: string, references: { type: string; path: string }[] = []) {
+  async function send(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
     if (!conversationId.value) await newChat()
     if (!conversationId.value) return
     messages.value = [
@@ -551,7 +622,18 @@ export const useAppStore = defineStore('app', () => {
       {
         id: `local-${Date.now()}`,
         role: 'user',
-        blocks: [{ id: 'u', type: 'user.text', text, meta: { references }, status: 'ok' }],
+        blocks: [
+          {
+            id: 'u',
+            type: 'user.text',
+            text,
+            meta: {
+              ...(references.length ? { references } : {}),
+              ...(files.length ? { files } : {}),
+            },
+            status: 'ok',
+          },
+        ],
       },
     ]
     const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
@@ -562,6 +644,7 @@ export const useAppStore = defineStore('app', () => {
         model_id: modelId.value,
         thinking: thinking.value,
         references,
+        files,
       }),
     })
     lastEventId.value = null
@@ -593,6 +676,25 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveSettings(patch: Record<string, unknown>) {
     settings.value = await api('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) })
+  }
+
+  function isFileDirty(path: string) {
+    return openFiles.value.some((f) => f.path === path && f.dirty)
+  }
+
+  function fileTreeMark(path: string, isDir = false) {
+    if (isDir) return { show: false, title: '' }
+    if (isFileDirty(path)) return { show: true, title: '未保存' }
+    const review = pendingReview(path)
+    if (review) {
+      const isNew = review.action === 'create' || !review.before
+      return { show: true, title: isNew ? '新增待确认' : '修改待确认' }
+    }
+    const gitTitle = gitChangedPaths.value[path]
+    if (gitTitle) return { show: true, title: gitTitle }
+    const sessionTitle = sessionTreeMarks.value[path]
+    if (sessionTitle) return { show: true, title: sessionTitle }
+    return { show: false, title: '' }
   }
 
   return {
@@ -649,6 +751,10 @@ export const useAppStore = defineStore('app', () => {
     closeFile,
     updateOpenContent,
     saveOpenFile,
+    isFileDirty,
+    fileTreeMark,
+    loadGitChangedPaths,
+    gitChangedPaths,
     loadConversations,
     newChat,
     openConversation,

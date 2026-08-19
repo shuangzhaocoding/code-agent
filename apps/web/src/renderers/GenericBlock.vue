@@ -21,7 +21,6 @@ const body = computed(() => {
     <pre class="raw">{{ body }}</pre>
   </EventCard>
 </template>
-
 <style scoped>
 .raw {
   margin: 0;
@@ -33,3 +32,4 @@ const body = computed(() => {
   overflow: auto;
 }
 </style>
+

@@ -1,10 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { TrSender } from '@opentiny/tiny-robot'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { TrAttachments, TrSender, UploadButton, VoiceButton } from '@opentiny/tiny-robot'
 import { useAppStore } from '@/stores/app'
 import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
-import AppIcon from '@/components/AppIcon.vue'
+import ChatInputToolbar from '@/components/ChatInputToolbar.vue'
+import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
+import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
+import { useChatAttachments } from '@/composables/useChatAttachments'
+import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
+import {
+  attachmentFileMatchers,
+  UPLOAD_ACCEPT,
+  UPLOAD_MAX_COUNT,
+  UPLOAD_MAX_SIZE_MB,
+} from '@/utils/fileTypes'
 
 const store = useAppStore()
 const scroller = ref<HTMLElement | null>(null)
@@ -12,11 +22,43 @@ const timelineInner = ref<HTMLElement | null>(null)
 const sender = ref<{ clear: () => void; setContent: (content: string) => void } | null>(null)
 const draft = ref('')
 const stick = ref(true)
+const contextUsageOpen = ref(false)
+const uploadError = ref('')
 let locking = false
 let raf = 0
 let followGen = 0
 let resizeObs: ResizeObserver | null = null
-const models = computed(() => store.providers.flatMap((p) => (p.models || []).map((m: any) => ({ ...m, provider: p.name }))))
+
+const {
+  attachments,
+  addFiles,
+  removeAttachment,
+  retryUpload,
+  clearAttachments,
+  getPendingFiles,
+  hasUploadingAttachments,
+} = useChatAttachments()
+
+const pendingFiles = computed(() => getPendingFiles())
+
+const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = useContextUsagePreview({
+  conversationId: toRef(store, 'conversationId'),
+  userContent: draft,
+  thinking: toRef(store, 'thinking'),
+  mode: toRef(store, 'mode'),
+  files: pendingFiles,
+})
+
+const contextUsageRingPercent = computed(() => contextUsagePreview.value?.recommendedUsagePercent ?? 0)
+const contextUsageRingLevel = computed(() => contextUsagePreview.value?.level ?? 'normal')
+const inputBlocked = computed(() => running() || hasUploadingAttachments())
+
+const speechConfig = computed(() => ({
+  lang: 'zh-CN',
+  continuous: true,
+  interimResults: true,
+}))
+
 const streamTick = computed(() =>
   store.messages.map((m) => m.blocks.map((b) => `${b.id}:${b.text?.length || 0}:${b.status}`).join('|')).join('/'),
 )
@@ -132,44 +174,46 @@ function clearSender() {
 
 function onSubmit(text: string) {
   const value = text?.trim()
-  if (!value) return
+  if (!value || hasUploadingAttachments()) return
   stick.value = true
   const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
-  store.send(value, refs)
+  const files = getPendingFiles()
+  store.send(value, refs, files)
   clearSender()
+  clearAttachments()
+  uploadError.value = ''
   nextTick(() => {
     clearSender()
     scrollToEnd()
   })
 }
 
-function toggleThinking() {
-  store.thinking = !store.thinking
+function onCancel() {
+  if (running()) store.stop()
+}
+
+function handleFileSelect(files: File[]) {
+  uploadError.value = ''
+  addFiles(files)
+}
+
+function handleUploadError(error: Error) {
+  uploadError.value = error.message
+}
+
+function handleSpeechError(error: Error) {
+  uploadError.value = error.message || '语音识别失败'
+}
+
+function openContextUsageDialog() {
+  contextUsageOpen.value = true
 }
 </script>
 
 <template>
   <div class="panel-shell agent">
     <header class="panel-head">
-      <select v-model="store.mode" class="field-control">
-        <option value="ask">Ask</option>
-        <option value="agent">Agent</option>
-        <option value="plan">Plan</option>
-      </select>
-      <select v-model="store.modelId" class="field-control grow">
-        <option :value="null">选择模型</option>
-        <option v-for="m in models" :key="m.id" :value="m.id">{{ m.display_name }}</option>
-      </select>
-      <button
-        type="button"
-        class="think-btn"
-        :class="{ on: store.thinking }"
-        :title="store.thinking ? '深度思考：开' : '深度思考：关'"
-        @click="toggleThinking"
-      >
-        <AppIcon name="think" :size="15" />
-        思考
-      </button>
+      <span class="panel-title">对话</span>
       <span class="spacer" />
       <button v-if="running()" type="button" class="btn" @click="store.stop()">停止</button>
       <button type="button" class="btn btn-primary" @click="store.newChat()">新会话</button>
@@ -189,49 +233,90 @@ function toggleThinking() {
         </div>
       </div>
     </div>
-    <footer>
-      <TrSender
-        ref="sender"
-        v-model="draft"
-        class="sender"
-        placeholder="给 Code Agent 下指令…"
-        :loading="running()"
-        @submit="onSubmit"
-      />
+    <footer class="agent-footer">
+      <div class="agent-sender-wrap">
+        <TrSender
+          ref="sender"
+          v-model="draft"
+          class="agent-sender"
+          mode="multiple"
+          submit-type="enter"
+          placeholder="给 Code Agent 下指令…"
+          :loading="running()"
+          clearable
+          @submit="onSubmit"
+          @cancel="onCancel"
+        >
+          <template v-if="attachments.length" #header>
+            <TrAttachments
+              v-model:items="attachments"
+              class="agent-attachments"
+              wrap
+              :file-matchers="attachmentFileMatchers"
+              @remove="removeAttachment"
+              @retry="retryUpload"
+            />
+          </template>
+
+          <template #footer>
+            <ChatInputToolbar />
+          </template>
+
+          <template #footer-right>
+            <div class="agent-sender-actions">
+              <ChatContextUsageButton
+                :percent="contextUsageRingPercent"
+                :level="contextUsageRingLevel"
+                :loading="contextUsagePreviewLoading"
+                :disabled="!store.conversationId"
+                @click="openContextUsageDialog"
+              />
+              <UploadButton
+                tooltip="上传图片"
+                tooltip-placement="top"
+                multiple
+                :max-size="UPLOAD_MAX_SIZE_MB"
+                :max-count="UPLOAD_MAX_COUNT"
+                :accept="UPLOAD_ACCEPT"
+                :disabled="inputBlocked"
+                @select="handleFileSelect"
+                @error="handleUploadError"
+              />
+              <VoiceButton
+                tooltip="语音输入"
+                tooltip-placement="top"
+                :speech-config="speechConfig"
+                :disabled="inputBlocked"
+                @speech-error="handleSpeechError"
+              />
+            </div>
+          </template>
+        </TrSender>
+      </div>
+      <p v-if="uploadError" class="agent-upload-error">{{ uploadError }}</p>
     </footer>
+
+    <ChatContextUsageDialog
+      :open="contextUsageOpen"
+      :conversation-id="store.conversationId"
+      :user-content="draft"
+      :thinking="store.thinking"
+      :mode="store.mode"
+      :files="pendingFiles"
+      @close="contextUsageOpen = false"
+    />
   </div>
 </template>
 
 <style scoped>
 .agent { background: var(--bg); }
 .panel-head { flex-wrap: wrap; }
-.field-control {
-  height: 28px;
-  padding: 0 8px;
-  font-size: 12px;
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
 }
-.grow { min-width: 0; max-width: 180px; }
 .btn { height: 28px; padding: 0 10px; font-size: 12px; }
-.think-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 12px;
-  flex-shrink: 0;
-}
-.think-btn:hover { color: var(--text); }
-.think-btn.on {
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  background: var(--primary-soft);
-}
 .timeline {
   flex: 1;
   overflow-x: hidden;
@@ -292,9 +377,115 @@ article.assistant {
   0%, 80%, 100% { opacity: 0.25; }
   40% { opacity: 1; }
 }
-footer {
-  border-top: 1px solid var(--border);
-  padding: 10px;
-  background: var(--bg-elevated);
+footer.agent-footer {
+  border-top: var(--border-width) solid var(--border);
+  padding: 10px 12px 12px;
+  background: var(--panel-bg);
+}
+
+.agent-sender-wrap {
+  width: 100%;
+  min-width: 0;
+}
+
+.agent-sender {
+  width: 100%;
+  min-width: 0;
+  --tr-sender-bg-color: var(--code-bg);
+  --tr-sender-text-color: var(--text-h);
+  --tr-sender-placeholder-color: var(--text);
+}
+
+.agent-sender :deep(.tr-sender) {
+  width: 100%;
+  box-sizing: border-box;
+  border: var(--border-width) solid var(--border);
+  background: var(--code-bg);
+  box-shadow: none;
+}
+
+.agent-sender :deep(.tr-sender-footer) {
+  min-width: 0;
+}
+
+.agent-sender :deep(.tr-sender-footer-left) {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.agent-sender :deep(.tr-sender-footer-right) {
+  flex: 0 0 auto;
+}
+
+.agent-sender :deep(.chat-input-toolbar__think) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-sender :deep(.tr-sender-content .ProseMirror) {
+  min-height: var(--tr-sender-line-height, 26px);
+  color: var(--text-h);
+}
+
+.agent-sender :deep(.tr-sender-content .ProseMirror p.is-editor-empty:first-child::before) {
+  color: var(--text);
+}
+
+.agent-sender :deep(.tr-sender-submit-button__icon) {
+  color: var(--sender-submit-icon);
+}
+
+.agent-sender :deep(.tr-sender-submit-button:not(.is-disabled):not(.is-loading):hover .tr-sender-submit-button__icon) {
+  color: var(--sender-submit-icon-hover);
+}
+
+.agent-sender :deep(.tr-sender-submit-button.is-disabled .tr-sender-submit-button__icon) {
+  color: var(--text);
+  opacity: 0.45;
+}
+
+.agent-sender :deep(.tr-sender-submit-button__cancel) {
+  background-color: var(--sender-submit-cancel-bg);
+}
+
+.agent-sender :deep(.tr-sender-submit-button__cancel:hover) {
+  background-color: var(--sender-submit-cancel-bg-hover);
+}
+
+.agent-sender :deep(.tr-sender-submit-button__cancel-icon) {
+  color: var(--sender-submit-icon);
+}
+
+.agent-sender :deep(.tr-sender-main) {
+  align-items: flex-start;
+}
+
+.agent-sender-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.agent-sender-actions :deep(.tr-action-button) {
+  color: var(--text);
+}
+
+.agent-sender-actions :deep(.tr-action-button:hover:not(:disabled)) {
+  color: var(--text-h);
+  background: var(--tr-sender-button-hover-bg);
+}
+
+.agent-attachments {
+  padding: 8px 10px 0;
+}
+
+.agent-upload-error {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--danger);
 }
 </style>

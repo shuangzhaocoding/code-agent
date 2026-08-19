@@ -137,7 +137,7 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 </template>
 
 <style scoped>
-.panel-shell { overflow: hidden; position: relative; }
+.panel-shell { overflow: hidden; position: relative; background: var(--sidebar-bg); }
 .root {
   font-size: 12px;
   color: var(--text-secondary);

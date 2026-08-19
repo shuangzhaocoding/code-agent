@@ -43,14 +43,15 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
 .sheet {
   width: min(460px, 100%);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-md);
-  padding: 16px 16px 14px;
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: var(--shadow);
+  padding: 16px 20px 14px;
 }
 h3 {
   margin: 0 0 8px;
-  font-size: 15px;
+  font-size: 16px;
+  color: var(--text-h);
 }
 .summary {
   margin: 0;
@@ -96,8 +97,8 @@ footer {
   color: var(--primary);
 }
 .btn.danger {
-  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
-  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
-  color: var(--danger);
+  border-color: color-mix(in srgb, var(--error-text) 40%, var(--border));
+  background: color-mix(in srgb, var(--error-text) 12%, var(--panel-bg));
+  color: var(--error-text);
 }
 </style>

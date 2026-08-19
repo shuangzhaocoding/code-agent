@@ -91,7 +91,7 @@ async function applyPreset(kind: string) {
         <button type="button" class="btn" @click="applyPreset('ollama')">添加 Ollama</button>
       </div>
       <p v-if="error" class="err">{{ error }}</p>
-      <form @submit.prevent="add">
+      <form class="page-panel setup__card" @submit.prevent="add">
         <input v-model="form.name" class="field-control" placeholder="名称" />
         <select v-model="form.kind" class="field-control" @change="onKindChange">
           <option value="deepseek">DeepSeek</option>
@@ -105,34 +105,38 @@ async function applyPreset(kind: string) {
         <input v-model="form.model_id" class="field-control" placeholder="model id，如 deepseek-chat" />
         <button type="submit" class="btn btn-primary">添加</button>
       </form>
-      <article v-for="p in store.providers" :key="p.id">
-        <h3>{{ p.name }} <small>{{ p.kind }}</small></h3>
-        <div class="meta">{{ p.base_url }} · {{ p.api_key_masked || 'no key' }}</div>
-        <ul>
-          <li v-for="m in p.models" :key="m.id">{{ m.display_name }} <em v-if="m.is_default">默认</em></li>
-        </ul>
-      </article>
+      <div class="workspace-grid">
+        <article v-for="p in store.providers" :key="p.id" class="workspace-card">
+          <h3>{{ p.name }} <small>{{ p.kind }}</small></h3>
+          <div class="meta">{{ p.base_url }} · {{ p.api_key_masked || 'no key' }}</div>
+          <ul>
+            <li v-for="m in p.models" :key="m.id">
+              {{ m.display_name }}
+              <em v-if="m.is_default" class="status-pill">默认</em>
+            </li>
+          </ul>
+        </article>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.models { padding: 14px 16px; }
-.hint { color: var(--text-secondary); font-size: 13px; margin: 0 0 12px; }
+.models { padding: 16px 20px; }
+.hint { color: var(--text); font-size: 13px; margin: 0 0 12px; }
 .quick { display: flex; gap: 8px; margin-bottom: 12px; }
 form { display: grid; gap: 8px; margin: 12px 0 16px; }
-.err { color: var(--danger); font-size: 13px; }
-article {
-  border-top: 1px solid var(--border);
-  padding: 12px 0;
-}
-h3 { margin: 0 0 4px; font-size: 14px; }
-small, em, .meta {
-  color: var(--text-secondary);
+.err { color: var(--error-text); font-size: 13px; }
+h3 { margin: 0; font-size: 16px; color: var(--text-h); }
+small, .meta {
+  color: var(--text);
   font-style: normal;
   font-weight: 400;
 }
 .meta { font-size: 12px; font-family: var(--mono); }
-ul { margin: 8px 0 0; padding-left: 18px; color: var(--text-secondary); }
+ul { margin: 8px 0 0; padding-left: 18px; color: var(--text); }
+li { display: flex; align-items: center; gap: 8px; }
 code { font-family: var(--mono); font-size: 12px; }
+.workspace-card { cursor: default; }
+.workspace-card:hover { border-color: var(--border); }
 </style>

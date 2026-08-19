@@ -42,42 +42,48 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 
 <template>
   <div class="mask" @click.self="emit('close')">
-    <div class="sheet" role="dialog" aria-label="打开工作区">
+    <div class="page-panel sheet" role="dialog" aria-label="打开工作区">
       <header>
-        <strong>打开工作区</strong>
+        <h1 class="page-panel__title">打开工作区</h1>
         <button type="button" class="icon-btn" title="关闭" @click="emit('close')">×</button>
       </header>
+      <p class="page-panel__lead">选择本地目录，或从最近工作区进入。</p>
       <div class="search-box">
         <AppIcon class="search-box-icon" name="folder" :size="18" />
         <input v-model="path" placeholder="/path/to/project" @keydown.enter="openPath" />
         <button type="button" class="search-box-btn" @click="openPath">打开</button>
       </div>
       <p v-if="error" class="err">{{ error }}</p>
-      <div class="crumbs">
-        <button type="button" class="btn btn-ghost" @click="browse(browsing?.parent || '~')">上级</button>
-        <span>{{ browsing?.path }}</span>
+      <div class="nested-list browse">
+        <div class="crumbs">
+          <button type="button" class="btn btn-ghost" @click="browse(browsing?.parent || '~')">上级</button>
+          <span>{{ browsing?.path }}</span>
+        </div>
+        <ul class="dirs">
+          <li v-for="item in dirs" :key="item.path">
+            <button type="button" class="menu-item" @click="browse(item.path)">
+              <AppIcon name="folder" :size="15" />
+              {{ item.name }}
+            </button>
+          </li>
+        </ul>
       </div>
-      <ul class="dirs">
-        <li v-for="item in dirs" :key="item.path">
-          <button type="button" class="menu-item" @click="browse(item.path)">
-            <AppIcon name="folder" :size="15" />
-            {{ item.name }}
-          </button>
-        </li>
-      </ul>
       <section v-if="recents.length" class="recents">
-        <h2>最近打开</h2>
-        <button
-          v-for="ws in recents"
-          :key="ws.id"
-          type="button"
-          class="recent"
-          :class="{ current: ws.id === store.workspaceId }"
-          @click="openRecent(ws.id)"
-        >
-          <strong>{{ ws.name }}</strong>
-          <span>{{ ws.root_path }}</span>
-        </button>
+        <h2 class="page-panel__title">最近打开</h2>
+        <div class="workspace-grid">
+          <button
+            v-for="ws in recents"
+            :key="ws.id"
+            type="button"
+            class="workspace-card"
+            :class="{ current: ws.id === store.workspaceId }"
+            @click="openRecent(ws.id)"
+          >
+            <strong>{{ ws.name }}</strong>
+            <span>{{ ws.root_path }}</span>
+            <em class="status-pill">{{ ws.id === store.workspaceId ? '当前' : '本地' }}</em>
+          </button>
+        </div>
       </section>
     </div>
   </div>
@@ -88,28 +94,24 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   position: fixed;
   inset: 0;
   z-index: 80;
-  background: rgba(15, 23, 42, 0.42);
+  background: color-mix(in srgb, var(--page-bg) 28%, transparent);
   display: grid;
   place-items: center;
   padding: 24px;
 }
 .sheet {
-  width: min(640px, 100%);
+  width: min(720px, 100%);
   max-height: min(80vh, 720px);
   overflow: auto;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 18px 20px 20px;
-  box-shadow: var(--shadow-md);
+  padding: 20px;
 }
 header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 14px;
+  gap: 12px;
 }
-header strong { font-size: 16px; }
+header .page-panel__title { margin: 0; }
 .icon-btn {
   width: 32px;
   height: 32px;
@@ -118,15 +120,20 @@ header strong { font-size: 16px; }
 }
 .err {
   margin: 8px 0 0;
-  color: var(--danger);
+  color: var(--error-text);
   font-size: 12px;
+}
+.browse {
+  margin-top: 14px;
+  padding: 8px;
 }
 .crumbs {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 14px 0 8px;
-  color: var(--text-secondary);
+  margin-bottom: 8px;
+  padding: 0 6px;
+  color: var(--text);
   font-size: 12px;
   font-family: var(--mono);
 }
@@ -134,41 +141,17 @@ header strong { font-size: 16px; }
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 220px;
+  max-height: 180px;
   overflow: auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
 }
 .recents {
-  margin-top: 16px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  margin-top: 20px;
 }
-.recents h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-}
-.recent {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-}
-.recent:hover,
-.recent.current { background: var(--primary-soft); }
-.recent span {
-  color: var(--text-muted);
-  font-size: 12px;
+.recents .page-panel__title { margin-bottom: 12px; }
+.workspace-card.current { border-color: var(--primary); }
+.workspace-card span {
   font-family: var(--mono);
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>

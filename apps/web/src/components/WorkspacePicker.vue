@@ -4,7 +4,6 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import AppIcon from '@/components/AppIcon.vue'
-import AuthScene from '@/components/AuthScene.vue'
 
 const store = useAppStore()
 const path = ref('')
@@ -35,68 +34,112 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 </script>
 
 <template>
-  <div class="auth-page">
-    <AuthScene />
-    <div class="auth-locale">
-      <button type="button" class="icon-btn" title="切换主题" @click="onToggleTheme">
-        <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
-      </button>
-    </div>
-    <div class="auth-card">
-      <div class="auth-brand">Code Agent</div>
-      <h1>对着真实仓库工作的开源编码 Agent</h1>
-      <p class="auth-lead">无登录 · 可插拔 Skill / 模型 · 刷新后续流 · 窗口可拖动排版</p>
-
-      <div class="search-box">
-        <AppIcon class="search-box-icon" name="folder" :size="20" />
-        <input v-model="path" placeholder="/path/to/project" @keydown.enter="open" />
-        <button type="button" class="search-box-btn" @click="open">打开</button>
+  <div class="launch-page">
+    <header class="layout-header">
+      <div class="layout-brand">
+        <span class="brand-mark">CA</span>
+        <span>Code Agent</span>
       </div>
+      <div class="layout-actions">
+        <button type="button" class="icon-btn" title="切换主题" @click="onToggleTheme">
+          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="18" />
+        </button>
+      </div>
+    </header>
 
-      <div class="browse">
-        <div class="crumbs">
-          <button type="button" class="btn btn-ghost" @click="browse(browsing?.parent || '~')">上级</button>
-          <span>{{ browsing?.path }}</span>
+    <main class="launch-main">
+      <section class="launch__panel">
+        <h1>打开工作区</h1>
+        <p>无登录 · 可插拔 Skill / 模型 · 刷新后续流。选择一个本地目录开始。</p>
+        <div class="search-box">
+          <AppIcon class="search-box-icon" name="folder" :size="20" />
+          <input v-model="path" placeholder="/path/to/project" @keydown.enter="open" />
+          <button type="button" class="search-box-btn" @click="open">打开</button>
         </div>
-        <ul class="dirs">
-          <li v-for="item in dirs" :key="item.path">
-            <button type="button" class="menu-item" @click="browse(item.path)">
-              <AppIcon name="folder" :size="15" />
-              {{ item.name }}
-            </button>
-          </li>
-        </ul>
-      </div>
+        <div class="browse nested-list">
+          <div class="crumbs">
+            <button type="button" class="btn btn-ghost" @click="browse(browsing?.parent || '~')">上级</button>
+            <span>{{ browsing?.path }}</span>
+          </div>
+          <ul class="dirs">
+            <li v-for="item in dirs" :key="item.path">
+              <button type="button" class="menu-item" @click="browse(item.path)">
+                <AppIcon name="folder" :size="15" />
+                {{ item.name }}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </section>
 
       <section v-if="recents.length" class="recents">
-        <h2>最近打开</h2>
-        <button
-          v-for="ws in recents"
-          :key="ws.id"
-          type="button"
-          class="recent"
-          @click="store.selectWorkspace(ws.id)"
-        >
-          <strong>{{ ws.name }}</strong>
-          <span>{{ ws.root_path }}</span>
-        </button>
+        <h2 class="page-panel__title">最近打开</h2>
+        <p class="page-panel__lead">点击卡片进入已有工作区。</p>
+        <div class="workspace-grid">
+          <button
+            v-for="ws in recents"
+            :key="ws.id"
+            type="button"
+            class="workspace-card"
+            @click="store.selectWorkspace(ws.id)"
+          >
+            <strong>{{ ws.name }}</strong>
+            <span>{{ ws.root_path }}</span>
+            <em class="status-pill">本地</em>
+          </button>
+        </div>
       </section>
-    </div>
+    </main>
   </div>
 </template>
 
 <style scoped>
+.launch-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--page-bg);
+}
+.launch-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  padding: 32px 20px 48px;
+}
+.launch__panel {
+  width: min(420px, 100%);
+}
+.launch__panel .search-box {
+  padding: 6px 6px 6px 14px;
+  border-radius: var(--radius-md);
+}
+.launch__panel .search-box input { height: 36px; font-size: 14px; }
+.launch__panel .search-box-btn {
+  height: 36px;
+  min-width: 72px;
+  padding: 0 16px;
+  font-size: 13px;
+}
 .browse {
-  margin-top: 18px;
+  margin-top: 16px;
+  padding: 8px;
 }
 .crumbs {
   display: flex;
   gap: 12px;
   align-items: center;
-  color: var(--text-secondary);
+  color: var(--text);
   font-size: 12px;
   font-family: var(--mono);
   margin-bottom: 8px;
+  padding: 0 6px;
+}
+.crumbs span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .dirs {
   list-style: none;
@@ -104,42 +147,13 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   padding: 0;
   max-height: 220px;
   overflow: auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 2px;
 }
 .recents {
-  margin-top: 20px;
-  border-top: 1px solid var(--border);
-  padding-top: 16px;
+  width: min(960px, 100%);
 }
-.recents h2 {
-  margin: 0 0 8px;
-  font-size: 13px;
-  color: var(--text-secondary);
-  font-weight: 600;
-}
-.recent {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  text-align: left;
-}
-.recent:hover { background: var(--primary-soft); }
-.recent span {
-  color: var(--text-muted);
-  font-size: 12px;
+.workspace-card span {
   font-family: var(--mono);
-}
-@media (max-width: 720px) {
-  .dirs { grid-template-columns: 1fr; }
+  font-size: 12px;
+  word-break: break-all;
 }
 </style>

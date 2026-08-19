@@ -75,8 +75,8 @@ function openFile() {
   font-weight: 600;
   margin-bottom: 8px;
 }
-.add { color: var(--ok); }
-.del { color: var(--danger); }
+.add { color: #059669; }
+.del { color: var(--error-text); }
 .diff {
   margin: 0;
   font-family: var(--mono);
@@ -86,9 +86,16 @@ function openFile() {
   max-height: 320px;
   white-space: pre;
 }
-.diff .add { color: var(--ok); background: color-mix(in srgb, var(--ok) 10%, transparent); }
-.diff .del { color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.diff .add { color: #059669; background: color-mix(in srgb, #059669 10%, transparent); }
+.diff .del { color: var(--error-text); background: color-mix(in srgb, var(--error-text) 10%, transparent); }
 .diff .hunk { color: var(--primary); }
+:global(html[data-theme='dark']) .add,
+:global(html[data-theme='dark']) .diff .add {
+  color: #34d399;
+}
+:global(html[data-theme='dark']) .diff .add {
+  background: color-mix(in srgb, #34d399 12%, transparent);
+}
 .empty {
   margin: 0;
   color: var(--text-muted);

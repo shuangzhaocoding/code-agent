@@ -11,7 +11,7 @@ from code_agent.crypto import encrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
 from code_agent.llm.hub import register_builtin_providers
 from code_agent.plugins.loader import load_plugins
-from code_agent.routers import conversations, git, llm, runs, settings as settings_router, skills, terminals, workspaces
+from code_agent.routers import conversations, git, llm, runs, settings as settings_router, skills, terminals, uploads, workspaces
 from code_agent.tools.host import register_builtin_tools
 
 async def _seed_llm_from_env() -> None:
@@ -81,6 +81,7 @@ def create_app() -> FastAPI:
     app.include_router(skills.router)
     app.include_router(settings_router.router)
     app.include_router(terminals.router)
+    app.include_router(uploads.router)
 
     @app.get("/api/health")
     async def health():

@@ -43,10 +43,9 @@ function onChevron(e: Event) {
           <AppIcon :name="icon" :size="14" />
         </span>
         <span class="titles">
-          <span class="title">{{ title }}</span>
+          <span class="title" :class="{ running: status === 'streaming' }">{{ title }}</span>
           <span v-if="subtitle" class="sub">{{ subtitle }}</span>
         </span>
-        <span class="dots" :class="{ on: status === 'streaming' }" aria-hidden="true"><i /><i /><i /></span>
         <span v-if="status === 'error'" class="pill error">失败</span>
         <button type="button" class="chev-btn" @click="onChevron">
           <AppIcon class="chev" name="chevron" :size="14" />
@@ -65,9 +64,9 @@ function onChevron(e: Event) {
 <style scoped>
 .card {
   margin: 8px 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-elevated);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
   overflow: clip;
   overflow-anchor: none;
   contain: layout style;
@@ -75,7 +74,7 @@ function onChevron(e: Event) {
 }
 .row {
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   align-items: stretch;
   min-width: 0;
 }
@@ -91,18 +90,9 @@ function onChevron(e: Event) {
   cursor: pointer;
   text-align: left;
   min-width: 0;
-  flex: 1;
+  width: 100%;
 }
-.open .head {
-  flex: 0 0 196px;
-  width: 196px;
-  max-width: 42%;
-  align-items: flex-start;
-  border-right: 1px solid var(--border);
-}
-.card.think { border-color: color-mix(in srgb, #8b5cf6 32%, var(--border)); }
-.card.danger { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
-.card.tool { border-color: color-mix(in srgb, var(--primary) 26%, var(--border)); }
+.card.error { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
 .head:hover { background: var(--bg-muted); }
 .head.activatable .titles { cursor: pointer; }
 .head.activatable .sub { color: var(--primary); }
@@ -137,18 +127,19 @@ function onChevron(e: Event) {
   gap: 8px;
   min-height: 20px;
 }
-.open .titles {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding-top: 3px;
-}
 .title {
+  flex-shrink: 0;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.title.running {
+  animation: title-pulse 1.2s ease-in-out infinite;
 }
 .sub {
+  min-width: 0;
+  flex: 1;
   font-size: 11.5px;
   color: var(--text-muted);
   font-family: var(--mono);
@@ -162,34 +153,12 @@ function onChevron(e: Event) {
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
+  background: var(--code-bg);
 }
 .pill.error {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
+  color: var(--error-text);
+  background: color-mix(in srgb, var(--error-text) 12%, var(--panel-bg));
 }
-.dots {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 22px;
-  height: 12px;
-  flex-shrink: 0;
-  color: var(--primary);
-  opacity: 0;
-  pointer-events: none;
-}
-.dots.on { opacity: 1; }
-.dots i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.25;
-}
-.dots.on i { animation: typing 1.05s ease-in-out infinite; }
-.dots.on i:nth-child(2) { animation-delay: 0.15s; }
-.dots.on i:nth-child(3) { animation-delay: 0.3s; }
 .chev-btn {
   flex-shrink: 0;
   display: grid;
@@ -213,12 +182,12 @@ function onChevron(e: Event) {
   background: var(--bg);
 }
 .foot {
-  border-top: 1px solid var(--border);
+  border-top: var(--border-width) solid var(--border);
   padding: 8px 12px 10px;
   background: var(--bg);
 }
-@keyframes typing {
-  0%, 80%, 100% { opacity: 0.25; }
-  40% { opacity: 1; }
+@keyframes title-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 </style>

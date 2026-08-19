@@ -74,11 +74,14 @@ async def start_run(
     model_id: str | None,
     references: list | None,
     thinking: bool = False,
+    files: list | None = None,
 ) -> Run:
     conv = await Conversation.get(id=conversation_id)
     last = await Message.filter(conversation_id=conversation_id).order_by("-sort_key").first()
     sort_key = (last.sort_key + 1) if last else 1
     blocks = [{"id": new_id(), "type": "user.text", "text": user_text, "meta": {}, "status": "ok"}]
+    if files:
+        blocks[0]["meta"] = {"files": files}
     if references:
         blocks.append(
             {
