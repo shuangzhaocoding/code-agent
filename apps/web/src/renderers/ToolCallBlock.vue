@@ -110,6 +110,7 @@ const body = computed(() => {
     :subtitle="subtitle"
     :tone="spec.tone"
     :status="block.status"
+    :default-open="block.status === 'error'"
     :activatable="fileOp && !!path"
     @activate="openFile"
   >

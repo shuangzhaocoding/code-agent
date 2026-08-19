@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
 import ChatInputToolbar from '@/components/ChatInputToolbar.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import { useChatAttachments } from '@/composables/useChatAttachments'
@@ -47,6 +48,7 @@ function msgPlainText(msg: (typeof store.messages)[0]): string {
     .join('\n')
     .trim()
 }
+
 
 async function copyMsg(msg: (typeof store.messages)[0]) {
   await navigator.clipboard.writeText(msgPlainText(msg)).catch(() => {})
@@ -101,6 +103,22 @@ function fmtTime(iso: string | null | undefined): string {
 const timelineInner = ref<HTMLElement | null>(null)
 const sender = ref<{ clear: () => void; setContent: (content: string) => void } | null>(null)
 const draft = ref('')
+
+const quickPrompts = [
+  { label: '解释代码结构', text: '请解释一下当前工作区的代码结构和主要模块。' },
+  { label: 'Review 改动', text: '请 review 当前的 git 改动并给出建议。' },
+  { label: '写单元测试', text: '为当前打开的文件补充单元测试。' },
+  { label: '修复 lint', text: '检查并修复项目中的 lint 问题。' },
+]
+
+function useQuickPrompt(text: string) {
+  draft.value = text
+  sender.value?.setContent?.(text)
+  nextTick(() => {
+    const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
+    el?.focus()
+  })
+}
 
 /* ---- @ file mention ---- */
 const mentionOpen = ref(false)
@@ -229,7 +247,7 @@ const pendingFiles = computed(() => getPendingFiles())
 const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = useContextUsagePreview({
   conversationId: toRef(store, 'conversationId'),
   userContent: draft,
-  thinking: toRef(store, 'thinking'),
+  thinkingLevel: toRef(store, 'thinkingLevel'),
   mode: toRef(store, 'mode'),
   files: pendingFiles,
 })
@@ -418,16 +436,24 @@ function openContextUsageDialog() {
         已复制
       </div>
     </Transition>
-    <header class="panel-head">
-      <span class="panel-title">对话</span>
-      <span class="spacer" />
-      <button v-if="running()" type="button" class="btn" @click="store.stop()">停止</button>
-      <button type="button" class="btn btn-primary" @click="store.newChat()">新会话</button>
-    </header>
     <div ref="scroller" class="timeline" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
       <div ref="timelineInner" class="timeline-inner">
         <div v-if="!store.messages.length" class="empty">
-          描述你想改的代码。可用 Skill、自备模型，刷新后生成会继续。
+          <div class="empty-icon" aria-hidden="true">
+            <AppIcon name="atom" :size="32" />
+          </div>
+          <p class="empty-lead">描述你想改的代码，或用 Skill / 自备模型开始。</p>
+          <div class="quick-prompts">
+            <button
+              v-for="item in quickPrompts"
+              :key="item.label"
+              type="button"
+              class="quick-prompt"
+              @click="useQuickPrompt(item.text)"
+            >
+              {{ item.label }}
+            </button>
+          </div>
         </div>
         <article v-for="msg in store.messages" :key="msg.id" :class="['msg-wrap', msg.role]">
           <template v-if="msg.role === 'user'">
@@ -465,6 +491,7 @@ function openContextUsageDialog() {
         </article>
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
+          <button type="button" class="stop-inline" @click="store.stop()">停止</button>
         </div>
       </div>
     </div>
@@ -575,6 +602,7 @@ function openContextUsageDialog() {
       :open="contextUsageOpen"
       :conversation-id="store.conversationId"
       :user-content="draft"
+      :thinking-level="store.thinkingLevel"
       :thinking="store.thinking"
       :mode="store.mode"
       :files="pendingFiles"
@@ -584,20 +612,13 @@ function openContextUsageDialog() {
 </template>
 
 <style scoped>
-.agent { background: var(--bg); position: relative; }
-.panel-head { flex-wrap: wrap; }
-.panel-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-h);
-}
-.btn { height: 28px; padding: 0 10px; font-size: 12px; }
+.agent { background: var(--page-bg); position: relative; }
 .timeline {
   flex: 1;
   overflow-x: hidden;
   overflow-y: scroll;
   overflow-anchor: none;
-  padding: 14px 16px 24px;
+  padding: 12px 20px 8px;
 }
 .timeline-inner {
   display: flex;
@@ -607,17 +628,55 @@ function openContextUsageDialog() {
   min-height: min-content;
 }
 .empty {
-  color: var(--text-secondary);
-  padding: 32px 8px;
+  align-self: center;
+  width: min(100%, 420px);
+  padding: 40px 12px 24px;
   text-align: center;
+}
+.empty-icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 16px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.empty-lead {
+  margin: 0 0 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
   line-height: 1.6;
+}
+.quick-prompts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.quick-prompt {
+  padding: 6px 12px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.quick-prompt:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  color: var(--primary);
+  background: var(--primary-soft);
 }
 article.msg-wrap.user {
   align-self: flex-end;
   margin-left: auto;
-  max-width: min(82%, 560px);
-  margin-top: 10px;
-  margin-bottom: 10px;
+  max-width: min(78%, 520px);
+  margin-top: 12px;
+  margin-bottom: 4px;
   margin-right: 0;
   overflow-anchor: none;
   display: flex;
@@ -626,10 +685,10 @@ article.msg-wrap.user {
   gap: 4px;
 }
 .msg-bubble {
-  background: var(--primary-soft);
-  color: var(--text);
-  padding: 10px 14px;
-  border-radius: 12px 12px 4px 12px;
+  background: var(--code-bg);
+  color: var(--text-h);
+  padding: 8px 12px;
+  border-radius: 10px 10px 4px 10px;
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
@@ -649,7 +708,7 @@ article.msg-wrap.user {
   left: 0;
   right: 0;
   height: 36px;
-  background: linear-gradient(transparent, var(--primary-soft));
+  background: linear-gradient(transparent, var(--code-bg));
   pointer-events: none;
 }
 .msg-expand-btn {
@@ -667,13 +726,13 @@ article.msg-wrap.user {
 article.msg-wrap.assistant {
   align-self: stretch;
   width: 100%;
-  margin: 10px 28px 10px 0;
+  margin: 16px 0 8px;
   overflow-anchor: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
-.block + .block { margin-top: 4px; }
+.block + .block { margin-top: 2px; }
 
 /* message action bar */
 .msg-bar {
@@ -681,6 +740,12 @@ article.msg-wrap.assistant {
   align-items: center;
   gap: 6px;
   min-height: 20px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+article.msg-wrap:hover .msg-bar,
+article.msg-wrap:focus-within .msg-bar {
+  opacity: 1;
 }
 .msg-bar.user {
   flex-direction: row-reverse;
@@ -688,7 +753,7 @@ article.msg-wrap.assistant {
 }
 .msg-time {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   white-space: nowrap;
 }
 .msg-actions {
@@ -752,9 +817,23 @@ article.msg-wrap.assistant {
 .typing {
   display: flex;
   align-items: center;
+  gap: 10px;
   min-height: 28px;
   padding: 4px 2px 8px;
   color: var(--text-muted);
+}
+.stop-inline {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+}
+.stop-inline:hover {
+  background: var(--primary-soft);
 }
 .dots {
   display: inline-flex;
@@ -776,9 +855,9 @@ article.msg-wrap.assistant {
 }
 footer.agent-footer {
   position: relative;
-  border-top: var(--border-width) solid var(--border);
-  padding: 10px 12px 12px;
-  background: var(--panel-bg);
+  border-top: 0;
+  padding: 0 16px 16px;
+  background: linear-gradient(to top, var(--page-bg) 72%, transparent);
 }
 
 .sender-resize-handle {
@@ -809,12 +888,20 @@ footer.agent-footer {
 .agent-sender-wrap {
   width: 100%;
   min-width: 0;
+  border: var(--border-width) solid var(--border);
+  border-radius: 14px;
+  background: var(--panel-bg);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  overflow: hidden;
+}
+html[data-theme='dark'] .agent-sender-wrap {
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
 }
 
 .agent-sender {
   width: 100%;
   min-width: 0;
-  --tr-sender-bg-color: var(--code-bg);
+  --tr-sender-bg-color: transparent;
   --tr-sender-text-color: var(--text-h);
   --tr-sender-placeholder-color: var(--text);
 }
@@ -822,8 +909,8 @@ footer.agent-footer {
 .agent-sender :deep(.tr-sender) {
   width: 100%;
   box-sizing: border-box;
-  border: var(--border-width) solid var(--border);
-  background: var(--code-bg);
+  border: 0;
+  background: transparent;
   box-shadow: none;
   display: flex;
   flex-direction: column;

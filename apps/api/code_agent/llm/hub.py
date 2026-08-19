@@ -4,6 +4,7 @@ from typing import Any
 
 from code_agent.crypto import decrypt_secret, encrypt_secret, mask_secret
 from code_agent.db.models import LlmModel, LlmProvider
+from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled, thinking_extra_body, thinking_off_extra_body
 from code_agent.plugins.base import ProviderSpec, registry
 
 
@@ -148,7 +149,9 @@ def register_builtin_providers() -> None:
         )
 
 
-async def resolve_chat_model(model_pk: str | None, thinking: bool = False):
+async def resolve_chat_model(model_pk: str | None, thinking_level: str = "off"):
+    level = normalize_thinking_level(thinking_level)
+    thinking = thinking_enabled(level)
     chat, row = await get_chat_model(model_pk)
     if not row:
         return chat, row
@@ -157,14 +160,18 @@ async def resolve_chat_model(model_pk: str | None, thinking: bool = False):
         pick = next((m for m in siblings if _looks_reasoner(m.model_id)), None)
         if pick:
             chat, row = await get_chat_model(str(pick.id))
-        elif chat is not None:
-            extra = dict(getattr(chat, "extra_body", None) or {})
-            extra["thinking"] = {"type": "enabled"}
-            chat = chat.model_copy(update={"extra_body": extra})
-    if not thinking and _looks_reasoner(row.model_id if row else None):
+    if not thinking and _looks_reasoner(row.model_id):
         pick = next((m for m in siblings if not _looks_reasoner(m.model_id)), None)
         if pick:
             chat, row = await get_chat_model(str(pick.id))
+    if chat is not None:
+        extra = dict(getattr(chat, "extra_body", None) or {})
+        if thinking:
+            extra.update(thinking_extra_body(level, row.model_id if row else None))
+        else:
+            extra.pop("thinking", None)
+            extra.update(thinking_off_extra_body(row.model_id if row else None))
+        chat = chat.model_copy(update={"extra_body": extra or None})
     return chat, row
 
 

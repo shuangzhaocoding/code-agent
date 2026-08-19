@@ -115,14 +115,10 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 </script>
 
 <template>
-  <div class="panel-shell" @contextmenu="onContext($event, null)">
-    <header class="panel-head">
-      <span class="root">{{ store.workspace?.name || '/' }}</span>
-      <span class="spacer" />
-      <button type="button" class="icon-btn" title="刷新" @click="store.refreshTree()">
-        <AppIcon name="refresh" :size="14" />
-      </button>
-    </header>
+  <div class="panel-shell panel-chromeless" @contextmenu="onContext($event, null)">
+    <button type="button" class="tree-refresh icon-btn icon-btn-ghost" title="刷新" @click="store.refreshTree()">
+      <AppIcon name="refresh" :size="14" />
+    </button>
     <form v-if="prompt" class="prompt" @submit.prevent="confirmPrompt">
       <input
         ref="promptEl"
@@ -159,12 +155,13 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 
 <style scoped>
 .panel-shell { overflow: hidden; position: relative; background: var(--sidebar-bg); }
-.root {
-  font-size: 12px;
-  color: var(--text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.tree-refresh {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
 }
 .prompt {
   display: flex;
@@ -183,7 +180,7 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 .tree {
   flex: 1;
   overflow: auto;
-  padding: 4px 0 12px;
+  padding: 36px 0 12px;
 }
 .icon-btn { width: 28px; height: 28px; }
 .ctx {
@@ -194,7 +191,7 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: var(--shadow-md);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
 }

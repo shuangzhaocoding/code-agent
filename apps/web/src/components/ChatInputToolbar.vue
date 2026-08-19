@@ -1,55 +1,89 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { IconAtom } from '@opentiny/tiny-robot-svgs'
 import { useAppStore } from '@/stores/app'
+import ToolbarSelect, { type ToolbarSelectOption } from '@/components/ToolbarSelect.vue'
+import { THINKING_LEVELS, type ThinkingLevel } from '@/types/thinking'
 
 const store = useAppStore()
 
-const models = computed(() =>
-  store.providers.flatMap((p) =>
-    (p.models || []).map((m: { id: string; display_name: string }) => ({
-      ...m,
-      provider: p.name as string,
-    })),
-  ),
-)
+const modeOptions: ToolbarSelectOption[] = [
+  {
+    value: 'ask',
+    label: 'Ask',
+    description: '快速问答，不调用工具',
+    icon: 'chat',
+    accent: '#0891b2',
+  },
+  {
+    value: 'agent',
+    label: 'Agent',
+    description: '自主调用工具完成任务',
+    icon: 'sparkles',
+    accent: 'var(--primary)',
+  },
+  {
+    value: 'plan',
+    label: 'Plan',
+    description: '先规划步骤，再逐步执行',
+    icon: 'rocket',
+    accent: '#d97706',
+  },
+]
 
-function toggleThinking() {
-  store.thinking = !store.thinking
+const thinkingOptions: ToolbarSelectOption[] = THINKING_LEVELS.map((item) => ({
+  value: item.value,
+  label: item.label,
+  description: item.description,
+  icon: item.value === 'off' ? 'think' : 'sparkles',
+  accent: item.value === 'off' ? undefined : '#7c3aed',
+}))
+
+const modelOptions = computed(() => {
+  const options: ToolbarSelectOption[] = []
+  for (const provider of store.providers) {
+    for (const model of provider.models || []) {
+      options.push({
+        value: model.id,
+        label: model.display_name,
+        description: provider.name,
+        icon: 'chip',
+        group: provider.name,
+      })
+    }
+  }
+  return options
+})
+
+function onThinkingChange(value: string | null) {
+  if (!value) return
+  store.thinkingLevel = value as ThinkingLevel
 }
 </script>
 
 <template>
   <div class="chat-input-toolbar">
-    <button
-      type="button"
-      class="chat-input-toolbar__think"
-      :class="{ 'is-active': store.thinking }"
-      :title="store.thinking ? '深度思考：开' : '深度思考：关'"
-      @click="toggleThinking"
-    >
-      <IconAtom class="chat-input-toolbar__icon" />
-      <span>深度思考</span>
-    </button>
+    <ToolbarSelect
+      :model-value="store.thinkingLevel"
+      :options="thinkingOptions"
+      :min-width="96"
+      @update:model-value="onThinkingChange"
+    />
 
-    <label class="chat-input-toolbar__field">
-      <span class="sr-only">模式</span>
-      <select v-model="store.mode" class="chat-input-toolbar__select">
-        <option value="ask">Ask</option>
-        <option value="agent">Agent</option>
-        <option value="plan">Plan</option>
-      </select>
-    </label>
+    <ToolbarSelect
+      :model-value="store.mode"
+      :options="modeOptions"
+      :min-width="108"
+      @update:model-value="store.mode = $event as typeof store.mode"
+    />
 
-    <label class="chat-input-toolbar__field chat-input-toolbar__field--grow">
-      <span class="sr-only">模型</span>
-      <select v-model="store.modelId" class="chat-input-toolbar__select">
-        <option :value="null">选择模型</option>
-        <option v-for="m in models" :key="m.id" :value="m.id">
-          {{ m.display_name }}
-        </option>
-      </select>
-    </label>
+    <ToolbarSelect
+      :model-value="store.modelId"
+      :options="modelOptions"
+      placeholder="选择模型"
+      :min-width="128"
+      grow
+      @update:model-value="store.modelId = $event"
+    />
   </div>
 </template>
 
@@ -60,98 +94,5 @@ function toggleThinking() {
   gap: 8px;
   flex-wrap: wrap;
   min-width: 0;
-}
-
-.chat-input-toolbar__think {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 32px;
-  padding: 0 14px;
-  border: var(--border-width) solid transparent;
-  border-radius: 999px;
-  background: var(--panel-bg);
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s,
-    color 0.2s;
-  flex-shrink: 0;
-}
-
-.chat-input-toolbar__think:hover {
-  background: var(--code-bg);
-}
-
-.chat-input-toolbar__think.is-active {
-  color: var(--think-active-text);
-  background: var(--think-active-bg);
-  border-color: var(--think-active-border);
-}
-
-.chat-input-toolbar__icon {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.chat-input-toolbar__field {
-  display: inline-flex;
-  min-width: 0;
-  flex-shrink: 0;
-}
-
-.chat-input-toolbar__field--grow {
-  flex: 1 1 120px;
-  max-width: 220px;
-}
-
-.chat-input-toolbar__select {
-  width: 100%;
-  height: 32px;
-  max-width: 100%;
-  padding: 0 28px 0 12px;
-  border: var(--border-width) solid transparent;
-  border-radius: 999px;
-  background-color: var(--panel-bg);
-  background-image: var(--select-chevron);
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  appearance: none;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition:
-    background-color 0.2s,
-    border-color 0.2s,
-    color 0.2s;
-}
-
-.chat-input-toolbar__select:hover {
-  background-color: var(--code-bg);
-}
-
-.chat-input-toolbar__select:focus {
-  outline: none;
-  border-color: var(--primary);
-  color: var(--text-h);
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
 </style>

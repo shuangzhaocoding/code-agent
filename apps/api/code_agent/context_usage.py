@@ -5,6 +5,7 @@ from typing import Any
 
 from code_agent.db.models import Conversation, Message, Workspace
 from code_agent.plugins.base import registry
+from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled, thinking_prompt
 from code_agent.streaming.run_manager import _system_prompt
 
 CONTEXT_LIMIT = 1_048_576
@@ -70,10 +71,11 @@ async def compute_context_usage(
     *,
     conversation_id: str | None,
     user_content: str,
-    thinking: bool,
+    thinking_level: str = "off",
     mode: str = "agent",
     files: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    level = normalize_thinking_level(thinking_level)
     workspace: Workspace | None = None
     rows: list[Message] = []
 
@@ -86,7 +88,7 @@ async def compute_context_usage(
 
     system_text = ""
     if workspace:
-        system_text = _system_prompt(workspace, mode, thinking)
+        system_text = _system_prompt(workspace, mode, level)
     else:
         system_text = "You are Code Agent."
 
@@ -121,7 +123,8 @@ async def compute_context_usage(
         "context_limit": CONTEXT_LIMIT,
         "recommended_limit": RECOMMENDED_LIMIT,
         "mode": mode,
-        "thinking": thinking,
+        "thinking": thinking_enabled(level),
+        "thinking_level": level,
         "categories": [item for item in categories if item["tokens"] > 0],
         "total_estimated_input": total,
         "session_context_tokens": total,

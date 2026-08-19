@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { DockviewVue } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
-import AppIcon from '@/components/AppIcon.vue'
+import SessionSidebar from '@/components/SessionSidebar.vue'
 import PanelTab from '@/components/PanelTab.vue'
+import TrajectoryPanel from '@/panels/TrajectoryPanel.vue'
+import TrajectoryDockPanel from '@/panels/TrajectoryDockPanel.vue'
 import WorkspacePanel from '@/panels/WorkspacePanel.vue'
 import ExplorerPanel from '@/panels/ExplorerPanel.vue'
 import EditorPanel from '@/panels/EditorPanel.vue'
@@ -18,9 +20,19 @@ import ModelsPanel from '@/panels/ModelsPanel.vue'
 import SettingsPanel from '@/panels/SettingsPanel.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
 import GitPanel from '@/panels/GitPanel.vue'
+import { getSidebarCollapsed, getTrajectoryOpen, setSidebarCollapsed, setTrajectoryOpen } from '@/utils/layoutPrefs'
 
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
+const sidebarCollapsed = ref(getSidebarCollapsed())
+const sidebarWidth = ref(260)
+const trajectoryOpen = ref(getTrajectoryOpen())
+const trajectoryWidth = ref(340)
+const resizing = ref<'sidebar' | 'trajectory' | null>(null)
+
+watch(sidebarCollapsed, (value) => setSidebarCollapsed(value))
+watch(trajectoryOpen, (value) => setTrajectoryOpen(value))
+
 const components = {
   workspace: WorkspacePanel,
   explorer: ExplorerPanel,
@@ -32,10 +44,10 @@ const components = {
   models: ModelsPanel,
   settings: SettingsPanel,
   git: GitPanel,
+  trajectory: TrajectoryDockPanel,
 }
 
 const dock = ref<DockviewApi | null>(null)
-const regions = ref({ explorer: true, terminal: true, agent: true })
 
 function onTheme(e: Event) {
   theme.value = (e as CustomEvent<Theme>).detail
@@ -50,13 +62,8 @@ onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-focus-editor', focusEditor)
   window.removeEventListener('ca-focus-agent', focusAgent)
+  stopResize()
 })
-
-function showHeaders(apiRef: DockviewApi) {
-  for (const group of apiRef.groups) {
-    group.model.header.hidden = false
-  }
-}
 
 function focusEditor() {
   openPanel('editor', 'editor', '编辑器')
@@ -67,47 +74,8 @@ function focusAgent() {
 }
 
 function seed(apiRef: DockviewApi) {
-  apiRef.addPanel({ id: 'workspace', component: 'workspace', title: '工作空间' })
-  apiRef.addPanel({
-    id: 'explorer',
-    component: 'explorer',
-    title: '文件目录',
-    position: { referencePanel: 'workspace', direction: 'right' },
-  })
-  apiRef.addPanel({
-    id: 'editor',
-    component: 'editor',
-    title: '编辑器',
-    position: { referencePanel: 'explorer', direction: 'right' },
-  })
-  apiRef.addPanel({
-    id: 'agent',
-    component: 'agent',
-    title: 'Agent',
-    position: { referencePanel: 'editor', direction: 'right' },
-  })
-  apiRef.addPanel({
-    id: 'terminal',
-    component: 'terminal',
-    title: '终端',
-    position: { referencePanel: 'editor', direction: 'below' },
-  })
-}
-
-function syncRegions() {
-  const apiRef = dock.value
-  if (!apiRef) return
-  regions.value = {
-    explorer: isRegionVisible(apiRef, 'explorer'),
-    terminal: isRegionVisible(apiRef, 'terminal'),
-    agent: isRegionVisible(apiRef, 'agent'),
-  }
-}
-
-function isRegionVisible(apiRef: DockviewApi, id: string) {
-  const panel = apiRef.getPanel(id)
-  if (!panel) return false
-  return panel.api.group.api.isVisible
+  apiRef.addPanel({ id: 'agent', component: 'agent', title: 'Agent' })
+  store.activity = 'agent'
 }
 
 async function onReady(event: DockviewReadyEvent) {
@@ -123,21 +91,7 @@ async function onReady(event: DockviewReadyEvent) {
     restored = false
   }
   if (!restored) seed(event.api)
-  else if (!event.api.getPanel('workspace')) {
-    const anchor = event.api.getPanel('explorer') ?? event.api.getPanel('editor')
-    if (anchor) {
-      event.api.addPanel({
-        id: 'workspace',
-        component: 'workspace',
-        title: '工作区',
-        position: { referencePanel: anchor.id, direction: 'left' },
-      })
-    }
-  }
-  showHeaders(event.api)
-  syncRegions()
   event.api.onDidLayoutChange(() => {
-    syncRegions()
     const layout = event.api.toJSON()
     api('/api/layout', {
       method: 'PUT',
@@ -147,12 +101,17 @@ async function onReady(event: DockviewReadyEvent) {
 }
 
 const placements: Record<string, { referencePanel: string; direction: 'left' | 'right' | 'below' }> = {
-  workspace: { referencePanel: 'explorer', direction: 'left' },
-  explorer: { referencePanel: 'editor', direction: 'left' },
-  terminal: { referencePanel: 'editor', direction: 'below' },
-  agent: { referencePanel: 'editor', direction: 'right' },
-  chats: { referencePanel: 'explorer', direction: 'below' },
-  git: { referencePanel: 'explorer', direction: 'below' },
+  workspace: { referencePanel: 'agent', direction: 'left' },
+  explorer: { referencePanel: 'agent', direction: 'left' },
+  editor: { referencePanel: 'agent', direction: 'left' },
+  terminal: { referencePanel: 'agent', direction: 'below' },
+  agent: { referencePanel: 'agent', direction: 'right' },
+  chats: { referencePanel: 'agent', direction: 'left' },
+  git: { referencePanel: 'agent', direction: 'left' },
+  skills: { referencePanel: 'agent', direction: 'right' },
+  models: { referencePanel: 'agent', direction: 'right' },
+  settings: { referencePanel: 'agent', direction: 'right' },
+  trajectory: { referencePanel: 'agent', direction: 'right' },
 }
 
 function openPanel(id: string, component: string, title: string) {
@@ -163,7 +122,6 @@ function openPanel(id: string, component: string, title: string) {
     if (!existing.api.group.api.isVisible) existing.api.group.api.setVisible(true)
     existing.api.setActive()
     store.activity = id
-    syncRegions()
     return
   }
   const place = placements[id]
@@ -175,49 +133,62 @@ function openPanel(id: string, component: string, title: string) {
     ...(refId ? { position: { referencePanel: refId, direction: place.direction } } : {}),
   })
   store.activity = id
-  syncRegions()
 }
 
-function openWorkspacePanel() {
-  openPanel('workspace', 'workspace', '工作空间')
+function onToggleTheme() {
+  theme.value = toggleTheme()
 }
 
-function toggleRegion(id: 'explorer' | 'terminal' | 'agent') {
-  const apiRef = dock.value
-  if (!apiRef) return
-  const panel = apiRef.getPanel(id)
-  if (panel) {
-    const group = panel.api.group
-    if (group.panels.length <= 1) {
-      group.api.setVisible(!group.api.isVisible)
-      if (group.api.isVisible) panel.api.setActive()
-    } else if (group.api.isVisible) {
-      panel.api.close()
-    }
-  } else {
-    const meta = items.find((item) => item.id === id)
-    if (meta) openPanel(meta.id, meta.component, meta.title)
+function toggleTrajectory() {
+  trajectoryOpen.value = !trajectoryOpen.value
+}
+
+function popoutTrajectory() {
+  openPanel('trajectory', 'trajectory', '轨迹')
+  trajectoryOpen.value = false
+}
+
+function openTrajectoryDock() {
+  openPanel('trajectory', 'trajectory', '轨迹')
+}
+
+function startSidebarResize(e: PointerEvent) {
+  if (sidebarCollapsed.value) return
+  resizing.value = 'sidebar'
+  const startX = e.clientX
+  const startWidth = sidebarWidth.value
+  const onMove = (ev: PointerEvent) => {
+    sidebarWidth.value = Math.min(420, Math.max(200, startWidth + ev.clientX - startX))
   }
-  syncRegions()
+  const onUp = () => stopResize(onMove, onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
 }
 
-const items = [
-  { id: 'workspace', component: 'workspace', title: '工作空间', label: '工作空间', icon: 'home' },
-  { id: 'explorer', component: 'explorer', title: '文件目录', label: '文件目录', icon: 'folder' },
-  { id: 'git', component: 'git', title: 'Git', label: 'Git', icon: 'git' },
-  { id: 'chats', component: 'chats', title: '会话', label: '会话', icon: 'chat' },
-  { id: 'agent', component: 'agent', title: 'Agent', label: 'Agent', icon: 'atom' },
-  { id: 'terminal', component: 'terminal', title: '终端', label: '终端', icon: 'terminal' },
-  { id: 'skills', component: 'skills', title: 'Skill', label: 'Skill', icon: 'book' },
-  { id: 'models', component: 'models', title: '模型', label: '模型', icon: 'chip' },
-  { id: 'settings', component: 'settings', title: '设置', label: '设置', icon: 'settings' },
-]
+function startTrajectoryResize(e: PointerEvent) {
+  resizing.value = 'trajectory'
+  const startX = e.clientX
+  const startWidth = trajectoryWidth.value
+  const onMove = (ev: PointerEvent) => {
+    const delta = startX - ev.clientX
+    trajectoryWidth.value = Math.min(560, Math.max(280, startWidth + delta))
+  }
+  const onUp = () => stopResize(onMove, onUp)
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+  ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+}
 
-const regionToggles = [
-  { id: 'explorer' as const, title: '折叠文件区', icon: 'panel-left' },
-  { id: 'terminal' as const, title: '折叠终端区', icon: 'panel-bottom' },
-  { id: 'agent' as const, title: '折叠对话区', icon: 'panel-right' },
-]
+function stopResize(onMove?: (ev: PointerEvent) => void, onUp?: () => void) {
+  resizing.value = null
+  if (onMove) window.removeEventListener('pointermove', onMove)
+  if (onUp) window.removeEventListener('pointerup', onUp)
+}
+
+const sidebarStyle = computed(() =>
+  sidebarCollapsed.value ? { width: 'var(--sidebar-rail-w)' } : { width: `${sidebarWidth.value}px` },
+)
 
 const dockThemeClass = computed(() =>
   theme.value === 'dark' ? 'dockview-theme-dark' : 'dockview-theme-light',
@@ -225,58 +196,46 @@ const dockThemeClass = computed(() =>
 </script>
 
 <template>
-  <div class="workbench">
-    <header class="layout-header">
-      <div class="layout-header-left">
-        <div class="layout-brand">
-          <span class="brand-mark">CA</span>
-          <span>Code Agent</span>
-        </div>
-        <nav class="top-nav">
-          <button
-            v-for="item in items"
-            :key="item.id"
-            type="button"
-            class="top-nav-link"
-            :class="{ active: store.activity === item.id }"
-            :title="item.label"
-            @click="openPanel(item.id, item.component, item.title)"
-          >
-            <AppIcon :name="item.icon" :size="14" />
-            <span>{{ item.label }}</span>
-          </button>
-        </nav>
-      </div>
-      <div class="layout-actions">
-        <button
-          v-for="item in regionToggles"
-          :key="item.id"
-          type="button"
-          class="icon-btn"
-          :class="{ active: regions[item.id] }"
-          :title="item.title"
-          @click="toggleRegion(item.id)"
-        >
-          <AppIcon :name="item.icon" :size="14" />
-        </button>
-        <span class="header-divider" />
-        <button type="button" class="icon-btn" title="切换主题" @click="theme = toggleTheme()">
-          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="14" />
-        </button>
-        <span class="ws-name" :title="store.workspace?.root_path">{{ store.workspace?.name }}</span>
-        <button type="button" class="btn" @click="openWorkspacePanel">
-          <AppIcon name="folder" :size="13" />
-          打开工作空间
-        </button>
-      </div>
-    </header>
+  <div class="workbench" :class="{ resizing: !!resizing }">
     <div class="workbench-body">
-      <div class="dock">
-        <DockviewVue
-          :class="[dockThemeClass, 'dockview-theme-codeagent']"
-          :components="components"
-          :default-tab-component="PanelTab"
-          @ready="onReady"
+      <SessionSidebar
+        :style="sidebarStyle"
+        :collapsed="sidebarCollapsed"
+        :theme="theme"
+        :trajectory-open="trajectoryOpen"
+        @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        @open-panel="openPanel"
+        @toggle-theme="onToggleTheme"
+        @toggle-trajectory="toggleTrajectory"
+        @open-trajectory-dock="openTrajectoryDock"
+      />
+      <div
+        v-if="!sidebarCollapsed"
+        class="sidebar-resizer"
+        title="拖拽调整侧栏宽度"
+        @pointerdown="startSidebarResize"
+      />
+      <div class="workbench-main">
+        <div class="dock">
+          <DockviewVue
+            :class="[dockThemeClass, 'dockview-theme-codeagent']"
+            :components="components"
+            :default-tab-component="PanelTab"
+            @ready="onReady"
+          />
+        </div>
+        <div
+          v-if="trajectoryOpen"
+          class="details-resizer"
+          title="拖拽调整轨迹面板宽度"
+          @pointerdown="startTrajectoryResize"
+        />
+        <TrajectoryPanel
+          v-if="trajectoryOpen"
+          mode="sidebar"
+          :style="{ width: `${trajectoryWidth}px`, flexShrink: 0 }"
+          @close="trajectoryOpen = false"
+          @popout="popoutTrajectory"
         />
       </div>
     </div>
@@ -306,6 +265,12 @@ const dockThemeClass = computed(() =>
   min-height: 0;
   display: flex;
 }
+.workbench-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
 .dock {
   flex: 1;
   min-width: 0;
@@ -315,12 +280,39 @@ const dockThemeClass = computed(() =>
 .dock :deep(.dv-dockview) {
   height: 100%;
 }
-.ws-name {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text-secondary);
-  font-size: 12px;
+.dock :deep(.dv-tabs-and-actions-container) {
+  min-height: 34px;
+  padding-top: 2px;
+}
+.sidebar-resizer,
+.details-resizer {
+  width: 5px;
+  flex-shrink: 0;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+}
+.sidebar-resizer::after,
+.details-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 1px;
+  background: var(--border);
+  transition: background 0.15s ease, width 0.15s ease, left 0.15s ease;
+}
+.sidebar-resizer:hover::after,
+.details-resizer:hover::after,
+.workbench.resizing .sidebar-resizer::after,
+.workbench.resizing .details-resizer::after {
+  left: 1px;
+  width: 3px;
+  background: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+.workbench.resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 </style>

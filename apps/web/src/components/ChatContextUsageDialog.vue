@@ -2,11 +2,13 @@
 import { computed, ref, watch } from 'vue'
 import { fetchContextUsage } from '@/services/contextUsageService'
 import type { ContextUsageCategoryItem, ContextUsageData, PendingFilePayload } from '@/types/contextUsage'
+import type { ThinkingLevel } from '@/types/thinking'
 
 const props = defineProps<{
   open: boolean
   conversationId: string | null
   userContent: string
+  thinkingLevel: ThinkingLevel
   thinking: boolean
   mode: string
   files: PendingFilePayload[]
@@ -101,6 +103,7 @@ async function loadUsage() {
     usage.value = await fetchContextUsage({
       conversationId: props.conversationId,
       userContent: props.userContent.trim(),
+      thinkingLevel: props.thinkingLevel,
       thinking: props.thinking,
       mode: props.mode,
       files: props.files,

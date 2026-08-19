@@ -13,15 +13,17 @@ const props = defineProps<{
 }>()
 
 const meta: Record<string, { icon: string; label: string }> = {
-  explorer: { icon: 'folder', label: '文件目录' },
+  workspace: { icon: 'home', label: '工作空间' },
+  explorer: { icon: 'folder', label: '文件' },
   editor: { icon: 'file', label: '编辑器' },
-  agent: { icon: 'atom', label: 'Agent' },
+  agent: { icon: 'sparkles', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },
   chats: { icon: 'chat', label: '会话' },
   git: { icon: 'git', label: 'Git' },
   skills: { icon: 'book', label: 'Skill' },
   models: { icon: 'chip', label: '模型' },
-  settings: { icon: 'settings', label: '设置' },
+  settings: { icon: 'sliders', label: '设置' },
+  trajectory: { icon: 'clock', label: '轨迹' },
 }
 
 const panelApi = computed(() => props.api || props.params?.api || props.params?.params?.api)
@@ -41,7 +43,7 @@ function close(e: MouseEvent) {
 
 <template>
   <div class="ptab" :title="info.label">
-    <AppIcon :name="info.icon" :size="13" />
+    <AppIcon :name="info.icon" :size="14" />
     <span class="lbl">{{ info.label }}</span>
     <button type="button" class="x" title="关闭" @mousedown.stop.prevent @click="close">×</button>
   </div>
@@ -57,9 +59,9 @@ function close(e: MouseEvent) {
   color: inherit;
 }
 .lbl {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  max-width: 88px;
+  max-width: 72px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

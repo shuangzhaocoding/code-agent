@@ -1,6 +1,7 @@
 import { onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { fetchContextUsage } from '@/services/contextUsageService'
 import type { ContextUsageLevel, PendingFilePayload } from '@/types/contextUsage'
+import type { ThinkingLevel } from '@/types/thinking'
 
 export interface ContextUsagePreview {
   usagePercent: number
@@ -12,7 +13,7 @@ export interface ContextUsagePreview {
 interface UseContextUsagePreviewOptions {
   conversationId: Ref<string | null>
   userContent: Ref<string>
-  thinking: Ref<boolean>
+  thinkingLevel: Ref<ThinkingLevel>
   mode: Ref<string>
   files: Ref<PendingFilePayload[]>
   enabled?: Ref<boolean>
@@ -41,7 +42,8 @@ export function useContextUsagePreview(options: UseContextUsagePreviewOptions) {
       const data = await fetchContextUsage({
         conversationId: options.conversationId.value,
         userContent: options.userContent.value.trim(),
-        thinking: options.thinking.value,
+        thinkingLevel: options.thinkingLevel.value,
+        thinking: options.thinkingLevel.value !== 'off',
         mode: options.mode.value,
         files: options.files.value,
         signal: abortController.signal,
@@ -72,7 +74,7 @@ export function useContextUsagePreview(options: UseContextUsagePreviewOptions) {
     [
       options.conversationId,
       options.userContent,
-      options.thinking,
+      options.thinkingLevel,
       options.mode,
       options.files,
       () => options.enabled?.value,

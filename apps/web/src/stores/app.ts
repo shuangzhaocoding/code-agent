@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { api, subscribeRun, type StreamEnvelope } from '@/api/http'
 import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
+import type { ThinkingLevel } from '@/types/thinking'
+import { loadThinkingLevel } from '@/types/thinking'
 
 export type Workspace = { id: string; name: string; root_path: string }
 export type Conversation = {
@@ -34,8 +36,12 @@ export const useAppStore = defineStore('app', () => {
   const applied = ref<Set<string>>(new Set())
   const mode = ref<'ask' | 'agent' | 'plan'>('agent')
   const modelId = ref<string | null>(null)
-  const thinking = ref(localStorage.getItem('ca.thinking') === '1')
-  watch(thinking, (on) => localStorage.setItem('ca.thinking', on ? '1' : '0'))
+  const thinkingLevel = ref<ThinkingLevel>(loadThinkingLevel())
+  watch(thinkingLevel, (level) => {
+    localStorage.setItem('ca.thinking_level', level)
+    localStorage.setItem('ca.thinking', level === 'off' ? '0' : '1')
+  })
+  const thinking = computed(() => thinkingLevel.value !== 'off')
   const fileTree = ref<FsItem[]>([])
   const childrenMap = ref<Record<string, FsItem[]>>({})
   const expanded = ref<Set<string>>(new Set())
@@ -57,7 +63,7 @@ export const useAppStore = defineStore('app', () => {
   const providers = ref<any[]>([])
   const skills = ref<any[]>([])
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
-  const activity = ref('files')
+  const activity = ref('agent')
   const gitChangedPaths = ref<Record<string, string>>({})
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
@@ -344,7 +350,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function openAgentFile(path: string) {
     if (!path) return
-    activity.value = 'files'
+    activity.value = 'explorer'
     await revealInTree(path)
     await openPath(path, false)
   }
@@ -545,6 +551,36 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function deleteConversation(id: string) {
+    const target = conversations.value.find((c) => c.id === id)
+    const ok = await askConfirm({
+      title: '删除会话',
+      summary: target ? `确定删除「${target.title}」？此操作不可恢复。` : '确定删除该会话？此操作不可恢复。',
+      confirmLabel: '删除',
+      cancelLabel: '取消',
+      danger: true,
+    })
+    if (!ok) return
+
+    await api(`/api/conversations/${id}`, { method: 'DELETE' })
+    conversations.value = conversations.value.filter((c) => c.id !== id)
+
+    if (conversationId.value !== id) return
+
+    stopStream?.()
+    activeRunId.value = null
+    runStatus.value = 'idle'
+    lastEventId.value = null
+    messages.value = []
+    conversationId.value = null
+
+    if (conversations.value[0]) {
+      await openConversation(conversations.value[0].id)
+      return
+    }
+    await newChat()
+  }
+
   function eventPath(event: StreamEnvelope): string | null {
     const payload = event.payload || {}
     const meta = (payload.meta || {}) as Record<string, unknown>
@@ -683,6 +719,7 @@ export const useAppStore = defineStore('app', () => {
         text,
         mode: mode.value,
         model_id: modelId.value,
+        thinking_level: thinkingLevel.value,
         thinking: thinking.value,
         references,
         files,
@@ -749,6 +786,7 @@ export const useAppStore = defineStore('app', () => {
     runStatus,
     mode,
     modelId,
+    thinkingLevel,
     thinking,
     fileTree,
     childrenMap,
@@ -803,6 +841,7 @@ export const useAppStore = defineStore('app', () => {
     loadConversations,
     newChat,
     openConversation,
+    deleteConversation,
     send,
     stop,
     loadProviders,

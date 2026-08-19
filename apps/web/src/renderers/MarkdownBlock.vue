@@ -24,6 +24,12 @@ const html = computed(() =>
 .md {
   color: var(--text-h);
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.65;
+}
+.md :deep(.markdown-body p:first-child) {
+  margin-top: 0;
+}
+.md :deep(.markdown-body p:last-child) {
+  margin-bottom: 0;
 }
 </style>

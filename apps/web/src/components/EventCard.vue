@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 
 const props = withDefaults(
@@ -16,7 +16,22 @@ const props = withDefaults(
 )
 
 const emit = defineEmits<{ activate: [] }>()
-const open = ref(props.defaultOpen)
+const open = ref(props.defaultOpen || props.status === 'streaming')
+
+watch(
+  () => props.status,
+  (status, prev) => {
+    if (status === 'streaming') {
+      open.value = true
+      return
+    }
+    if (prev === 'streaming' && status !== 'error') {
+      open.value = false
+    }
+  },
+)
+
+const collapsed = computed(() => !open.value)
 
 function toggle() {
   open.value = !open.value
@@ -36,11 +51,11 @@ function onChevron(e: Event) {
 </script>
 
 <template>
-  <div class="card" :class="[tone, status, { open }]">
+  <div class="card" :class="[tone, status, { open, collapsed }]">
     <div class="row">
       <div class="head" :class="{ activatable }" @click="onHeadClick">
         <span class="glyph" aria-hidden="true">
-          <AppIcon :name="icon" :size="14" />
+          <AppIcon :name="icon" :size="13" />
         </span>
         <span class="titles">
           <span class="title" :class="{ running: status === 'streaming' }">{{ title }}</span>
@@ -48,7 +63,7 @@ function onChevron(e: Event) {
         </span>
         <span v-if="status === 'error'" class="pill error">失败</span>
         <button type="button" class="chev-btn" @click="onChevron">
-          <AppIcon class="chev" name="chevron" :size="14" />
+          <AppIcon class="chev" name="chevron" :size="13" />
         </button>
       </div>
       <div v-show="open" class="body">
@@ -63,14 +78,21 @@ function onChevron(e: Event) {
 
 <style scoped>
 .card {
-  margin: 2px 0;
+  margin: 3px 0;
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   background: var(--panel-bg);
   overflow: clip;
   overflow-anchor: none;
   contain: layout style;
-  box-shadow: var(--shadow);
+}
+.card.collapsed {
+  background: transparent;
+  border-color: transparent;
+}
+.card.collapsed:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--code-bg) 50%, transparent);
 }
 .row {
   display: flex;
@@ -81,42 +103,50 @@ function onChevron(e: Event) {
 .head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 42px;
-  padding: 8px 12px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 8px;
   border: 0;
-  background: color-mix(in srgb, var(--bg-muted) 55%, var(--bg-elevated));
+  background: transparent;
   color: var(--text);
   cursor: pointer;
   text-align: left;
   min-width: 0;
   width: 100%;
 }
+.card.open .head {
+  background: color-mix(in srgb, var(--code-bg) 60%, var(--panel-bg));
+  border-bottom: var(--border-width) solid var(--border);
+}
 .card.error { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); }
-.head:hover { background: var(--bg-muted); }
+.head:hover { background: var(--code-bg); }
 .head.activatable .titles { cursor: pointer; }
 .head.activatable .sub { color: var(--primary); }
 .glyph {
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 8px;
-  background: var(--bg-muted);
+  border-radius: 6px;
+  background: var(--code-bg);
   color: var(--text-secondary);
 }
 .think .glyph {
-  color: #7c3aed;
-  background: color-mix(in srgb, #8b5cf6 16%, var(--bg-elevated));
+  color: var(--traj-think);
+  background: var(--traj-think-soft);
 }
 .danger .glyph {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 16%, var(--bg-elevated));
+  background: color-mix(in srgb, var(--danger) 14%, var(--code-bg));
 }
 .tool .glyph {
-  color: var(--primary);
-  background: var(--primary-soft);
+  color: var(--traj-tool);
+  background: var(--traj-tool-soft);
+}
+.default .glyph {
+  color: var(--traj-context);
+  background: var(--traj-context-soft);
 }
 .titles {
   min-width: 0;
@@ -125,14 +155,14 @@ function onChevron(e: Event) {
   flex-direction: row;
   align-items: baseline;
   gap: 8px;
-  min-height: 20px;
+  min-height: 18px;
 }
 .title {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.01em;
   white-space: nowrap;
+  color: var(--text-h);
 }
 .title.running {
   animation: title-pulse 1.2s ease-in-out infinite;
@@ -140,7 +170,7 @@ function onChevron(e: Event) {
 .sub {
   min-width: 0;
   flex: 1;
-  font-size: 11.5px;
+  font-size: 11px;
   color: var(--text-muted);
   font-family: var(--mono);
   overflow: hidden;
@@ -149,9 +179,9 @@ function onChevron(e: Event) {
 }
 .pill {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 999px;
   background: var(--code-bg);
 }
@@ -163,28 +193,28 @@ function onChevron(e: Event) {
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
   padding: 0;
 }
-.chev-btn:hover { background: var(--bg-elevated); color: var(--text); }
+.chev-btn:hover { background: var(--code-bg); color: var(--text); }
 .chev { transition: transform 0.16s ease; transform: rotate(-90deg); }
 .open .chev { transform: rotate(0deg); }
 .body {
   flex: 1;
   min-width: 0;
-  padding: 10px 12px 12px;
-  background: var(--bg);
+  padding: 8px 10px 10px;
+  background: var(--panel-bg);
 }
 .foot {
   border-top: var(--border-width) solid var(--border);
-  padding: 8px 12px 10px;
-  background: var(--bg);
+  padding: 8px 10px;
+  background: var(--panel-bg);
 }
 @keyframes title-pulse {
   0%, 100% { opacity: 1; }

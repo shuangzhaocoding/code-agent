@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from code_agent.config import settings
 from code_agent.db.models import Conversation, Message, Run, Setting, Workspace
 from code_agent.llm.hub import resolve_chat_model
+from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled, thinking_prompt
 from code_agent.plugins.base import registry
 from code_agent.protocol.events import new_id
 from code_agent.skills.registry import list_skill_catalog
@@ -20,7 +21,7 @@ _tasks: set[asyncio.Task] = set()
 _cancel: dict[str, asyncio.Event] = {}
 
 
-def _system_prompt(workspace: Workspace, mode: str, thinking: bool = False) -> str:
+def _system_prompt(workspace: Workspace, mode: str, thinking_level: str = "off") -> str:
     skills = list_skill_catalog(workspace.root_path)
     skill_lines = "\n".join(
         f"- {s['name']}: {s['description']}" for s in skills if not s.get("invalid_reason")
@@ -41,7 +42,7 @@ Rules:
 - Paths are relative to the workspace root. Never escape it.
 - Be concise. Show your work via tools rather than dumping huge code in chat.
 - After edits, mention which files changed.
-{'- Deep thinking is ON. Reason carefully before acting; keep the analysis brief.' if thinking else ''}
+{thinking_prompt(thinking_level)}
 
 Available skills:
 {skill_lines}
@@ -73,9 +74,10 @@ async def start_run(
     mode: str,
     model_id: str | None,
     references: list | None,
-    thinking: bool = False,
+    thinking_level: str = "off",
     files: list | None = None,
 ) -> Run:
+    level = normalize_thinking_level(thinking_level)
     conv = await Conversation.get(id=conversation_id)
     last = await Message.filter(conversation_id=conversation_id).order_by("-sort_key").first()
     sort_key = (last.sort_key + 1) if last else 1
@@ -104,7 +106,7 @@ async def start_run(
         conversation_id=conversation_id,
         status="queued",
         mode=mode,
-        model_snapshot={"model_id": model_id, "thinking": thinking},
+        model_snapshot={"model_id": model_id, "thinking_level": level, "thinking": thinking_enabled(level)},
     )
     conv.active_run_id = str(run.id)
     conv.mode = mode
@@ -143,8 +145,10 @@ async def _execute(run_id: str) -> None:
         run.status = "running"
         await run.save(update_fields=["status"])
         await broker.publish(run_id, "run.started", {"mode": run.mode})
-        thinking = bool((run.model_snapshot or {}).get("thinking"))
-        model, model_row = await resolve_chat_model(conv.model_id, thinking)
+        thinking_level = normalize_thinking_level((run.model_snapshot or {}).get("thinking_level"))
+        if not (run.model_snapshot or {}).get("thinking_level") and (run.model_snapshot or {}).get("thinking"):
+            thinking_level = "medium"
+        model, model_row = await resolve_chat_model(conv.model_id, thinking_level)
         if model is None:
             await _fail(run_id, "model.missing", "没有可用的 LLM。请先在 Models 面板添加 Provider。")
             return
@@ -156,7 +160,7 @@ async def _execute(run_id: str) -> None:
         tools = registry.enabled_tools(run.mode)
         from langgraph.prebuilt import create_react_agent
 
-        graph = create_react_agent(model, tools, prompt=_system_prompt(workspace, run.mode, thinking))
+        graph = create_react_agent(model, tools, prompt=_system_prompt(workspace, run.mode, thinking_level))
         history = await Message.filter(conversation_id=conv.id).order_by("sort_key")
         lc_messages = _history_messages(list(history))
 
@@ -168,7 +172,7 @@ async def _execute(run_id: str) -> None:
             except (TypeError, ValueError):
                 pass
         await asyncio.wait_for(
-            _stream_graph(run_id, graph, lc_messages, thinking, recursion_limit),
+            _stream_graph(run_id, graph, lc_messages, thinking_level, recursion_limit),
             timeout=timeout,
         )
         if _cancel[run_id].is_set():
@@ -265,10 +269,10 @@ async def _stream_graph(
     run_id: str,
     graph,
     messages: list,
-    thinking: bool = False,
+    thinking_level: str = "off",
     recursion_limit: int = 80,
 ) -> None:
-    del thinking
+    emit_thinking = thinking_enabled(thinking_level)
     cancel = _cancel[run_id]
     md_block: str | None = None
     think_block: str | None = None
@@ -300,7 +304,7 @@ async def _stream_graph(
                             text += part.get("text") or ""
                     elif isinstance(part, str):
                         text += part
-            if thought:
+            if thought and emit_thinking:
                 got_thought = True
                 think_block = await _emit_thinking(run_id, think_block, thought)
             if text:
@@ -315,7 +319,7 @@ async def _stream_graph(
         elif kind == "on_chat_model_end":
             output = data.get("output")
             leftover = _thinking_from_chunk(output)
-            if leftover and not got_thought:
+            if leftover and emit_thinking and not got_thought:
                 think_block = await _emit_thinking(run_id, think_block, leftover)
             got_thought = False
             if md_block:

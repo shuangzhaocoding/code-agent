@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from code_agent.context_usage import compute_context_usage
-from code_agent.db.models import Conversation, Message, Run, Workspace
+from code_agent.db.models import Conversation, Message, Run, RunEvent, Workspace
 from code_agent.streaming.run_manager import start_run
 
 router = APIRouter(prefix="/api", tags=["conversations"])
@@ -22,6 +22,7 @@ class MessageIn(BaseModel):
     mode: str = "agent"
     model_id: str | None = None
     thinking: bool = False
+    thinking_level: str | None = None
     references: list[dict] = Field(default_factory=list)
     files: list[dict] = Field(default_factory=list)
 
@@ -29,8 +30,17 @@ class MessageIn(BaseModel):
 class ContextUsageIn(BaseModel):
     user_content: str = ""
     thinking: bool = False
+    thinking_level: str | None = None
     mode: str = "agent"
     files: list[dict] = Field(default_factory=list)
+
+
+def _resolve_thinking_level(thinking: bool, thinking_level: str | None) -> str:
+    from code_agent.llm.thinking import normalize_thinking_level
+
+    if thinking_level:
+        return normalize_thinking_level(thinking_level)
+    return normalize_thinking_level(thinking)
 
 
 @router.get("/workspaces/{workspace_id}/conversations")
@@ -92,6 +102,12 @@ async def delete_conversation(conversation_id: str):
     row = await Conversation.get_or_none(id=conversation_id)
     if not row:
         raise HTTPException(status_code=404, detail={"code": "conversation.not_found"})
+    runs = await Run.filter(conversation_id=conversation_id)
+    run_ids = [r.id for r in runs]
+    if run_ids:
+        await RunEvent.filter(run_id__in=run_ids).delete()
+    await Run.filter(conversation_id=conversation_id).delete()
+    await Message.filter(conversation_id=conversation_id).delete()
     await row.delete()
     return {"ok": True}
 
@@ -104,7 +120,7 @@ async def estimate_context_usage(conversation_id: str, body: ContextUsageIn):
     data = await compute_context_usage(
         conversation_id=conversation_id,
         user_content=body.user_content,
-        thinking=body.thinking,
+        thinking_level=_resolve_thinking_level(body.thinking, body.thinking_level),
         mode=body.mode or row.mode,
         files=body.files,
     )
@@ -126,7 +142,7 @@ async def send_message(conversation_id: str, body: MessageIn):
         body.mode,
         body.model_id or row.model_id,
         body.references,
-        body.thinking,
+        _resolve_thinking_level(body.thinking, body.thinking_level),
         body.files,
     )
     return {"run_id": str(run.id), "conversation_id": conversation_id}

@@ -107,8 +107,8 @@ function openFile(path: string) {
 </script>
 
 <template>
-  <div class="panel-shell git">
-    <header class="panel-head">
+  <div class="panel-shell git panel-chromeless">
+    <div class="git-bar">
       <span class="branch">
         <AppIcon name="git" :size="14" />
         {{ status?.branch || 'Git' }}
@@ -116,10 +116,10 @@ function openFile(path: string) {
       <span v-if="status?.ahead" class="pill">↑{{ status.ahead }}</span>
       <span v-if="status?.behind" class="pill">↓{{ status.behind }}</span>
       <span class="spacer" />
-      <button type="button" class="icon-btn" title="刷新" @click="refresh">
+      <button type="button" class="icon-btn icon-btn-ghost" title="刷新" @click="refresh">
         <AppIcon name="refresh" :size="14" />
       </button>
-    </header>
+    </div>
     <p v-if="error" class="err">{{ error }}</p>
     <div class="files">
       <button
@@ -150,6 +150,17 @@ function openFile(path: string) {
 
 <style scoped>
 .git { overflow: hidden; }
+.git-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-bottom: var(--border-width) solid var(--border);
+  background: var(--panel-bg);
+  flex-shrink: 0;
+}
+.git-bar .spacer { margin-left: auto; }
 .branch {
   display: inline-flex;
   align-items: center;

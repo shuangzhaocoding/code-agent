@@ -94,7 +94,7 @@ export function parseContextUsageData(data: unknown): ContextUsageData | null {
 }
 
 export async function fetchContextUsage(params: ContextUsageRequestParams): Promise<ContextUsageData> {
-  const { conversationId, userContent, thinking, mode, files, signal } = params
+  const { conversationId, userContent, thinking, thinkingLevel, mode, files, signal } = params
   if (!conversationId) throw new Error('请先开始会话')
 
   const response = await fetch(`/api/conversations/${conversationId}/context-usage`, {
@@ -102,7 +102,8 @@ export async function fetchContextUsage(params: ContextUsageRequestParams): Prom
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       user_content: userContent,
-      thinking,
+      thinking: thinking ?? (thinkingLevel ? thinkingLevel !== 'off' : false),
+      thinking_level: thinkingLevel,
       mode,
       files: files ?? [],
     }),

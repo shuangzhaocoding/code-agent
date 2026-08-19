@@ -124,6 +124,7 @@ async def delete_provider(provider_id: str):
     row = await LlmProvider.get_or_none(id=provider_id)
     if not row:
         raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    await LlmModel.filter(provider_id=provider_id).delete()
     await row.delete()
     return {"ok": True}
 

@@ -1,3 +1,5 @@
+import type { ThinkingLevel } from '@/types/thinking'
+
 export type ContextUsageLevel = 'normal' | 'warning' | 'danger' | 'critical' | string
 
 export interface ContextUsageCategoryItem {
@@ -45,7 +47,8 @@ export interface PendingFilePayload {
 export interface ContextUsageRequestParams {
   conversationId?: string | null
   userContent: string
-  thinking: boolean
+  thinking?: boolean
+  thinkingLevel?: ThinkingLevel
   mode?: string
   files?: PendingFilePayload[]
   signal?: AbortSignal
