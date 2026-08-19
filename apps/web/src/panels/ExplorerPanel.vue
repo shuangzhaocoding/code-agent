@@ -9,6 +9,7 @@ const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
 const prompt = ref<{ kind: 'file' | 'dir' | 'rename'; dir: string; from?: string; value: string } | null>(null)
 const promptEl = ref<HTMLInputElement | null>(null)
 const error = ref('')
+const renamingPath = ref<string | null>(null)
 
 function closeMenu() {
   menu.value = null
@@ -38,9 +39,25 @@ function startRename() {
   const item = menu.value?.item
   if (!item) return
   closeMenu()
-  prompt.value = { kind: 'rename', dir: store.parentPath(item.path), from: item.path, value: item.name }
-  error.value = ''
-  nextTick(() => promptEl.value?.select())
+  renamingPath.value = item.path
+}
+
+async function commitInlineRename(from: string, newName: string) {
+  const msg = validName(newName)
+  if (msg) { error.value = msg; renamingPath.value = null; return }
+  const dir = store.parentPath(from)
+  const rel = store.joinPath(dir, newName)
+  try {
+    await store.renameEntry(from, rel)
+    error.value = ''
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+  renamingPath.value = null
+}
+
+function cancelInlineRename() {
+  renamingPath.value = null
 }
 
 function validName(name: string) {
@@ -124,7 +141,11 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
         :key="item.path"
         :item="item"
         :depth="0"
+        :renaming-path="renamingPath"
         @context="onContext"
+        @start-rename="(p) => renamingPath = p"
+        @commit-rename="commitInlineRename"
+        @cancel-rename="cancelInlineRename"
       />
     </div>
     <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>

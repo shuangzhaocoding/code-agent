@@ -55,6 +55,7 @@ class EventBroker:
         et = envelope["type"]
         payload = envelope["payload"]
         if et == "block.started":
+            from datetime import datetime, timezone
             msg = await self._assistant_message(run)
             blocks = list(msg.blocks or [])
             blocks.append(
@@ -64,6 +65,7 @@ class EventBroker:
                     "text": "",
                     "meta": payload.get("meta") or {},
                     "status": "streaming",
+                    "started_at": datetime.now(timezone.utc).isoformat(),
                 }
             )
             msg.blocks = blocks
@@ -82,6 +84,7 @@ class EventBroker:
             msg.blocks = blocks
             await msg.save(update_fields=["blocks"])
         elif et == "block.completed":
+            from datetime import datetime, timezone
             msg = await Message.filter(run_id=str(run.id), role="assistant").order_by("-sort_key").first()
             if not msg:
                 return
@@ -91,6 +94,7 @@ class EventBroker:
                     if payload.get("meta"):
                         block["meta"] = {**(block.get("meta") or {}), **payload["meta"]}
                     block["status"] = payload.get("status") or "ok"
+                    block["ended_at"] = datetime.now(timezone.utc).isoformat()
                     break
             msg.blocks = blocks
             await msg.save(update_fields=["blocks"])

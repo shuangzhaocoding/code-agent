@@ -9,11 +9,17 @@ const bodyEl = ref<HTMLElement | null>(null)
 const elapsed = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
+function toMs(v: number | string | undefined): number {
+  if (!v) return 0
+  if (typeof v === 'number') return v
+  return new Date(v).getTime()
+}
+
 function updateElapsed() {
-  if (props.block.started_at) {
-    const end = props.block.ended_at || Date.now()
-    elapsed.value = Math.round((end - props.block.started_at) / 100) / 10
-  }
+  const start = toMs(props.block.started_at)
+  if (!start) return
+  const end = toMs(props.block.ended_at) || Date.now()
+  elapsed.value = Math.round((end - start) / 100) / 10
 }
 
 onMounted(() => {
@@ -42,7 +48,7 @@ watch(
 )
 
 const timeLabel = computed(() => {
-  if (!props.block.started_at) return ''
+  if (!toMs(props.block.started_at)) return ''
   return `${elapsed.value.toFixed(1)}s`
 })
 

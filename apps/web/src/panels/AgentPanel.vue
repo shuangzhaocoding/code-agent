@@ -25,6 +25,21 @@ const editingText = ref('')
 const copyToast = ref(false)
 let copyToastTimer: ReturnType<typeof setTimeout> | null = null
 
+const expandedMsgs = ref(new Set<string>())
+const MSG_COLLAPSE_LEN = 300
+
+function isLongMsg(msg: (typeof store.messages)[0]): boolean {
+  const text = msg.blocks.map((b) => b.text || '').join('')
+  return text.length > MSG_COLLAPSE_LEN || text.split('\n').length > 8
+}
+
+function toggleExpand(id: string) {
+  const s = new Set(expandedMsgs.value)
+  if (s.has(id)) s.delete(id)
+  else s.add(id)
+  expandedMsgs.value = s
+}
+
 function msgPlainText(msg: (typeof store.messages)[0]): string {
   return msg.blocks
     .filter((b) => b.type === 'user.text' || b.type === 'assistant.markdown')
@@ -304,11 +319,17 @@ function openContextUsageDialog() {
           描述你想改的代码。可用 Skill、自备模型，刷新后生成会继续。
         </div>
         <article v-for="msg in store.messages" :key="msg.id" :class="['msg-wrap', msg.role]">
-          <div v-if="msg.role === 'user'" class="msg-bubble">
+          <div v-if="msg.role === 'user'" class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
             <section v-for="block in msg.blocks" :key="block.id" class="block">
               <component :is="rendererFor(block.type)" :block="block as Block" />
             </section>
           </div>
+          <button
+            v-if="msg.role === 'user' && isLongMsg(msg)"
+            type="button"
+            class="msg-expand-btn"
+            @click="toggleExpand(msg.id)"
+          >{{ expandedMsgs.has(msg.id) ? '收起' : '展开全部' }}</button>
           <template v-else>
             <section v-for="block in msg.blocks" :key="block.id" class="block">
               <component :is="rendererFor(block.type)" :block="block as Block" />
@@ -463,6 +484,33 @@ article.msg-wrap.user {
 .msg-bubble :deep(.markdown-body p) {
   margin: 0;
 }
+.msg-bubble.collapsed {
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+}
+.msg-bubble.collapsed::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: linear-gradient(transparent, var(--primary-soft));
+  pointer-events: none;
+}
+.msg-expand-btn {
+  display: block;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+.msg-expand-btn:hover { text-decoration: underline; }
 article.msg-wrap.assistant {
   align-self: stretch;
   width: 100%;

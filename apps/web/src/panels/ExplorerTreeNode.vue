@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { FsItem } from '@/stores/app'
 import { useAppStore } from '@/stores/app'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
@@ -8,13 +8,40 @@ import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 const props = defineProps<{
   item: FsItem
   depth: number
+  renamingPath?: string | null
 }>()
 
 const store = useAppStore()
 const mark = computed(() => store.fileTreeMark(props.item.path, props.item.is_dir))
 const emit = defineEmits<{
   context: [e: MouseEvent, item: FsItem]
+  'start-rename': [path: string]
+  'commit-rename': [from: string, newName: string]
+  'cancel-rename': []
 }>()
+
+const renameVal = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+const isRenaming = computed(() => props.renamingPath === props.item.path)
+
+watch(isRenaming, (v) => {
+  if (v) {
+    renameVal.value = props.item.name
+    nextTick(() => {
+      renameInput.value?.focus()
+      renameInput.value?.select()
+    })
+  }
+})
+
+function commitRename() {
+  const name = renameVal.value.trim()
+  if (name && name !== props.item.name) {
+    emit('commit-rename', props.item.path, name)
+  } else {
+    emit('cancel-rename')
+  }
+}
 </script>
 
 <template>
@@ -34,7 +61,17 @@ const emit = defineEmits<{
         :expanded="store.isExpanded(item.path)"
         :size="16"
       />
-      <span class="label">{{ item.name }}</span>
+      <input
+        v-if="isRenaming"
+        ref="renameInput"
+        v-model="renameVal"
+        class="rename-input"
+        @blur="commitRename"
+        @keydown.enter.prevent="commitRename"
+        @keydown.escape.prevent="emit('cancel-rename')"
+        @click.stop
+      />
+      <span v-else class="label">{{ item.name }}</span>
       <span
         v-if="mark.show"
         class="tree-dot"
@@ -48,7 +85,11 @@ const emit = defineEmits<{
         :key="child.path"
         :item="child"
         :depth="depth + 1"
+        :renaming-path="renamingPath"
         @context="(e, it) => emit('context', e, it)"
+        @start-rename="(p) => emit('start-rename', p)"
+        @commit-rename="(from, name) => emit('commit-rename', from, name)"
+        @cancel-rename="emit('cancel-rename')"
       />
     </template>
   </div>
@@ -88,6 +129,19 @@ const emit = defineEmits<{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  font-size: 13px;
+  padding: 0 4px;
+  border: 1px solid var(--primary);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+  font-family: inherit;
 }
 .tree-dot {
   width: 6px;

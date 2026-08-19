@@ -6,8 +6,8 @@ export type Block = {
   text: string
   meta: Record<string, unknown>
   status: string
-  started_at?: number
-  ended_at?: number
+  started_at?: number | string
+  ended_at?: number | string
 }
 
 export type ChatMessage = {

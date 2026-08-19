@@ -63,7 +63,7 @@ function onChevron(e: Event) {
 
 <style scoped>
 .card {
-  margin: 8px 0;
+  margin: 2px 0;
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
