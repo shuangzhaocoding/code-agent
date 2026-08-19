@@ -67,11 +67,11 @@ function focusAgent() {
 }
 
 function seed(apiRef: DockviewApi) {
-  apiRef.addPanel({ id: 'workspace', component: 'workspace', title: '工作区' })
+  apiRef.addPanel({ id: 'workspace', component: 'workspace', title: '工作空间' })
   apiRef.addPanel({
     id: 'explorer',
     component: 'explorer',
-    title: '文件',
+    title: '文件目录',
     position: { referencePanel: 'workspace', direction: 'right' },
   })
   apiRef.addPanel({
@@ -179,7 +179,7 @@ function openPanel(id: string, component: string, title: string) {
 }
 
 function openWorkspacePanel() {
-  openPanel('workspace', 'workspace', '工作区')
+  openPanel('workspace', 'workspace', '工作空间')
 }
 
 function toggleRegion(id: 'explorer' | 'terminal' | 'agent') {
@@ -202,8 +202,8 @@ function toggleRegion(id: 'explorer' | 'terminal' | 'agent') {
 }
 
 const items = [
-  { id: 'workspace', component: 'workspace', title: '工作区', label: '工作区', icon: 'home' },
-  { id: 'explorer', component: 'explorer', title: '文件', label: '文件', icon: 'folder' },
+  { id: 'workspace', component: 'workspace', title: '工作空间', label: '工作空间', icon: 'home' },
+  { id: 'explorer', component: 'explorer', title: '文件目录', label: '文件目录', icon: 'folder' },
   { id: 'git', component: 'git', title: 'Git', label: 'Git', icon: 'git' },
   { id: 'chats', component: 'chats', title: '会话', label: '会话', icon: 'chat' },
   { id: 'agent', component: 'agent', title: 'Agent', label: 'Agent', icon: 'atom' },
@@ -266,7 +266,7 @@ const dockThemeClass = computed(() =>
         <span class="ws-name" :title="store.workspace?.root_path">{{ store.workspace?.name }}</span>
         <button type="button" class="btn" @click="openWorkspacePanel">
           <AppIcon name="folder" :size="13" />
-          打开工作区
+          打开工作空间
         </button>
       </div>
     </header>

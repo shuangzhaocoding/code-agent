@@ -844,6 +844,16 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   display: none;
 }
 
+/* override built-in dark/light theme separator & sash colors */
+.dockview-theme-codeagent .dv-split-view-container .dv-view:not(:first-child)::before {
+  background-color: var(--border) !important;
+}
+.dockview-theme-codeagent .dv-split-view-container .dv-sash-container .dv-sash:not(.disabled):hover,
+.dockview-theme-codeagent .dv-split-view-container .dv-sash-container .dv-sash:not(.disabled):active {
+  background-color: var(--border-strong) !important;
+  opacity: 1;
+}
+
 .dockview-theme-codeagent {
   --dv-tabs-and-actions-container-height: 36px;
   --dv-font-family: var(--font);
@@ -870,6 +880,10 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   --dv-floating-border: var(--border-width) solid var(--border);
   --dv-floating-box-shadow: var(--shadow-md);
   --dv-scrollbar-background-color: var(--scrollbar-thumb);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--border-strong);
+  --dv-active-sash-transition-delay: 0s;
+  --dv-active-sash-transition-duration: 0.1s;
 }
 
 @media (max-width: 1100px) {

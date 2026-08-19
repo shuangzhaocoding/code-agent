@@ -2,7 +2,7 @@ import { defineAsyncComponent, type Component } from 'vue'
 
 export const renderers: Record<string, Component> = {
   'assistant.markdown': defineAsyncComponent(() => import('./MarkdownBlock.vue')),
-  'user.text': defineAsyncComponent(() => import('./MarkdownBlock.vue')),
+  'user.text': defineAsyncComponent(() => import('./UserTextBlock.vue')),
   'assistant.thinking': defineAsyncComponent(() => import('./ThinkingBlock.vue')),
   'tool.call': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
   'tool.result': defineAsyncComponent(() => import('./ToolCallBlock.vue')),

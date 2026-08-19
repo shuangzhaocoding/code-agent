@@ -45,10 +45,10 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 <template>
   <div class="panel-shell workspace-panel">
     <header class="panel-head">
-      <span class="panel-title">打开工作区</span>
+      <span class="panel-title">打开工作空间</span>
     </header>
     <div class="workspace-body">
-      <p class="lead">选择本地目录，或从最近工作区进入。</p>
+      <p class="lead">选择本地目录，或从最近工作空间进入。</p>
       <div class="search-box compact">
         <AppIcon class="search-box-icon" name="folder" :size="16" />
         <input v-model="path" placeholder="/path/to/project" @keydown.enter="openPath" />

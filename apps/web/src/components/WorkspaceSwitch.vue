@@ -44,10 +44,10 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   <div class="mask" @click.self="emit('close')">
     <div class="page-panel sheet" role="dialog" aria-label="打开工作区">
       <header>
-        <h1 class="page-panel__title">打开工作区</h1>
+        <h1 class="page-panel__title">打开工作空间</h1>
         <button type="button" class="icon-btn" title="关闭" @click="emit('close')">×</button>
       </header>
-      <p class="page-panel__lead">选择本地目录，或从最近工作区进入。</p>
+      <p class="page-panel__lead">选择本地目录，或从最近工作空间进入。</p>
       <div class="search-box">
         <AppIcon class="search-box-icon" name="folder" :size="18" />
         <input v-model="path" placeholder="/path/to/project" @keydown.enter="openPath" />

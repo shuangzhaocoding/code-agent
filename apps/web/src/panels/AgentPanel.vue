@@ -101,6 +101,111 @@ function fmtTime(iso: string | null | undefined): string {
 const timelineInner = ref<HTMLElement | null>(null)
 const sender = ref<{ clear: () => void; setContent: (content: string) => void } | null>(null)
 const draft = ref('')
+
+/* ---- @ file mention ---- */
+const mentionOpen = ref(false)
+const mentionQuery = ref('')
+const mentionDir = ref('')
+const mentionActiveIdx = ref(0)
+// chips: files/dirs selected via @ picker, shown as tags above sender
+const mentionFiles = ref<{ name: string; path: string; is_dir: boolean }[]>([])
+
+const mentionItems = computed(() => {
+  const dir = mentionDir.value
+  const q = mentionQuery.value.toLowerCase()
+  const items = store.childrenOf(dir)
+  return q ? items.filter((i) => i.name.toLowerCase().includes(q)) : items
+})
+
+watch(mentionDir, async (d) => {
+  if (!store.childrenMap[d]) await store.loadTree(d)
+})
+
+function getAtTrigger(text: string): { atPos: number; query: string } | null {
+  const lastAt = text.lastIndexOf('@')
+  if (lastAt < 0) return null
+  const after = text.slice(lastAt + 1)
+  // only consider as trigger if no whitespace after @
+  if (/\s/.test(after)) return null
+  return { atPos: lastAt, query: after }
+}
+
+watch(draft, (text) => {
+  const trigger = getAtTrigger(text)
+  if (trigger) {
+    mentionQuery.value = trigger.query
+    if (!mentionOpen.value) {
+      // opening fresh: reset dir browse state
+      mentionDir.value = ''
+      mentionActiveIdx.value = 0
+    }
+    mentionOpen.value = true
+  } else {
+    mentionOpen.value = false
+  }
+})
+
+function mentionBrowse(item: { name: string; path: string; is_dir: boolean }) {
+  if (item.is_dir) {
+    mentionDir.value = item.path
+    mentionQuery.value = ''
+    mentionActiveIdx.value = 0
+    store.loadTree(item.path)
+  } else {
+    mentionSelect(item)
+  }
+}
+
+function mentionSelect(item: { name: string; path: string; is_dir: boolean }) {
+  // Remove the @query from draft, keep text before @
+  const trigger = getAtTrigger(draft.value)
+  if (trigger !== null) {
+    draft.value = draft.value.slice(0, trigger.atPos)
+  }
+  // Add to chips if not already present
+  if (!mentionFiles.value.find((f) => f.path === item.path)) {
+    mentionFiles.value = [...mentionFiles.value, item]
+  }
+  mentionOpen.value = false
+  nextTick(() => {
+    const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
+    el?.focus()
+  })
+}
+
+function mentionRemove(path: string) {
+  mentionFiles.value = mentionFiles.value.filter((f) => f.path !== path)
+}
+
+function mentionKeydown(e: KeyboardEvent) {
+  if (!mentionOpen.value) return
+  const items = mentionItems.value
+  if (e.key === 'ArrowDown') { e.preventDefault(); mentionActiveIdx.value = (mentionActiveIdx.value + 1) % Math.max(1, items.length) }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); mentionActiveIdx.value = (mentionActiveIdx.value - 1 + Math.max(1, items.length)) % Math.max(1, items.length) }
+  else if (e.key === 'Enter' && items.length) { e.preventDefault(); e.stopPropagation(); mentionBrowse(items[mentionActiveIdx.value]) }
+  else if (e.key === 'Escape') { e.preventDefault(); mentionOpen.value = false }
+}
+
+/* ---- sender resize ---- */
+const senderContentHeight = ref<number | null>(null)
+
+function onResizeHandlePointerDown(e: PointerEvent) {
+  e.preventDefault()
+  const startY = e.clientY
+  const content = document.querySelector('.agent-sender .tr-sender-content') as HTMLElement | null
+  const startH = content?.offsetHeight ?? 60
+  const onMove = (ev: PointerEvent) => {
+    const delta = startY - ev.clientY
+    senderContentHeight.value = Math.max(40, Math.min(440, startH + delta))
+  }
+  const onUp = () => {
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
 const stick = ref(true)
 const contextUsageOpen = ref(false)
 const uploadError = ref('')
@@ -262,12 +367,18 @@ function normalizeSubmitText(text: string) {
 }
 
 function onSubmit(text: string) {
-  const value = normalizeSubmitText(text || '')
+  let value = normalizeSubmitText(text || '')
   if (!value || hasUploadingAttachments()) return
+  // Append @mention file paths to the message
+  if (mentionFiles.value.length) {
+    const paths = mentionFiles.value.map((f) => `@${f.path}`).join(' ')
+    value = value + '\n' + paths
+  }
   stick.value = true
   const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
   const files = getPendingFiles()
   store.send(value, refs, files)
+  mentionFiles.value = []
   clearSender()
   clearAttachments()
   uploadError.value = ''
@@ -319,17 +430,19 @@ function openContextUsageDialog() {
           描述你想改的代码。可用 Skill、自备模型，刷新后生成会继续。
         </div>
         <article v-for="msg in store.messages" :key="msg.id" :class="['msg-wrap', msg.role]">
-          <div v-if="msg.role === 'user'" class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
-            <section v-for="block in msg.blocks" :key="block.id" class="block">
-              <component :is="rendererFor(block.type)" :block="block as Block" />
-            </section>
-          </div>
-          <button
-            v-if="msg.role === 'user' && isLongMsg(msg)"
-            type="button"
-            class="msg-expand-btn"
-            @click="toggleExpand(msg.id)"
-          >{{ expandedMsgs.has(msg.id) ? '收起' : '展开全部' }}</button>
+          <template v-if="msg.role === 'user'">
+            <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
+              <section v-for="block in msg.blocks" :key="block.id" class="block">
+                <component :is="rendererFor(block.type)" :block="block as Block" />
+              </section>
+            </div>
+            <button
+              v-if="isLongMsg(msg)"
+              type="button"
+              class="msg-expand-btn"
+              @click="toggleExpand(msg.id)"
+            >{{ expandedMsgs.has(msg.id) ? '收起' : '展开全部' }}</button>
+          </template>
           <template v-else>
             <section v-for="block in msg.blocks" :key="block.id" class="block">
               <component :is="rendererFor(block.type)" :block="block as Block" />
@@ -356,11 +469,51 @@ function openContextUsageDialog() {
       </div>
     </div>
     <footer class="agent-footer">
-      <div class="agent-sender-wrap">
+      <!-- @ file picker popup -->
+      <Transition name="mention-fade">
+        <div v-if="mentionOpen && mentionItems.length" class="mention-popup">
+          <div v-if="mentionDir" class="mention-dir-back">
+            <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+              返回
+            </button>
+            <span class="mention-dir-label">{{ mentionDir }}</span>
+          </div>
+          <ul class="mention-list">
+            <li
+              v-for="(item, i) in mentionItems"
+              :key="item.path"
+              class="mention-item"
+              :class="{ active: i === mentionActiveIdx }"
+              @mouseenter="mentionActiveIdx = i"
+              @mousedown.prevent="mentionBrowse(item)"
+            >
+              <svg v-if="item.is_dir" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <span class="mention-name">{{ item.name }}</span>
+              <span v-if="item.is_dir" class="mention-arrow">›</span>
+            </li>
+          </ul>
+        </div>
+      </Transition>
+      <!-- @ mention chips -->
+      <div v-if="mentionFiles.length" class="mention-chips">
+        <span v-for="f in mentionFiles" :key="f.path" class="mention-chip">
+          <span class="mention-chip-body" @click="store.openPath(f.path, f.is_dir)">
+            <svg v-if="f.is_dir" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span class="mention-chip-path">@{{ f.path }}</span>
+          </span>
+          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" title="移除">×</button>
+        </span>
+      </div>
+      <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
+      <div class="agent-sender-wrap" @keydown="mentionKeydown">
         <TrSender
           ref="sender"
           v-model="draft"
           class="agent-sender"
+          :style="senderContentHeight ? { '--sender-content-height': senderContentHeight + 'px' } : {}"
           mode="multiple"
           submit-type="enter"
           placeholder="给 Code Agent 下指令…"
@@ -622,9 +775,35 @@ article.msg-wrap.assistant {
   40% { opacity: 1; }
 }
 footer.agent-footer {
+  position: relative;
   border-top: var(--border-width) solid var(--border);
   padding: 10px 12px 12px;
   background: var(--panel-bg);
+}
+
+.sender-resize-handle {
+  width: 100%;
+  height: 6px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2px;
+  border-radius: 3px;
+  transition: background 0.15s;
+}
+.sender-resize-handle::before {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.15s;
+}
+.sender-resize-handle:hover::before,
+.sender-resize-handle:active::before {
+  background: var(--border-strong);
 }
 
 .agent-sender-wrap {
@@ -646,9 +825,25 @@ footer.agent-footer {
   border: var(--border-width) solid var(--border);
   background: var(--code-bg);
   box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.agent-sender :deep(.tr-sender-content) {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: var(--sender-content-height, var(--tr-sender-line-height, 26px));
+  max-height: var(--sender-content-height, none);
+  box-sizing: border-box;
+}
+
+.agent-sender :deep(.tr-sender-editor-scroll) {
+  max-height: var(--sender-content-height, none) !important;
+  overflow-y: auto;
 }
 
 .agent-sender :deep(.tr-sender-footer) {
+  flex: 0 0 auto;
   min-width: 0;
 }
 
@@ -670,7 +865,6 @@ footer.agent-footer {
 }
 
 .agent-sender :deep(.tr-sender-content .ProseMirror) {
-  min-height: var(--tr-sender-line-height, 26px);
   color: var(--text-h);
 }
 
@@ -749,6 +943,127 @@ footer.agent-footer {
 .toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.2s, transform 0.2s; }
 .toast-fade-enter-from { opacity: 0; transform: translateX(-50%) translateY(-6px); }
 .toast-fade-leave-to { opacity: 0; transform: translateX(-50%) translateY(-6px); }
+
+/* @ mention file picker */
+.mention-popup {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 12px;
+  right: 12px;
+  z-index: 200;
+  background: var(--bg-elevated);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+  max-height: 260px;
+  display: flex;
+  flex-direction: column;
+}
+.mention-dir-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: var(--border-width) solid var(--border);
+  background: var(--bg-muted);
+}
+.mention-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.mention-back-btn:hover { background: var(--border); color: var(--text-h); }
+.mention-dir-label {
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  flex: 1;
+}
+.mention-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 13px;
+}
+.mention-item.active { background: var(--primary-soft); color: var(--primary); }
+.mention-item:hover { background: var(--bg-muted); }
+.mention-item.active:hover { background: var(--primary-soft); }
+.mention-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-arrow { flex-shrink: 0; color: var(--text-secondary); font-size: 16px; }
+.mention-fade-enter-active, .mention-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
+.mention-fade-enter-from, .mention-fade-leave-to { opacity: 0; transform: translateY(4px); }
+
+/* @ mention chips */
+.mention-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 4px 2px 6px;
+}
+.mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 7px;
+  border-radius: 5px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 12px;
+  font-family: var(--mono);
+  max-width: 320px;
+  overflow: hidden;
+}
+.mention-chip-body {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.mention-chip-body:hover .mention-chip-path { text-decoration: underline; }
+.mention-chip-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-chip-remove {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.7;
+}
+.mention-chip-remove:hover { opacity: 1; background: var(--border); }
 
 .agent-upload-error {
   margin: 6px 0 0;

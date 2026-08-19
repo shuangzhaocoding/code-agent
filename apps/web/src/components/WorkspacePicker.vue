@@ -49,7 +49,7 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 
     <main class="launch-main">
       <section class="launch__panel">
-        <h1>打开工作区</h1>
+        <h1>打开工作空间</h1>
         <p>无登录 · 可插拔 Skill / 模型 · 刷新后续流。选择一个本地目录开始。</p>
         <div class="search-box">
           <AppIcon class="search-box-icon" name="folder" :size="20" />
@@ -74,7 +74,7 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 
       <section v-if="recents.length" class="recents">
         <h2 class="page-panel__title">最近打开</h2>
-        <p class="page-panel__lead">点击卡片进入已有工作区。</p>
+        <p class="page-panel__lead">点击卡片进入已有工作空间。</p>
         <div class="workspace-grid">
           <button
             v-for="ws in recents"

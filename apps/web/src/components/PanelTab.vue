@@ -13,7 +13,7 @@ const props = defineProps<{
 }>()
 
 const meta: Record<string, { icon: string; label: string }> = {
-  explorer: { icon: 'folder', label: '文件' },
+  explorer: { icon: 'folder', label: '文件目录' },
   editor: { icon: 'file', label: '编辑器' },
   agent: { icon: 'atom', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },
