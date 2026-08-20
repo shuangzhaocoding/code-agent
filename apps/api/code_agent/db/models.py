@@ -102,6 +102,8 @@ class LlmModel(Model):
     supports_vision = fields.BooleanField(default=False)
     is_default = fields.BooleanField(default=False)
     enabled = fields.BooleanField(default=True)
+    capabilities_json = fields.JSONField(default=dict)
+    params_json = fields.JSONField(default=dict)
     pricing_json = fields.JSONField(default=dict)
     created_at = fields.DatetimeField(auto_now_add=True)
 

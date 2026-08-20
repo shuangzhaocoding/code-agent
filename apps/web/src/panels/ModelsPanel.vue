@@ -3,46 +3,30 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
-
-type Provider = {
-  id: string
-  name: string
-  kind: string
-  base_url: string
-  api_key_masked?: string
-  enabled?: boolean
-  models?: Model[]
-}
-
-type Model = {
-  id: string
-  model_id: string
-  display_name: string
-  is_default?: boolean
-  supports_tools?: boolean
-  context_window?: number
-}
+import type { LlmModel, LlmPreset, LlmProvider, ModelCapabilities, ModelParams } from '@/types/llm'
 
 const store = useAppStore()
 const error = ref('')
 const busy = ref(false)
 const showCustom = ref(false)
 const testingId = ref<string | null>(null)
+const syncingId = ref<string | null>(null)
 const editingProviderId = ref<string | null>(null)
 const editingModelId = ref<string | null>(null)
+const presets = ref<LlmPreset[]>([])
 
-const presets = [
-  { kind: 'deepseek', label: 'DeepSeek', desc: '官方 OpenAI 兼容接口', icon: 'sparkles', accent: '#4f6bff' },
-  { kind: 'ollama', label: 'Ollama', desc: '本地模型服务', icon: 'chip', accent: '#059669' },
-  { kind: 'openai', label: 'OpenAI', desc: 'GPT 系列模型', icon: 'globe', accent: '#0891b2' },
-]
+const presetMeta: Record<string, { desc: string; icon: string; accent: string }> = {
+  deepseek: { desc: '官方 OpenAI 兼容接口', icon: 'sparkles', accent: '#4f6bff' },
+  ollama: { desc: '本地模型服务', icon: 'chip', accent: '#059669' },
+  openai: { desc: 'GPT 系列模型', icon: 'globe', accent: '#0891b2' },
+  aivalux: { desc: 'AI 中转站 · 多模型聚合', icon: 'globe', accent: '#7c3aed' },
+}
 
 const form = reactive({
   name: 'DeepSeek',
   kind: 'deepseek',
   base_url: 'https://api.deepseek.com/v1',
   api_key: '',
-  model_id: 'deepseek-chat',
 })
 
 const providerEdit = reactive({
@@ -58,26 +42,47 @@ const modelEdit = reactive({
   context_window: 128000,
   supports_tools: true,
   is_default: false,
+  params: {} as ModelParams,
+  capabilities: {} as ModelCapabilities,
 })
 
-const providers = computed(() => store.providers as Provider[])
+const providers = computed(() => store.providers as LlmProvider[])
 
-onMounted(() => store.loadProviders())
+const presetCards = computed(() =>
+  presets.value.map((preset) => ({
+    ...preset,
+    label: preset.title || preset.name,
+    desc: presetMeta[preset.kind]?.desc || preset.base_url,
+    icon: presetMeta[preset.kind]?.icon || 'chip',
+    accent: presetMeta[preset.kind]?.accent || '#4f6bff',
+  })),
+)
+
+onMounted(async () => {
+  await Promise.all([store.loadProviders(), loadPresets()])
+})
+
+async function loadPresets() {
+  try {
+    presets.value = await api<LlmPreset[]>('/api/llm/presets')
+  } catch {
+    presets.value = []
+  }
+}
 
 function onKindChange() {
-  if (form.kind === 'deepseek') {
-    form.name = 'DeepSeek'
-    form.base_url = 'https://api.deepseek.com/v1'
-    form.model_id = 'deepseek-chat'
-  } else if (form.kind === 'ollama') {
-    form.name = 'Ollama'
-    form.base_url = 'http://127.0.0.1:11434/v1'
-    form.model_id = 'llama3.1'
-    form.api_key = form.api_key || 'ollama'
-  } else if (form.kind === 'openai') {
-    form.name = 'OpenAI'
+  const preset = presets.value.find((item) => item.kind === form.kind)
+  if (preset) {
+    form.name = preset.name
+    form.base_url = preset.base_url
+    return
+  }
+  if (form.kind === 'gateway') {
+    form.name = 'API Gateway'
+    form.base_url = 'https://api.example.com/v1'
+  } else if (form.kind === 'openai_compat' || form.kind === 'custom') {
+    form.name = 'OpenAI Compatible'
     form.base_url = 'https://api.openai.com/v1'
-    form.model_id = 'gpt-4o-mini'
   }
 }
 
@@ -102,35 +107,17 @@ async function addCustom() {
   error.value = ''
   busy.value = true
   try {
-    const provider = await api<{ id: string }>('/api/llm/providers', {
+    await api('/api/llm/providers', {
       method: 'POST',
       body: JSON.stringify({
         name: form.name,
         kind: form.kind,
         base_url: form.base_url,
         api_key: form.api_key,
+        sync_models: true,
+        make_default: true,
       }),
     })
-    const extra =
-      form.kind === 'deepseek' && form.model_id === 'deepseek-chat'
-        ? [{ model_id: 'deepseek-reasoner', display_name: 'DeepSeek Reasoner', is_default: false }]
-        : []
-    await api('/api/llm/models', {
-      method: 'POST',
-      body: JSON.stringify({
-        provider_id: provider.id,
-        model_id: form.model_id,
-        display_name: form.kind === 'deepseek' ? 'DeepSeek Chat' : form.model_id,
-        is_default: true,
-        supports_tools: true,
-      }),
-    })
-    for (const m of extra) {
-      await api('/api/llm/models', {
-        method: 'POST',
-        body: JSON.stringify({ provider_id: provider.id, supports_tools: true, ...m }),
-      })
-    }
     form.api_key = ''
     showCustom.value = false
     await store.loadProviders()
@@ -141,7 +128,7 @@ async function addCustom() {
   }
 }
 
-function startEditProvider(p: Provider) {
+function startEditProvider(p: LlmProvider) {
   editingProviderId.value = p.id
   providerEdit.name = p.name
   providerEdit.kind = p.kind
@@ -173,7 +160,7 @@ async function saveProvider(id: string) {
   }
 }
 
-async function removeProvider(p: Provider) {
+async function removeProvider(p: LlmProvider) {
   const ok = await store.askConfirm({
     title: '删除 Provider',
     summary: `确定删除「${p.name}」及其所有模型？`,
@@ -192,12 +179,29 @@ async function removeProvider(p: Provider) {
   }
 }
 
+async function syncModels(id: string) {
+  syncingId.value = id
+  error.value = ''
+  try {
+    const res = await api<{ count: number }>(`/api/llm/providers/${id}/sync-models`, {
+      method: 'POST',
+      body: JSON.stringify({ make_default: false, disable_missing: true }),
+    })
+    error.value = `已同步 ${res.count} 个模型`
+    await store.loadProviders()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    syncingId.value = null
+  }
+}
+
 async function testProvider(id: string) {
   testingId.value = id
   error.value = ''
   try {
     const res = await api<{ ok: boolean; reply: string }>(`/api/llm/providers/${id}/test`, { method: 'POST' })
-    error.value = `连接成功：${res.reply?.slice(0, 80) || 'pong'}`
+    error.value = `连接成功：${res.reply?.slice(0, 120) || 'pong'}`
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -205,17 +209,29 @@ async function testProvider(id: string) {
   }
 }
 
-function startEditModel(m: Model) {
+function startEditModel(m: LlmModel) {
   editingModelId.value = m.id
   modelEdit.display_name = m.display_name
   modelEdit.model_id = m.model_id
   modelEdit.context_window = m.context_window || 128000
   modelEdit.supports_tools = m.supports_tools !== false
   modelEdit.is_default = !!m.is_default
+  modelEdit.capabilities = m.capabilities || {}
+  modelEdit.params = { ...(m.params || {}) }
 }
 
 function cancelEditModel() {
   editingModelId.value = null
+}
+
+function paramValue(key: keyof ModelParams) {
+  const spec = modelEdit.capabilities[key]
+  if (modelEdit.params[key] !== undefined) return modelEdit.params[key]
+  return spec?.default
+}
+
+function setParamValue(key: keyof ModelParams, value: number) {
+  modelEdit.params[key] = value
 }
 
 async function saveModel(id: string) {
@@ -230,6 +246,7 @@ async function saveModel(id: string) {
         context_window: modelEdit.context_window,
         supports_tools: modelEdit.supports_tools,
         is_default: modelEdit.is_default,
+        params: modelEdit.params,
       }),
     })
     editingModelId.value = null
@@ -241,7 +258,7 @@ async function saveModel(id: string) {
   }
 }
 
-async function setDefaultModel(m: Model) {
+async function setDefaultModel(m: LlmModel) {
   if (m.is_default) return
   busy.value = true
   try {
@@ -255,7 +272,7 @@ async function setDefaultModel(m: Model) {
   }
 }
 
-async function removeModel(m: Model, providerName: string) {
+async function removeModel(m: LlmModel, providerName: string) {
   const ok = await store.askConfirm({
     title: '删除模型',
     summary: `确定删除「${providerName} / ${m.display_name}」？`,
@@ -279,10 +296,21 @@ function kindLabel(kind: string) {
     deepseek: 'DeepSeek',
     ollama: 'Ollama',
     openai: 'OpenAI',
+    gateway: '中转站',
     openai_compat: 'OpenAI 兼容',
     custom: 'Custom',
   }
   return map[kind] || kind
+}
+
+function capabilityTags(m: LlmModel) {
+  const caps = m.capabilities || {}
+  const tags: string[] = []
+  if (caps.thinking?.supported) tags.push('思考')
+  if (caps.tools?.supported ?? m.supports_tools) tags.push('工具')
+  if (caps.vision?.supported ?? m.supports_vision) tags.push('视觉')
+  if (caps.temperature?.supported) tags.push('温度')
+  return tags
 }
 </script>
 
@@ -292,7 +320,7 @@ function kindLabel(kind: string) {
       <header class="page-head">
         <div>
           <h1 class="page-title">模型配置</h1>
-          <p class="page-lead">管理 LLM Provider 与可用模型，支持快速预设与自定义接入。</p>
+          <p class="page-lead">从 Provider 接口自动获取模型列表，支持官方 API 与中转站。</p>
         </div>
       </header>
 
@@ -300,7 +328,7 @@ function kindLabel(kind: string) {
         <h2 class="section-title">快速添加</h2>
         <div class="preset-grid">
           <button
-            v-for="preset in presets"
+            v-for="preset in presetCards"
             :key="preset.kind"
             type="button"
             class="preset-card"
@@ -318,7 +346,7 @@ function kindLabel(kind: string) {
           </button>
         </div>
         <label class="api-key-field">
-          <span>API Key（DeepSeek / OpenAI 预设需要）</span>
+          <span>API Key（需要 Key 的预设必填，添加后自动拉取模型列表）</span>
           <input v-model="form.api_key" class="field-control" type="password" placeholder="sk-…（Ollama 可留空）" />
         </label>
       </section>
@@ -342,6 +370,7 @@ function kindLabel(kind: string) {
               <span>类型</span>
               <select v-model="form.kind" class="field-control" @change="onKindChange">
                 <option value="deepseek">DeepSeek</option>
+                <option value="gateway">中转站</option>
                 <option value="openai_compat">OpenAI Compatible</option>
                 <option value="openai">OpenAI</option>
                 <option value="ollama">Ollama</option>
@@ -350,19 +379,16 @@ function kindLabel(kind: string) {
             </label>
             <label class="span-2">
               <span>Base URL</span>
-              <input v-model="form.base_url" class="field-control" placeholder="https://api.example.com/v1" />
+              <input v-model="form.base_url" class="field-control" placeholder="https://www.aivalux.com 或 https://www.aivalux.com/v1" />
             </label>
-            <label>
+            <label class="span-2">
               <span>API Key</span>
-              <input v-model="form.api_key" class="field-control" type="password" placeholder="可选" />
-            </label>
-            <label>
-              <span>Model ID</span>
-              <input v-model="form.model_id" class="field-control" placeholder="deepseek-chat" />
+              <input v-model="form.api_key" class="field-control" type="password" placeholder="可选（Ollama 可填 ollama）" />
             </label>
           </div>
+          <p class="form-hint">Base URL 填网站地址即可（如 https://www.aivalux.com），系统会自动补全 /v1 并拉取模型。</p>
           <div class="form-actions">
-            <button type="submit" class="btn btn-primary" :disabled="busy">添加 Provider</button>
+            <button type="submit" class="btn btn-primary" :disabled="busy">添加并同步模型</button>
           </div>
         </form>
 
@@ -404,6 +430,15 @@ function kindLabel(kind: string) {
                 </div>
               </div>
               <div class="card-actions inline">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  title="同步模型"
+                  :disabled="syncingId === p.id"
+                  @click="syncModels(p.id)"
+                >
+                  <AppIcon name="refresh" :size="16" />
+                </button>
                 <button type="button" class="icon-btn" title="测试连接" :disabled="testingId === p.id" @click="testProvider(p.id)">
                   <AppIcon name="zap" :size="16" />
                 </button>
@@ -415,14 +450,14 @@ function kindLabel(kind: string) {
                 </button>
               </div>
             </div>
-            <p class="provider-meta">{{ p.base_url }} · {{ p.api_key_masked || '无 Key' }}</p>
+            <p class="provider-meta">{{ p.base_url }} · {{ p.api_key_masked || '无 Key' }} · {{ (p.models || []).length }} 个模型</p>
 
             <ul class="model-list">
               <li v-for="m in p.models || []" :key="m.id" class="model-row">
                 <template v-if="editingModelId === m.id">
                   <div class="model-edit-grid">
                     <input v-model="modelEdit.display_name" class="field-control" placeholder="显示名称" />
-                    <input v-model="modelEdit.model_id" class="field-control" placeholder="model id" />
+                    <input v-model="modelEdit.model_id" class="field-control" placeholder="model id" readonly />
                     <input v-model.number="modelEdit.context_window" class="field-control" type="number" placeholder="上下文" />
                     <label class="check-label">
                       <input v-model="modelEdit.supports_tools" type="checkbox" />
@@ -432,6 +467,45 @@ function kindLabel(kind: string) {
                       <input v-model="modelEdit.is_default" type="checkbox" />
                       设为默认
                     </label>
+                    <template v-if="modelEdit.capabilities.temperature?.supported">
+                      <label class="span-2 param-field">
+                        <span>温度 ({{ paramValue('temperature') }})</span>
+                        <input
+                          type="range"
+                          :min="modelEdit.capabilities.temperature.min ?? 0"
+                          :max="modelEdit.capabilities.temperature.max ?? 2"
+                          :step="modelEdit.capabilities.temperature.step ?? 0.1"
+                          :value="paramValue('temperature')"
+                          @input="setParamValue('temperature', Number(($event.target as HTMLInputElement).value))"
+                        />
+                      </label>
+                    </template>
+                    <template v-if="modelEdit.capabilities.max_tokens?.supported">
+                      <label class="param-field">
+                        <span>最大 Token</span>
+                        <input
+                          type="number"
+                          class="field-control"
+                          :min="modelEdit.capabilities.max_tokens.min ?? 1"
+                          :max="modelEdit.capabilities.max_tokens.max ?? 128000"
+                          :value="paramValue('max_tokens')"
+                          @input="setParamValue('max_tokens', Number(($event.target as HTMLInputElement).value))"
+                        />
+                      </label>
+                    </template>
+                    <template v-if="modelEdit.capabilities.top_p?.supported">
+                      <label class="param-field">
+                        <span>Top P ({{ paramValue('top_p') }})</span>
+                        <input
+                          type="range"
+                          :min="modelEdit.capabilities.top_p.min ?? 0"
+                          :max="modelEdit.capabilities.top_p.max ?? 1"
+                          :step="modelEdit.capabilities.top_p.step ?? 0.05"
+                          :value="paramValue('top_p')"
+                          @input="setParamValue('top_p', Number(($event.target as HTMLInputElement).value))"
+                        />
+                      </label>
+                    </template>
                   </div>
                   <div class="model-edit-actions">
                     <button type="button" class="btn btn-primary btn-sm" @click="saveModel(m.id)">保存</button>
@@ -449,6 +523,9 @@ function kindLabel(kind: string) {
                     <span v-if="m.is_default" class="default-badge">默认</span>
                   </button>
                   <code class="model-id">{{ m.model_id }}</code>
+                  <div class="cap-tags">
+                    <span v-for="tag in capabilityTags(m)" :key="tag" class="cap-tag">{{ tag }}</span>
+                  </div>
                   <div class="model-actions">
                     <button type="button" class="icon-btn" title="编辑" @click="startEditModel(m)">
                       <AppIcon name="pencil" :size="15" />
@@ -464,7 +541,7 @@ function kindLabel(kind: string) {
         </article>
       </section>
 
-      <p v-if="error" class="status-msg" :class="{ ok: error.startsWith('连接成功') }">{{ error }}</p>
+      <p v-if="error" class="status-msg" :class="{ ok: error.startsWith('连接成功') || error.startsWith('已同步') }">{{ error }}</p>
     </div>
   </div>
 </template>
@@ -580,13 +657,19 @@ function kindLabel(kind: string) {
 }
 .form-grid .span-2 { grid-column: span 2; }
 .form-grid label,
-.api-key-field {
+.api-key-field,
+.param-field {
   display: flex;
   flex-direction: column;
   gap: 5px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+.form-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .models-panel :deep(.field-control) {
   font-size: 12px;
@@ -666,6 +749,7 @@ function kindLabel(kind: string) {
   gap: 8px;
   padding: 8px 0;
   border-bottom: var(--border-width) solid var(--border);
+  flex-wrap: wrap;
 }
 .model-row:last-child { border-bottom: 0; padding-bottom: 0; }
 .model-name {
@@ -691,12 +775,24 @@ function kindLabel(kind: string) {
 }
 .model-id {
   flex: 1;
-  min-width: 0;
+  min-width: 120px;
   font-size: 10px;
   color: var(--text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.cap-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.cap-tag {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--code-bg);
+  color: var(--text-muted);
 }
 .model-actions {
   display: flex;

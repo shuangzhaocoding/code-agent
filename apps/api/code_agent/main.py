@@ -9,15 +9,15 @@ from tortoise.contrib.fastapi import RegisterTortoise
 from code_agent.config import settings
 from code_agent.crypto import encrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.hub import register_builtin_providers
+from code_agent.db.schema import upgrade_llm_schema
+from code_agent.llm.hub import apply_preset, register_builtin_providers
+from code_agent.llm.models_sync import sync_provider_models
 from code_agent.plugins.loader import load_plugins
 from code_agent.routers import conversations, git, llm, runs, settings as settings_router, skills, terminals, uploads, workspaces
 from code_agent.tools.host import register_builtin_tools
 
 async def _seed_llm_from_env() -> None:
     import os
-
-    from code_agent.llm.hub import apply_preset
 
     deepseek_key = os.environ.get("CODE_AGENT_DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or ""
     if deepseek_key and not await LlmProvider.filter(kind="deepseek").exists():
@@ -27,7 +27,6 @@ async def _seed_llm_from_env() -> None:
         return
     api_key = os.environ.get("CODE_AGENT_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
     base_url = os.environ.get("CODE_AGENT_OPENAI_BASE_URL") or "https://api.openai.com/v1"
-    model_id = os.environ.get("CODE_AGENT_OPENAI_MODEL") or "gpt-4o-mini"
     if not api_key and "11434" not in base_url:
         return
     provider = await LlmProvider.create(
@@ -36,13 +35,22 @@ async def _seed_llm_from_env() -> None:
         base_url=base_url.rstrip("/"),
         api_key_encrypted=encrypt_secret(api_key or "ollama"),
     )
-    await LlmModel.create(
-        provider_id=provider.id,
-        model_id=model_id,
-        display_name=model_id,
-        is_default=True,
-        supports_tools=True,
-    )
+    try:
+        await sync_provider_models(provider, make_default=True)
+    except Exception:
+        model_id = os.environ.get("CODE_AGENT_OPENAI_MODEL") or "gpt-4o-mini"
+        from code_agent.llm.capabilities import default_params, infer_capabilities
+
+        caps = infer_capabilities(model_id)
+        await LlmModel.create(
+            provider_id=provider.id,
+            model_id=model_id,
+            display_name=model_id,
+            capabilities_json=caps,
+            params_json=default_params(caps),
+            is_default=True,
+            supports_tools=True,
+        )
 
 
 @asynccontextmanager
@@ -57,6 +65,7 @@ async def lifespan(app: FastAPI):
         register_builtin_providers()
         register_builtin_tools()
         load_plugins()
+        await upgrade_llm_schema()
         await _seed_llm_from_env()
         print(f"Code Agent API on {settings.get('server.host')}:{settings.get('server.port')}")
         print("Default bind is localhost. Do not expose an unauthenticated instance to the internet.")

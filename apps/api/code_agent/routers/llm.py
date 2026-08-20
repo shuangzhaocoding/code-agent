@@ -5,7 +5,14 @@ from pydantic import BaseModel, Field
 
 from code_agent.crypto import encrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.hub import PROVIDER_PRESETS, apply_preset, get_chat_model, model_public, provider_public
+from code_agent.llm.hub import (
+    PROVIDER_PRESETS,
+    apply_preset,
+    get_chat_model,
+    model_public,
+    provider_public,
+)
+from code_agent.llm.models_sync import fetch_remote_models, normalize_base_url, sync_provider_models
 from code_agent.plugins.base import registry
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -18,6 +25,8 @@ class ProviderIn(BaseModel):
     api_key: str | None = None
     extra_headers: dict = Field(default_factory=dict)
     enabled: bool = True
+    sync_models: bool = True
+    make_default: bool = False
 
 
 class ModelIn(BaseModel):
@@ -28,6 +37,12 @@ class ModelIn(BaseModel):
     supports_tools: bool = True
     supports_vision: bool = False
     is_default: bool = False
+    params: dict = Field(default_factory=dict)
+
+
+class SyncModelsIn(BaseModel):
+    make_default: bool = False
+    disable_missing: bool = True
 
 
 @router.get("/kinds")
@@ -47,7 +62,6 @@ async def list_presets():
             "name": spec["name"],
             "title": spec.get("title") or spec["name"],
             "base_url": spec["base_url"],
-            "models": spec["models"],
             "needs_key": "default_api_key" not in spec,
         }
         for kind, spec in PROVIDER_PRESETS.items()
@@ -67,9 +81,15 @@ async def create_from_preset(kind: str, body: PresetIn = PresetIn()):
     key = body.api_key or preset.get("default_api_key") or ""
     if "default_api_key" not in preset and not key:
         raise HTTPException(status_code=400, detail={"code": "provider.auth", "message": "API Key 必填"})
-    provider = await apply_preset(kind, api_key=key, make_default=body.make_default)
+    try:
+        provider = await apply_preset(kind, api_key=key, make_default=body.make_default)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "provider.sync_failed", "message": str(exc)},
+        ) from exc
     item = provider_public(provider)
-    item["models"] = [model_public(m) for m in await LlmModel.filter(provider_id=provider.id)]
+    item["models"] = [model_public(m) for m in await LlmModel.filter(provider_id=provider.id, enabled=True)]
     return item
 
 
@@ -79,7 +99,7 @@ async def list_providers():
     out = []
     for p in rows:
         item = provider_public(p)
-        models = await LlmModel.filter(provider_id=p.id)
+        models = await LlmModel.filter(provider_id=p.id, enabled=True)
         item["models"] = [model_public(m) for m in models]
         out.append(item)
     return out
@@ -90,12 +110,23 @@ async def create_provider(body: ProviderIn):
     row = await LlmProvider.create(
         name=body.name,
         kind=body.kind,
-        base_url=body.base_url.rstrip("/"),
+        base_url=normalize_base_url(body.base_url),
         api_key_encrypted=encrypt_secret(body.api_key or ""),
         extra_headers=body.extra_headers,
         enabled=body.enabled,
     )
-    return provider_public(row)
+    if body.sync_models:
+        try:
+            await sync_provider_models(row, make_default=body.make_default)
+        except Exception as exc:
+            await row.delete()
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "provider.sync_failed", "message": str(exc)},
+            ) from exc
+    item = provider_public(row)
+    item["models"] = [model_public(m) for m in await LlmModel.filter(provider_id=row.id, enabled=True)]
+    return item
 
 
 @router.patch("/providers/{provider_id}")
@@ -108,7 +139,7 @@ async def update_provider(provider_id: str, body: dict):
     if "kind" in body:
         row.kind = body["kind"]
     if "base_url" in body:
-        row.base_url = str(body["base_url"]).rstrip("/")
+        row.base_url = normalize_base_url(str(body["base_url"]))
     if "api_key" in body and body["api_key"]:
         row.api_key_encrypted = encrypt_secret(body["api_key"])
     if "extra_headers" in body:
@@ -129,20 +160,76 @@ async def delete_provider(provider_id: str):
     return {"ok": True}
 
 
+@router.post("/providers/{provider_id}/sync-models")
+async def sync_models(provider_id: str, body: SyncModelsIn = SyncModelsIn()):
+    provider = await LlmProvider.get_or_none(id=provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    try:
+        models = await sync_provider_models(
+            provider,
+            make_default=body.make_default,
+            disable_missing=body.disable_missing,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "provider.sync_failed", "message": str(exc)},
+        ) from exc
+    return {
+        "ok": True,
+        "count": len(models),
+        "models": [model_public(m) for m in models],
+    }
+
+
+@router.get("/providers/{provider_id}/remote-models")
+async def list_remote_models(provider_id: str):
+    provider = await LlmProvider.get_or_none(id=provider_id)
+    if not provider:
+        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    try:
+        models = await fetch_remote_models(provider)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "provider.sync_failed", "message": str(exc)},
+        ) from exc
+    return {"models": models}
+
+
 @router.post("/providers/{provider_id}/test")
 async def test_provider(provider_id: str):
     provider = await LlmProvider.get_or_none(id=provider_id)
     if not provider:
         raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
-    model = await LlmModel.filter(provider_id=provider_id).first()
+
+    remote_count = 0
+    try:
+        remote = await fetch_remote_models(provider)
+        remote_count = len(remote)
+    except Exception:
+        remote = []
+
+    model = await LlmModel.filter(provider_id=provider_id, enabled=True).first()
+    if not model and remote:
+        await sync_provider_models(provider)
+        model = await LlmModel.filter(provider_id=provider_id, enabled=True).first()
+
     if not model:
-        raise HTTPException(status_code=400, detail={"code": "model.missing", "message": "Add a model first"})
+        if remote_count:
+            return {"ok": True, "reply": f"已获取 {remote_count} 个模型，请同步后测试对话"}
+        raise HTTPException(status_code=400, detail={"code": "model.missing", "message": "无法获取模型列表"})
+
     chat, _ = await get_chat_model(str(model.id))
     if chat is None:
         raise HTTPException(status_code=400, detail={"code": "provider.invalid"})
     try:
         msg = await chat.ainvoke("Reply with the single word pong.")
-        return {"ok": True, "reply": getattr(msg, "content", str(msg))[:500]}
+        reply = getattr(msg, "content", str(msg))[:500]
+        if remote_count:
+            reply = f"{reply}（远程模型 {remote_count} 个）"
+        return {"ok": True, "reply": reply}
     except Exception as exc:
         raise HTTPException(status_code=400, detail={"code": "provider.auth", "message": str(exc)})
 
@@ -154,6 +241,9 @@ async def create_model(body: ModelIn):
         raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
     if body.is_default:
         await LlmModel.all().update(is_default=False)
+    from code_agent.llm.capabilities import default_params, infer_capabilities
+
+    caps = infer_capabilities(body.model_id)
     row = await LlmModel.create(
         provider_id=body.provider_id,
         model_id=body.model_id,
@@ -161,6 +251,8 @@ async def create_model(body: ModelIn):
         context_window=body.context_window,
         supports_tools=body.supports_tools,
         supports_vision=body.supports_vision,
+        capabilities_json=caps,
+        params_json=body.params or default_params(caps),
         is_default=body.is_default,
     )
     return model_public(row)
@@ -177,6 +269,8 @@ async def update_model(model_id: str, body: dict):
     for field in ("display_name", "model_id", "context_window", "supports_tools", "supports_vision", "enabled"):
         if field in body:
             setattr(row, field, body[field])
+    if "params" in body and isinstance(body["params"], dict):
+        row.params_json = body["params"]
     await row.save()
     return model_public(row)
 
