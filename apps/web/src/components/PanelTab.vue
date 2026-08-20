@@ -18,6 +18,7 @@ const meta: Record<string, { icon: string; label: string }> = {
   editor: { icon: 'file', label: '编辑器' },
   agent: { icon: 'sparkles', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },
+  ports: { icon: 'globe', label: '端口' },
   chats: { icon: 'chat', label: '会话' },
   git: { icon: 'git', label: 'Git' },
   skills: { icon: 'book', label: 'Skill' },

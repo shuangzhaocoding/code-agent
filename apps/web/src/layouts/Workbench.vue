@@ -19,7 +19,9 @@ import SkillsPanel from '@/panels/SkillsPanel.vue'
 import ModelsPanel from '@/panels/ModelsPanel.vue'
 import SettingsPanel from '@/panels/SettingsPanel.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
+import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import GitPanel from '@/panels/GitPanel.vue'
+import PortsPanel from '@/panels/PortsPanel.vue'
 import { getSidebarCollapsed, getTrajectoryOpen, setSidebarCollapsed, setTrajectoryOpen } from '@/utils/layoutPrefs'
 
 const store = useAppStore()
@@ -44,6 +46,7 @@ const components = {
   models: ModelsPanel,
   settings: SettingsPanel,
   git: GitPanel,
+  ports: PortsPanel,
   trajectory: TrajectoryDockPanel,
 }
 
@@ -108,6 +111,7 @@ const placements: Record<string, { referencePanel: string; direction: 'left' | '
   agent: { referencePanel: 'agent', direction: 'right' },
   chats: { referencePanel: 'agent', direction: 'left' },
   git: { referencePanel: 'agent', direction: 'left' },
+  ports: { referencePanel: 'agent', direction: 'below' },
   skills: { referencePanel: 'agent', direction: 'right' },
   models: { referencePanel: 'agent', direction: 'right' },
   settings: { referencePanel: 'agent', direction: 'right' },
@@ -250,6 +254,7 @@ const dockThemeClass = computed(() =>
       @confirm="store.closeConfirm(true)"
       @cancel="store.closeConfirm(false)"
     />
+    <PortNotifyToast />
   </div>
 </template>
 
