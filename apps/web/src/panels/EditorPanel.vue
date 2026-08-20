@@ -5,11 +5,15 @@ import { currentTheme } from '@/theme'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
+import FilePreviewHost from '@/preview/FilePreviewHost.vue'
+import { isPreviewKind } from '@/preview/classify'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
 const mdPreview = ref(false)
+/** HTML: true = iframe preview, false = Monaco source */
+const htmlPreview = ref(true)
 const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
@@ -22,6 +26,17 @@ const reviewIndex = computed(() => {
   const i = store.pendingReviews.findIndex((r) => r.path === store.activePath)
   return i < 0 ? 0 : i + 1
 })
+
+const isHtmlFile = computed(() => store.openFile?.kind === 'html')
+const canHtmlPreview = computed(() => Boolean(isHtmlFile.value && !review.value))
+const showHtmlPreview = computed(() => htmlPreview.value && canHtmlPreview.value)
+
+const activeIsBinaryPreview = computed(() => {
+  const f = store.openFile
+  return Boolean(f && isPreviewKind(f.kind) && f.kind !== 'html')
+})
+
+const showFilePreview = computed(() => activeIsBinaryPreview.value || showHtmlPreview.value)
 
 function cssColor(name: string, fallback: string) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -78,8 +93,19 @@ function isMarkdownFile(path: string) {
   return /\.(md|mdx|markdown)$/i.test(path)
 }
 
-const canMarkdownPreview = computed(() => Boolean(store.activePath && isMarkdownFile(store.activePath)))
+const canMarkdownPreview = computed(
+  () => Boolean(store.activePath && store.openFile?.kind === 'text' && isMarkdownFile(store.activePath)),
+)
 const showMarkdownPreview = computed(() => mdPreview.value && canMarkdownPreview.value && !review.value)
+
+const canSave = computed(
+  () =>
+    Boolean(store.openFile) &&
+    !review.value &&
+    !showMarkdownPreview.value &&
+    !activeIsBinaryPreview.value &&
+    !(isHtmlFile.value && htmlPreview.value),
+)
 
 function uriOf(path: string, original = false) {
   return monacoMod!.Uri.from({
@@ -135,12 +161,17 @@ function showPath(path: string | null) {
   }
   diffEditor?.setModel(null)
   if (!editor) return
-  if (!path) {
+  const file = path ? store.openFiles.find((f) => f.path === path) : null
+  if (!path || !file) {
     editor.setModel(null)
     return
   }
-  const file = store.openFiles.find((f) => f.path === path)
-  const model = ensureModel(path, file?.content ?? '')
+  // Binary / media previews, or HTML while in preview mode — hide Monaco
+  if (isPreviewKind(file.kind) && (file.kind !== 'html' || htmlPreview.value)) {
+    editor.setModel(null)
+    return
+  }
+  const model = ensureModel(path, file.content ?? '')
   if (model) editor.setModel(model)
   requestAnimationFrame(() => editor?.layout())
 }
@@ -206,7 +237,7 @@ function onReload(e: Event) {
 }
 
 watch(
-  () => [store.activePath, review.value?.blockId, review.value?.status] as const,
+  () => [store.activePath, review.value?.blockId, review.value?.status, htmlPreview.value] as const,
   async () => {
     await nextTick()
     showPath(store.activePath)
@@ -217,6 +248,10 @@ watch(
   () => store.activePath,
   (path, prev) => {
     if (!path || !prev || !isMarkdownFile(path) || !isMarkdownFile(prev)) mdPreview.value = false
+    // Reset HTML to preview when switching between different HTML files / leaving HTML
+    const nextHtml = path ? /\.(html?|HTML?)$/.test(path) : false
+    const prevHtml = prev ? /\.(html?|HTML?)$/.test(prev) : false
+    if (!nextHtml || !prevHtml || path !== prev) htmlPreview.value = true
   },
 )
 
@@ -338,8 +373,16 @@ async function onTabMenuSelect(id: string) {
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': !mdPreview }" @click="mdPreview = false">Markdown</button>
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': mdPreview }" @click="mdPreview = true">预览</button>
       </div>
-      <button type="button" class="btn" :disabled="!store.openFile || !!review || showMarkdownPreview" @click="save">保存</button>
+      <div v-if="canHtmlPreview" class="md-toggle" role="group" aria-label="HTML 预览">
+        <button type="button" class="md-toggle-btn" :class="{ 'is-on': !htmlPreview }" @click="htmlPreview = false">源码</button>
+        <button type="button" class="md-toggle-btn" :class="{ 'is-on': htmlPreview }" @click="htmlPreview = true">预览</button>
+      </div>
+      <button type="button" class="btn" :disabled="!canSave" @click="save">保存</button>
     </header>
+    <div v-if="store.fileNotice" class="file-notice" role="status">
+      <span>{{ store.fileNotice }}</span>
+      <button type="button" class="notice-x" @click="store.clearFileNotice()">×</button>
+    </div>
     <div v-if="pendingCount" class="review-bar">
       <span>{{ review ? '请确认当前文件 diff' : '有待确认的改动' }}</span>
       <span class="count">{{ review ? `${reviewIndex}/${pendingCount}` : `${pendingCount} 个文件` }}</span>
@@ -351,13 +394,18 @@ async function onTabMenuSelect(id: string) {
       <button type="button" class="btn primary" @click="store.acceptAllReviews()">全部接受</button>
     </div>
     <div class="host-wrap">
+      <FilePreviewHost
+        v-if="showFilePreview && store.openFile"
+        :file="store.openFile"
+        class="host"
+      />
       <MarkdownPreview
-        v-if="showMarkdownPreview && store.openFile"
+        v-else-if="showMarkdownPreview && store.openFile"
         :content="store.openFile.content"
         :path="store.openFile.path"
         class="host"
       />
-      <div ref="host" class="host" :class="{ hidden: !!review || showMarkdownPreview }" />
+      <div ref="host" class="host" :class="{ hidden: !!review || showMarkdownPreview || showFilePreview }" />
       <div ref="diffHost" class="host" :class="{ hidden: !review }" />
       <div v-if="!store.openFile" class="empty">从左侧打开文件</div>
     </div>
@@ -382,6 +430,29 @@ async function onTabMenuSelect(id: string) {
   padding-right: 8px;
   border-bottom: var(--border-width) solid var(--border);
   background: var(--bg);
+}
+.file-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-bottom: var(--border-width) solid var(--border);
+  background: color-mix(in srgb, #dc2626 12%, var(--bg));
+  color: var(--text-h);
+  font-size: 12.5px;
+}
+.file-notice span {
+  flex: 1;
+  min-width: 0;
+}
+.notice-x {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
 }
 .tabs {
   flex: 1;

@@ -21,7 +21,7 @@ const meta: Record<string, { icon: string; label: string }> = {
   ports: { icon: 'globe', label: '端口' },
   chats: { icon: 'chat', label: '会话' },
   git: { icon: 'git', label: 'Git' },
-  skills: { icon: 'book', label: 'Skill' },
+  skills: { icon: 'puzzle', label: 'Skill' },
   models: { icon: 'chip', label: '模型' },
   settings: { icon: 'sliders', label: '设置' },
   trajectory: { icon: 'clock', label: '轨迹' },

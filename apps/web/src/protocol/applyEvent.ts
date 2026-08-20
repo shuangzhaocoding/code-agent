@@ -57,6 +57,8 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
           if (b.id !== payload.block_id) return b
           const copy = { ...b, meta: { ...b.meta } }
           if (event.type === 'block.delta') {
+            // Don't keep "printing" a thinking/answer card after it completed
+            if (b.status && b.status !== 'streaming') return b
             copy.text += String(payload.text || '')
             if (payload.meta) Object.assign(copy.meta, payload.meta)
           } else {

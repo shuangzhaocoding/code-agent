@@ -254,7 +254,19 @@ const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = us
 
 const contextUsageRingPercent = computed(() => contextUsagePreview.value?.recommendedUsagePercent ?? 0)
 const contextUsageRingLevel = computed(() => contextUsagePreview.value?.level ?? 'normal')
-const inputBlocked = computed(() => running() || hasUploadingAttachments())
+const inputBlocked = computed(() => hasUploadingAttachments())
+
+const queuedMessages = computed(() => store.conversationQueue())
+const queueExpanded = ref(true)
+
+function toggleQueueExpanded() {
+  queueExpanded.value = !queueExpanded.value
+}
+
+function onSendQueuedNow(id: string) {
+  stick.value = true
+  void store.sendQueuedNow(id)
+}
 
 const speechConfig = computed(() => ({
   lang: 'zh-CN',
@@ -262,12 +274,8 @@ const speechConfig = computed(() => ({
   interimResults: true,
 }))
 
-const streamTick = computed(() =>
-  store.messages.map((m) => m.blocks.map((b) => `${b.id}:${b.text?.length || 0}:${b.status}`).join('|')).join('/'),
-)
-
 function running() {
-  return store.runStatus === 'running' || store.runStatus === 'queued'
+  return store.isRunBusy()
 }
 
 function distanceToBottom(el: HTMLElement) {
@@ -362,7 +370,7 @@ watch(
 )
 
 watch(
-  () => [store.conversationId, store.messages.length, store.runStatus, streamTick.value] as const,
+  () => [store.conversationId, store.messages.length, store.runStatus] as const,
   async () => {
     await nextTick()
     followOutput()
@@ -384,18 +392,19 @@ function normalizeSubmitText(text: string) {
     .trim()
 }
 
-function onSubmit(text: string) {
+function buildPayload(text: string) {
   let value = normalizeSubmitText(text || '')
-  if (!value || hasUploadingAttachments()) return
-  // Append @mention file paths to the message
+  if (!value || hasUploadingAttachments()) return null
   if (mentionFiles.value.length) {
     const paths = mentionFiles.value.map((f) => `@${f.path}`).join(' ')
     value = value + '\n' + paths
   }
-  stick.value = true
   const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
   const files = getPendingFiles()
-  store.send(value, refs, files)
+  return { value, refs, files }
+}
+
+function afterSubmitClear() {
   mentionFiles.value = []
   clearSender()
   clearAttachments()
@@ -404,6 +413,33 @@ function onSubmit(text: string) {
     clearSender()
     scrollToEnd()
   })
+}
+
+function onSubmit(text: string) {
+  const payload = buildPayload(text)
+  if (!payload) return
+  stick.value = true
+  void store.send(payload.value, payload.refs, payload.files)
+  afterSubmitClear()
+}
+
+function onSubmitNow() {
+  const payload = buildPayload(draft.value)
+  if (!payload) return
+  stick.value = true
+  void store.sendNow(payload.value, payload.refs, payload.files)
+  afterSubmitClear()
+}
+
+function onSenderCaptureKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+  if (!running()) return
+  const value = normalizeSubmitText(draft.value || '')
+  if (!value || hasUploadingAttachments()) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.altKey) onSubmitNow()
+  else onSubmit(draft.value)
 }
 
 function onCancel() {
@@ -524,6 +560,25 @@ function openContextUsageDialog() {
         </div>
       </Transition>
       <!-- @ mention chips -->
+      <div v-if="queuedMessages.length" class="send-queue" :class="{ collapsed: !queueExpanded }">
+        <div class="send-queue-head">
+          <button type="button" class="queue-toggle" :aria-expanded="queueExpanded" @click="toggleQueueExpanded">
+            <span class="queue-chevron" :class="{ open: queueExpanded }">›</span>
+            <span>排队中 · {{ queuedMessages.length }}</span>
+          </button>
+          <button type="button" class="queue-clear" @click="store.clearConversationQueue()">清空队列</button>
+        </div>
+        <div v-show="queueExpanded" class="send-queue-body">
+          <div v-for="(item, index) in queuedMessages" :key="item.id" class="send-queue-item">
+            <span class="queue-index">{{ index + 1 }}</span>
+            <span class="queue-text" :title="item.text">{{ item.text }}</span>
+            <div class="queue-actions">
+              <button type="button" class="queue-send" title="立即发送" @click="onSendQueuedNow(item.id)">发送</button>
+              <button type="button" class="queue-remove" title="移除" @click="store.removeQueuedSend(item.id)">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div v-if="mentionFiles.length" class="mention-chips">
         <span v-for="f in mentionFiles" :key="f.path" class="mention-chip">
           <span class="mention-chip-body" @click="store.openPath(f.path, f.is_dir)">
@@ -535,7 +590,7 @@ function openContextUsageDialog() {
         </span>
       </div>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
-      <div class="agent-sender-wrap" @keydown="mentionKeydown">
+      <div class="agent-sender-wrap" @keydown.capture="onSenderCaptureKeydown" @keydown="mentionKeydown">
         <TrSender
           ref="sender"
           v-model="draft"
@@ -543,7 +598,7 @@ function openContextUsageDialog() {
           :style="senderContentHeight ? { '--sender-content-height': senderContentHeight + 'px' } : {}"
           mode="multiple"
           submit-type="enter"
-          placeholder="给 Code Agent 下指令…"
+          :placeholder="running() ? '输出中也可输入；Enter 加入队列，Alt+Enter 立即发送' : '给 Code Agent 下指令…'"
           :loading="running()"
           clearable
           @submit="onSubmit"
@@ -896,6 +951,103 @@ footer.agent-footer {
 }
 html[data-theme='dark'] .agent-sender-wrap {
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+
+.send-queue {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.send-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.send-queue.collapsed .send-queue-head {
+  margin-bottom: 0;
+}
+.queue-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+.queue-chevron {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  transform: rotate(0deg);
+  transition: transform 0.15s ease;
+  color: var(--text-secondary);
+}
+.queue-chevron.open {
+  transform: rotate(90deg);
+}
+.queue-clear {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.send-queue-item {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+}
+.queue-index {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--mono);
+}
+.queue-text {
+  font-size: 12.5px;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.queue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.queue-send {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--primary);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  line-height: 1.4;
+}
+.queue-send:hover {
+  border-color: var(--primary);
+}
+.queue-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
 }
 
 .agent-sender {

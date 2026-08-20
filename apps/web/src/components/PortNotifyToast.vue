@@ -1,25 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api } from '@/api/http'
+import { computed, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
-
-type PortItem = {
-  port: number
-  address: string
-  pid: number | null
-  process: string | null
-  url: string
-  preview_path: string
-  self?: boolean
-}
+import { usePortsWatch, type PortItem } from '@/composables/usePortsWatch'
 
 type PortNotice = PortItem & { id: string }
 
 const SYSTEM_PORTS = new Set([22, 25, 53, 111, 123, 135, 139, 445, 631, 5353])
 
+const { ports } = usePortsWatch()
 const notices = ref<PortNotice[]>([])
 const known = ref<Set<number> | null>(null)
-let timer: ReturnType<typeof setInterval> | null = null
 let seq = 0
 
 const origin = computed(() => (typeof location !== 'undefined' ? location.origin : ''))
@@ -57,36 +47,22 @@ async function copyAddress(item: PortNotice) {
   }
 }
 
-async function poll() {
-  try {
-    const data = await api<{ ports: PortItem[] }>('/api/ports')
-    const list = (data.ports || []).filter(isInteresting)
-    const next = new Set(list.map((p) => p.port))
-
+watch(
+  ports,
+  (list) => {
+    const interesting = list.filter(isInteresting)
+    const next = new Set(interesting.map((p) => p.port))
     if (known.value === null) {
       known.value = next
       return
     }
-
-    for (const item of list) {
+    for (const item of interesting) {
       if (!known.value.has(item.port)) pushNotice(item)
     }
     known.value = next
-  } catch {
-    /* ignore transient errors */
-  }
-}
-
-onMounted(() => {
-  void poll()
-  timer = setInterval(() => {
-    void poll()
-  }, 2500)
-})
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+  },
+  { deep: true },
+)
 </script>
 
 <template>

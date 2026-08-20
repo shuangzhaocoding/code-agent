@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import mimetypes
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from code_agent.db.models import Workspace
@@ -11,6 +13,9 @@ from code_agent.policy.engine import is_protected
 from code_agent.tools.paths import list_dir, read_text_file, resolve_in_workspace, workspace_root
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
+
+# Max size for browser preview of binary / media files
+RAW_FILE_MAX_BYTES = 80 * 1024 * 1024
 
 
 class WorkspaceIn(BaseModel):
@@ -74,6 +79,31 @@ async def get_file(workspace_id: str, path: str):
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
     return {"path": path, "content": read_text_file(file_path)}
+
+
+@router.get("/{workspace_id}/file/raw")
+async def get_file_raw(workspace_id: str, path: str):
+    ws = await _get_ws(workspace_id)
+    file_path = resolve_in_workspace(ws.root_path, path)
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": "文件不存在"})
+    size = file_path.stat().st_size
+    if size > RAW_FILE_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "file.too_large",
+                "message": f"文件过大（{size} bytes），预览上限 {RAW_FILE_MAX_BYTES} bytes",
+            },
+        )
+    mime, _ = mimetypes.guess_type(str(file_path))
+    media_type = mime or "application/octet-stream"
+    return FileResponse(
+        path=file_path,
+        media_type=media_type,
+        filename=file_path.name,
+        content_disposition_type="inline",
+    )
 
 
 @router.put("/{workspace_id}/file")

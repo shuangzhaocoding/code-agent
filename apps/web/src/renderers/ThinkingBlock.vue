@@ -8,6 +8,7 @@ const streaming = computed(() => props.block.status === 'streaming')
 const bodyEl = ref<HTMLElement | null>(null)
 const elapsed = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+let scrollRaf = 0
 
 function toMs(v: number | string | undefined): number {
   if (!v) return 0
@@ -24,11 +25,12 @@ function updateElapsed() {
 
 onMounted(() => {
   updateElapsed()
-  timer = setInterval(updateElapsed, 100)
+  timer = setInterval(updateElapsed, 500)
 })
 
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer)
+  if (scrollRaf) cancelAnimationFrame(scrollRaf)
 })
 
 watch(() => props.block.status, () => {
@@ -41,9 +43,13 @@ watch(() => props.block.status, () => {
 
 watch(
   () => props.block.text,
-  async () => {
-    const el = bodyEl.value
-    if (el) el.scrollTop = el.scrollHeight
+  () => {
+    if (scrollRaf) return
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = 0
+      const el = bodyEl.value
+      if (el) el.scrollTop = el.scrollHeight
+    })
   },
 )
 

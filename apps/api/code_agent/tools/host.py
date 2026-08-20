@@ -39,7 +39,7 @@ def _root() -> str:
 
 @tool
 async def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
-    """Read a UTF-8 text file from the workspace. offset is 1-based line number."""
+    """Read a UTF-8 text file. Path may be workspace-relative or absolute (incl. ~)."""
     file_path = resolve_in_workspace(_root(), path)
     if not file_path.is_file():
         return f"ERROR: file not found: {path}"
@@ -54,7 +54,7 @@ async def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
 
 @tool
 async def list_dir(path: str = ".") -> str:
-    """List a directory relative to the workspace root."""
+    """List a directory. Path may be workspace-relative or absolute (incl. ~)."""
     from code_agent.tools.paths import list_dir as _list
 
     items = _list(_root(), path)
@@ -117,7 +117,7 @@ async def grep_search(query: str, glob: str = "", regex: bool = False) -> str:
 
 @tool
 async def write_file(path: str, content: str) -> str:
-    """Create or overwrite a UTF-8 text file in the workspace."""
+    """Create or overwrite a UTF-8 text file. Path may be workspace-relative or absolute (incl. ~)."""
     if is_protected(path):
         return f"ERROR: protected file, cannot write: {path}"
     file_path = resolve_in_workspace(_root(), path)
@@ -153,7 +153,7 @@ async def write_file(path: str, content: str) -> str:
 
 @tool
 async def search_replace(path: str, old_string: str, new_string: str) -> str:
-    """Replace the first exact occurrence of old_string with new_string in a file."""
+    """Replace the first exact occurrence of old_string with new_string. Path may be relative or absolute."""
     if is_protected(path):
         return f"ERROR: protected file: {path}"
     file_path = resolve_in_workspace(_root(), path)
@@ -184,7 +184,7 @@ async def search_replace(path: str, old_string: str, new_string: str) -> str:
 
 @tool
 async def delete_file(path: str) -> str:
-    """Delete a file or empty-safe directory inside the workspace."""
+    """Delete a file or directory. Path may be workspace-relative or absolute (incl. ~)."""
     if is_protected(path):
         return f"ERROR: protected path, cannot delete: {path}"
     file_path = resolve_in_workspace(_root(), path)
@@ -208,7 +208,7 @@ async def delete_file(path: str) -> str:
 
 @tool
 async def run_command(command: str, cwd: str = ".") -> str:
-    """Run a shell command inside the workspace. Use for tests, linters, git status."""
+    """Run a shell command. cwd may be workspace-relative or absolute (incl. ~)."""
     if is_command_blocked(command):
         return f"ERROR: command blocked by policy: {command}"
     if command_needs_confirm(command):

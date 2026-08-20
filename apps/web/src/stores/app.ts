@@ -4,6 +4,7 @@ import { api, subscribeRun, type StreamEnvelope } from '@/api/http'
 import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
+import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 
 export type Workspace = { id: string; name: string; root_path: string }
 export type Conversation = {
@@ -15,7 +16,14 @@ export type Conversation = {
 }
 
 export type FsItem = { name: string; path: string; is_dir: boolean }
-export type OpenFile = { path: string; content: string; dirty: boolean }
+export type OpenFile = {
+  path: string
+  kind: OpenFileKind
+  content: string
+  previewUrl?: string
+  mime?: string
+  dirty: boolean
+}
 export type FileReview = {
   path: string
   action: string
@@ -23,6 +31,43 @@ export type FileReview = {
   after: string
   status: 'pending' | 'accepted' | 'rejected'
   blockId: string
+}
+
+export type QueuedSend = {
+  id: string
+  conversationId: string
+  text: string
+  references: { type: string; path: string }[]
+  files: { name: string; url: string; size: number; type: string }[]
+  mode: 'ask' | 'agent' | 'plan'
+  modelId: string | null
+  thinkingLevel: ThinkingLevel
+}
+
+const SEND_QUEUE_KEY = 'ca.send_queue'
+
+function loadSendQueue(): QueuedSend[] {
+  try {
+    const raw = localStorage.getItem(SEND_QUEUE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is QueuedSend => {
+      if (!item || typeof item !== 'object') return false
+      const row = item as Partial<QueuedSend>
+      return typeof row.id === 'string' && typeof row.conversationId === 'string' && typeof row.text === 'string'
+    })
+  } catch {
+    return []
+  }
+}
+
+function persistSendQueue(queue: QueuedSend[]) {
+  try {
+    localStorage.setItem(SEND_QUEUE_KEY, JSON.stringify(queue))
+  } catch {
+    /* ignore quota */
+  }
 }
 
 export const useAppStore = defineStore('app', () => {
@@ -49,6 +94,7 @@ export const useAppStore = defineStore('app', () => {
   const openFiles = ref<OpenFile[]>([])
   const activePath = ref<string | null>(null)
   const openFile = computed(() => openFiles.value.find((f) => f.path === activePath.value) || null)
+  const fileNotice = ref<string | null>(null)
   const reviews = ref<Record<string, FileReview>>({})
   const confirmDialog = ref<{
     title: string
@@ -59,7 +105,23 @@ export const useAppStore = defineStore('app', () => {
     danger?: boolean
   } | null>(null)
   const activeRunId = ref<string | null>(null)
+  const sendQueue = ref<QueuedSend[]>(loadSendQueue())
+  watch(
+    sendQueue,
+    (queue) => {
+      persistSendQueue(queue)
+    },
+    { deep: true },
+  )
+  let queueFlushing = false
+  let suppressQueueFlush = false
+  let stopStream: (() => void) | null = null
   let confirmResolver: ((ok: boolean) => void) | null = null
+  /** Coalesce block.delta to one Vue update per animation frame. */
+  let pendingDeltas: StreamEnvelope[] = []
+  let deltaRaf = 0
+  /** Hold non-thinking blocks until the active thinking card finishes. */
+  let heldEvents: StreamEnvelope[] = []
   const providers = ref<any[]>([])
   const skills = ref<any[]>([])
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
@@ -67,7 +129,6 @@ export const useAppStore = defineStore('app', () => {
   const gitChangedPaths = ref<Record<string, string>>({})
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
-  let stopStream: (() => void) | null = null
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   const pendingTreePaths = new Set<string>()
 
@@ -90,7 +151,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function clearWorkspace() {
-    stopStream?.()
+    detachRun()
     workspaceId.value = null
     localStorage.removeItem('ca.workspace')
     conversationId.value = null
@@ -100,7 +161,6 @@ export const useAppStore = defineStore('app', () => {
     activePath.value = null
     reviews.value = {}
     confirmDialog.value = null
-    activeRunId.value = null
     fileTree.value = []
     childrenMap.value = {}
     expanded.value = new Set()
@@ -108,7 +168,6 @@ export const useAppStore = defineStore('app', () => {
     gitChangedPaths.value = {}
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
-    runStatus.value = 'idle'
   }
 
   async function selectWorkspace(id: string) {
@@ -213,17 +272,28 @@ export const useAppStore = defineStore('app', () => {
 
   function scheduleTreeRefresh(relPath?: string) {
     if (relPath) pendingTreePaths.add(relPath)
-    if (treeTimer) return
+    // Trailing debounce: wait until writes settle (tool.call often fires before the file exists)
+    if (treeTimer) clearTimeout(treeTimer)
     treeTimer = setTimeout(async () => {
       treeTimer = null
       const paths = [...pendingTreePaths]
       pendingTreePaths.clear()
-      if (!paths.length) {
-        await refreshTree()
-        return
+      try {
+        if (!paths.length) {
+          await refreshTree()
+          return
+        }
+        for (const path of paths) {
+          await revealInTree(path)
+          const parent = parentPath(path)
+          if (parent) await loadTree(parent)
+        }
+        await loadTree('')
+        await loadGitChangedPaths()
+      } catch (err) {
+        console.error(err)
       }
-      for (const path of paths) await revealInTree(path)
-    }, 250)
+    }, 350)
   }
 
   function childrenOf(path: string) {
@@ -266,7 +336,14 @@ export const useAppStore = defineStore('app', () => {
       body: JSON.stringify({ path: from, new_path: to }),
     })
     if (openFiles.value.some((f) => f.path === from)) {
-      openFiles.value = openFiles.value.map((f) => (f.path === from ? { ...f, path: to } : f))
+      openFiles.value = openFiles.value.map((f) => {
+        if (f.path !== from) return f
+        const next: typeof f = { ...f, path: to }
+        if (isPreviewKind(f.kind) && workspaceId.value) {
+          next.previewUrl = rawFileUrl(workspaceId.value, to)
+        }
+        return next
+      })
       if (activePath.value === from) activePath.value = to
     }
     const session = { ...sessionTreeMarks.value }
@@ -311,18 +388,35 @@ export const useAppStore = defineStore('app', () => {
     }
     const existing = openFiles.value.find((f) => f.path === path)
     const review = reviews.value[path]
+    const kind = classifyOpenKind(path)
+
     if (existing) {
       if (!existing.dirty && workspaceId.value) {
-        try {
-          const data = await api<{ path: string; content: string }>(
-            `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
-          )
-          existing.content = data.content
-          window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
-        } catch {
-          if (review) {
-            existing.content = review.after
-            window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: review.after } }))
+        if (existing.kind === 'html') {
+          existing.previewUrl = rawFileUrl(workspaceId.value, path)
+          try {
+            const data = await api<{ path: string; content: string }>(
+              `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+            )
+            existing.content = data.content
+            window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+          } catch {
+            /* keep previous content */
+          }
+        } else if (isPreviewKind(existing.kind)) {
+          existing.previewUrl = rawFileUrl(workspaceId.value, path)
+        } else {
+          try {
+            const data = await api<{ path: string; content: string }>(
+              `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+            )
+            existing.content = data.content
+            window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+          } catch {
+            if (review) {
+              existing.content = review.after
+              window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: review.after } }))
+            }
           }
         }
       }
@@ -330,22 +424,92 @@ export const useAppStore = defineStore('app', () => {
       window.dispatchEvent(new Event('ca-focus-editor'))
       return
     }
+
     if (!workspaceId.value) return
+    const ws = workspaceId.value
+
+    if (kind === 'html') {
+      try {
+        const data = await api<{ path: string; content: string }>(
+          `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
+        )
+        openFiles.value = [
+          ...openFiles.value,
+          {
+            path: data.path,
+            kind: 'html',
+            content: data.content,
+            previewUrl: rawFileUrl(ws, data.path),
+            dirty: false,
+          },
+        ]
+        activePath.value = data.path
+        window.dispatchEvent(new Event('ca-focus-editor'))
+        return
+      } catch (err) {
+        fileNotice.value = err instanceof Error ? err.message : String(err)
+        return
+      }
+    }
+
+    if (isPreviewKind(kind)) {
+      const url = rawFileUrl(ws, path)
+      openFiles.value = [
+        ...openFiles.value,
+        { path, kind, content: '', previewUrl: url, dirty: false },
+      ]
+      activePath.value = path
+      window.dispatchEvent(new Event('ca-focus-editor'))
+      return
+    }
+
     try {
       const data = await api<{ path: string; content: string }>(
-        `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+        `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
       )
-      openFiles.value = [...openFiles.value, { path: data.path, content: data.content, dirty: false }]
+      openFiles.value = [...openFiles.value, { path: data.path, kind: 'text', content: data.content, dirty: false }]
       activePath.value = data.path
-    } catch {
-      if (review) {
-        openFiles.value = [...openFiles.value, { path, content: review.after, dirty: false }]
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // Unknown/binary: fall back to binary preview tab
+      if (msg.includes('file.binary') || msg.includes('Binary file')) {
+        try {
+          const url = rawFileUrl(ws, path)
+          openFiles.value = [
+            ...openFiles.value,
+            { path, kind: 'binary', content: '', previewUrl: url, dirty: false },
+          ]
+          activePath.value = path
+        } catch (fallbackErr) {
+          fileNotice.value = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+          return
+        }
+      } else if (review) {
+        openFiles.value = [...openFiles.value, { path, kind: 'text', content: review.after, dirty: false }]
         activePath.value = path
       } else {
+        fileNotice.value = msg || '打开文件失败'
         return
       }
     }
     window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
+  function parseApiError(raw: string): string {
+    try {
+      const parsed = JSON.parse(raw) as { detail?: { message?: string; code?: string } | string }
+      if (typeof parsed.detail === 'string') return parsed.detail
+      if (parsed.detail && typeof parsed.detail === 'object') {
+        return parsed.detail.message || parsed.detail.code || raw
+      }
+    } catch {
+      /* ignore */
+    }
+    return raw
+  }
+
+  function clearFileNotice() {
+    fileNotice.value = null
   }
 
   async function openAgentFile(path: string) {
@@ -495,7 +659,7 @@ export const useAppStore = defineStore('app', () => {
 
   function updateOpenContent(path: string, content: string) {
     const file = openFiles.value.find((f) => f.path === path)
-    if (!file || file.content === content) return
+    if (!file || !isEditableKind(file.kind) || file.content === content) return
     file.content = content
     file.dirty = true
     if (ackedTreeMarks.value[path]) {
@@ -507,12 +671,15 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveOpenFile() {
     const file = openFile.value
-    if (!workspaceId.value || !file) return
+    if (!workspaceId.value || !file || !isEditableKind(file.kind)) return
     await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(file.path)}`, {
       method: 'PUT',
       body: JSON.stringify({ content: file.content }),
     })
     file.dirty = false
+    if (file.kind === 'html') {
+      file.previewUrl = rawFileUrl(workspaceId.value, file.path)
+    }
     void loadGitChangedPaths()
   }
 
@@ -531,22 +698,130 @@ export const useAppStore = defineStore('app', () => {
     await openConversation(conv.id)
   }
 
-  async function openConversation(id: string) {
+  function discardPendingDeltas() {
+    if (deltaRaf) {
+      cancelAnimationFrame(deltaRaf)
+      deltaRaf = 0
+    }
+    pendingDeltas = []
+    heldEvents = []
+  }
+
+  function hasStreamingThinking(runId?: string | null): boolean {
+    const rid = runId || activeRunId.value
+    if (!rid) return false
+    for (const m of messages.value) {
+      if (m.run_id !== rid && m.id !== `run-${rid}`) continue
+      if (m.blocks.some((b) => b.type === 'assistant.thinking' && b.status === 'streaming')) return true
+    }
+    return false
+  }
+
+  function heldBlockIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const ev of heldEvents) {
+      if (ev.type === 'block.started' && ev.payload?.block_id) ids.add(String(ev.payload.block_id))
+    }
+    return ids
+  }
+
+  function releaseHeldEvents() {
+    if (!heldEvents.length) return
+    const batch = heldEvents
+    heldEvents = []
+    for (const ev of batch) applyIncomingEvent(ev)
+  }
+
+  function applyIncomingEvent(event: StreamEnvelope) {
+    messages.value = applyEvent(messages.value, event)
+    const payload = event.payload || {}
+    const blockId = payload.block_id != null ? String(payload.block_id) : ''
+    let type = String(payload.block_type || '')
+    let meta = (payload.meta as Record<string, unknown>) || {}
+    let path = eventPath(event)
+
+    // completed events often omit block_type/meta — recover from the applied block
+    if ((!type || !path) && blockId) {
+      for (const m of messages.value) {
+        const b = m.blocks.find((item) => item.id === blockId)
+        if (!b) continue
+        if (!type) type = b.type
+        if (!path && typeof b.meta.path === 'string') path = b.meta.path
+        if (!Object.keys(meta).length) meta = b.meta || {}
+        break
+      }
+    }
+
+    if (
+      (event.type === 'block.started' || event.type === 'block.completed') &&
+      (type === 'file.diff' || type === 'file.delete')
+    ) {
+      upsertReview({
+        id: blockId,
+        type,
+        meta,
+      })
+      const changedPath = String(meta.path || path || '')
+      if (changedPath && typeof meta.after === 'string') {
+        const file = openFiles.value.find((f) => f.path === changedPath)
+        if (file && !file.dirty) {
+          file.content = meta.after
+          window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: changedPath, content: meta.after } }))
+        }
+      }
+      if (type === 'file.diff' && (meta.action === 'create' || meta.action === 'overwrite') && changedPath) {
+        if (meta.action === 'create') {
+          sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: '新增' }
+        }
+      }
+    }
+    if (event.type === 'run.started') runStatus.value = 'running'
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+      runStatus.value = event.type.replace('run.', '')
+      const now = new Date().toISOString()
+      messages.value = messages.value.map((m) =>
+        m.run_id === event.run_id ? { ...m, ended_at: now } : m,
+      )
+      void refreshTree()
+      if (activeRunId.value === event.run_id) activeRunId.value = null
+      void flushSendQueue()
+    }
+    if (event.type === 'block.started' || event.type === 'block.completed') {
+      const name = String((meta as { name?: string }).name || '')
+      const fileOp =
+        type.startsWith('file.') ||
+        ['write_file', 'search_replace', 'delete_file', 'read_file'].includes(name)
+      if (fileOp) scheduleTreeRefresh(path || undefined)
+    }
+  }
+
+  function detachRun() {
+    discardPendingDeltas()
     stopStream?.()
+    stopStream = null
+    activeRunId.value = null
+    runStatus.value = 'idle'
+    lastEventId.value = null
+  }
+
+  async function openConversation(id: string) {
+    // Leave the previous run stream behind so the new chat is not "busy"
+    detachRun()
     conversationId.value = id
     const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
+    // Ignore late responses if user already switched again
+    if (conversationId.value !== id) return
     messages.value = data.messages || []
     mode.value = (data.mode as typeof mode.value) || 'agent'
     modelId.value = data.model_id
     applied.value = new Set()
-    if (data.active_run) {
-      lastEventId.value = data.active_run.last_event_id
-      runStatus.value = data.active_run.status
-      if (['queued', 'running'].includes(data.active_run.status)) {
-        attachRun(data.active_run.id, data.active_run.last_event_id)
-      }
+    const active = data.active_run
+    if (active && ['queued', 'running'].includes(String(active.status))) {
+      lastEventId.value = active.last_event_id
+      attachRun(active.id, active.last_event_id)
     } else {
       runStatus.value = 'idle'
+      activeRunId.value = null
       lastEventId.value = null
     }
   }
@@ -567,10 +842,7 @@ export const useAppStore = defineStore('app', () => {
 
     if (conversationId.value !== id) return
 
-    stopStream?.()
-    activeRunId.value = null
-    runStatus.value = 'idle'
-    lastEventId.value = null
+    detachRun()
     messages.value = []
     conversationId.value = null
 
@@ -599,60 +871,277 @@ export const useAppStore = defineStore('app', () => {
     return null
   }
 
+  function flushPendingDeltas() {
+    if (deltaRaf) {
+      cancelAnimationFrame(deltaRaf)
+      deltaRaf = 0
+    }
+    if (!pendingDeltas.length) return
+    const batch = pendingDeltas
+    pendingDeltas = []
+    let next = messages.value
+    for (const event of batch) {
+      next = applyEvent(next, event)
+    }
+    messages.value = next
+  }
+
+  function scheduleDeltaFlush() {
+    if (deltaRaf) return
+    deltaRaf = requestAnimationFrame(() => {
+      deltaRaf = 0
+      flushPendingDeltas()
+    })
+  }
+
   function onEvent(event: StreamEnvelope) {
+    // Drop events from a run we already navigated away from
+    if (!activeRunId.value || event.run_id !== activeRunId.value) return
     if (applied.value.has(event.event_id)) return
     applied.value.add(event.event_id)
     lastEventId.value = event.event_id
-    messages.value = applyEvent(messages.value, event)
-    const type = String(event.payload?.block_type || '')
+
+    const payload = event.payload || {}
+    const blockId = payload.block_id != null ? String(payload.block_id) : ''
+    const blockType = String(payload.block_type || '')
+
+    // While thinking is still streaming, hold tool/file/markdown cards (and their follow-ups)
+    if (event.type === 'block.started' && blockType !== 'assistant.thinking' && hasStreamingThinking(event.run_id)) {
+      heldEvents.push(event)
+      return
+    }
     if (
-      (event.type === 'block.started' || event.type === 'block.completed') &&
-      (type === 'file.diff' || type === 'file.delete')
+      (event.type === 'block.delta' || event.type === 'block.completed') &&
+      blockId &&
+      heldBlockIds().has(blockId)
     ) {
-      upsertReview({
-        id: String(event.payload?.block_id || ''),
-        type,
-        meta: (event.payload?.meta as Record<string, unknown>) || {},
-      })
-      const meta = (event.payload?.meta as Record<string, unknown>) || {}
-      const changedPath = String(meta.path || '')
-      if (changedPath && typeof meta.after === 'string') {
-        const file = openFiles.value.find((f) => f.path === changedPath)
-        if (file && !file.dirty) {
-          file.content = meta.after
-          window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: changedPath, content: meta.after } }))
-        }
-      }
+      heldEvents.push(event)
+      return
     }
-    if (event.type === 'run.started') runStatus.value = 'running'
+
+    // One paint per frame while streaming text/thinking
+    if (event.type === 'block.delta') {
+      pendingDeltas.push(event)
+      scheduleDeltaFlush()
+      return
+    }
+
+    flushPendingDeltas()
+    const completedThink =
+      event.type === 'block.completed' &&
+      (blockType === 'assistant.thinking' ||
+        messages.value.some((m) =>
+          m.blocks.some((b) => b.id === blockId && b.type === 'assistant.thinking'),
+        ))
+    applyIncomingEvent(event)
+
+    if (completedThink && !hasStreamingThinking(event.run_id)) {
+      releaseHeldEvents()
+    }
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
-      runStatus.value = event.type.replace('run.', '')
-      const now = new Date().toISOString()
-      messages.value = messages.value.map((m) =>
-        m.run_id === event.run_id ? { ...m, ended_at: now } : m,
-      )
-      refreshTree()
-    }
-    if (event.type === 'block.started' || event.type === 'block.completed') {
-      const type = String(event.payload?.block_type || '')
-      const name = String((event.payload?.meta as { name?: string } | undefined)?.name || '')
-      const path = eventPath(event)
-      const fileOp =
-        type.startsWith('file.') ||
-        ['write_file', 'search_replace', 'delete_file'].includes(name)
-      if (fileOp) scheduleTreeRefresh(path || undefined)
+      releaseHeldEvents()
     }
   }
 
   function attachRun(runId: string, after?: string | null) {
+    discardPendingDeltas()
     stopStream?.()
+    stopStream = null
     activeRunId.value = runId
     runStatus.value = 'running'
     stopStream = subscribeRun(runId, after || null, onEvent, () => {
+      // Stream closed after we already switched conversations — ignore
+      if (activeRunId.value !== runId) return
+      discardPendingDeltas()
       runStatus.value = runStatus.value === 'running' ? 'completed' : runStatus.value
-      if (activeRunId.value === runId) activeRunId.value = null
+      activeRunId.value = null
       loadConversations()
+      void flushSendQueue()
     })
+  }
+
+  function isRunBusy() {
+    return runStatus.value === 'running' || runStatus.value === 'queued' || Boolean(activeRunId.value)
+  }
+
+  function conversationQueue() {
+    const cid = conversationId.value
+    if (!cid) return []
+    return sendQueue.value.filter((item) => item.conversationId === cid)
+  }
+
+  function enqueueSend(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) return
+    sendQueue.value = [
+      ...sendQueue.value,
+      {
+        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        conversationId: conversationId.value,
+        text,
+        references,
+        files,
+        mode: mode.value,
+        modelId: modelId.value,
+        thinkingLevel: thinkingLevel.value,
+      },
+    ]
+  }
+
+  function removeQueuedSend(id: string) {
+    sendQueue.value = sendQueue.value.filter((item) => item.id !== id)
+  }
+
+  function clearConversationQueue(cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return
+    sendQueue.value = sendQueue.value.filter((item) => item.conversationId !== id)
+  }
+
+  async function waitUntilIdle(timeoutMs = 20000) {
+    const start = Date.now()
+    while (isRunBusy() && Date.now() - start < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    }
+  }
+
+  async function dispatchSend(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+    opts?: {
+      mode?: 'ask' | 'agent' | 'plan'
+      modelId?: string | null
+      thinkingLevel?: ThinkingLevel
+    },
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    const sendMode = opts?.mode ?? mode.value
+    const sendModel = opts?.modelId ?? modelId.value
+    const sendThinking = opts?.thinkingLevel ?? thinkingLevel.value
+    messages.value = [
+      ...messages.value,
+      {
+        id: `local-${Date.now()}`,
+        role: 'user',
+        created_at: new Date().toISOString(),
+        blocks: [
+          {
+            id: 'u',
+            type: 'user.text',
+            text,
+            meta: {
+              ...(references.length ? { references } : {}),
+              ...(files.length ? { files } : {}),
+            },
+            status: 'ok',
+          },
+        ],
+      },
+    ]
+    const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        mode: sendMode,
+        model_id: sendModel,
+        thinking_level: sendThinking,
+        thinking: sendThinking !== 'off',
+        references,
+        files,
+      }),
+    })
+    lastEventId.value = null
+    attachRun(data.run_id, null)
+  }
+
+  async function flushSendQueue() {
+    if (suppressQueueFlush || queueFlushing || isRunBusy()) return
+    const cid = conversationId.value
+    if (!cid) return
+    const next = sendQueue.value.find((item) => item.conversationId === cid)
+    if (!next) return
+    queueFlushing = true
+    sendQueue.value = sendQueue.value.filter((item) => item.id !== next.id)
+    try {
+      await dispatchSend(next.text, next.references, next.files, {
+        mode: next.mode,
+        modelId: next.modelId,
+        thinkingLevel: next.thinkingLevel,
+      })
+    } catch (err) {
+      sendQueue.value = [next, ...sendQueue.value]
+      console.error(err)
+    } finally {
+      queueFlushing = false
+    }
+  }
+
+  async function send(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    if (isRunBusy()) {
+      enqueueSend(text, references, files)
+      return
+    }
+    await dispatchSend(text, references, files)
+  }
+
+  async function sendNow(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    suppressQueueFlush = true
+    try {
+      if (isRunBusy()) {
+        await stop()
+        await waitUntilIdle()
+      }
+      await dispatchSend(text, references, files)
+    } finally {
+      suppressQueueFlush = false
+    }
+  }
+
+  async function sendQueuedNow(id: string) {
+    const item = sendQueue.value.find((q) => q.id === id)
+    if (!item) return
+    sendQueue.value = sendQueue.value.filter((q) => q.id !== id)
+    suppressQueueFlush = true
+    try {
+      if (isRunBusy()) {
+        await stop()
+        await waitUntilIdle()
+      }
+      await dispatchSend(item.text, item.references, item.files, {
+        mode: item.mode,
+        modelId: item.modelId,
+        thinkingLevel: item.thinkingLevel,
+      })
+    } catch (err) {
+      sendQueue.value = [item, ...sendQueue.value]
+      console.error(err)
+    } finally {
+      suppressQueueFlush = false
+    }
+  }
+
+  async function stop() {
+    const conv = conversations.value.find((c) => c.id === conversationId.value)
+    const runId = activeRunId.value || conv?.active_run_id
+    if (!runId) return
+    await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
   }
 
   function askConfirm(req: {
@@ -684,56 +1173,6 @@ export const useAppStore = defineStore('app', () => {
       method: 'POST',
       body: JSON.stringify({ allowed }),
     }).catch(() => undefined)
-  }
-
-  async function send(
-    text: string,
-    references: { type: string; path: string }[] = [],
-    files: { name: string; url: string; size: number; type: string }[] = [],
-  ) {
-    if (!conversationId.value) await newChat()
-    if (!conversationId.value) return
-    messages.value = [
-      ...messages.value,
-      {
-        id: `local-${Date.now()}`,
-        role: 'user',
-        created_at: new Date().toISOString(),
-        blocks: [
-          {
-            id: 'u',
-            type: 'user.text',
-            text,
-            meta: {
-              ...(references.length ? { references } : {}),
-              ...(files.length ? { files } : {}),
-            },
-            status: 'ok',
-          },
-        ],
-      },
-    ]
-    const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({
-        text,
-        mode: mode.value,
-        model_id: modelId.value,
-        thinking_level: thinkingLevel.value,
-        thinking: thinking.value,
-        references,
-        files,
-      }),
-    })
-    lastEventId.value = null
-    attachRun(data.run_id, null)
-  }
-
-  async function stop() {
-    const conv = conversations.value.find((c) => c.id === conversationId.value)
-    const runId = conv?.active_run_id
-    if (!runId) return
-    await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
   }
 
   async function loadProviders() {
@@ -784,6 +1223,7 @@ export const useAppStore = defineStore('app', () => {
     conversationId,
     messages,
     runStatus,
+    sendQueue,
     mode,
     modelId,
     thinkingLevel,
@@ -795,6 +1235,8 @@ export const useAppStore = defineStore('app', () => {
     openFiles,
     activePath,
     openFile,
+    fileNotice,
+    clearFileNotice,
     reviews,
     pendingReview,
     pendingReviews,
@@ -843,7 +1285,13 @@ export const useAppStore = defineStore('app', () => {
     openConversation,
     deleteConversation,
     send,
+    sendNow,
+    sendQueuedNow,
     stop,
+    removeQueuedSend,
+    clearConversationQueue,
+    conversationQueue,
+    isRunBusy,
     loadProviders,
     loadSkills,
     loadSettings,

@@ -39,7 +39,7 @@ Rules:
 - Prefer search_replace over write_file for existing files.
 - Use list_skills / load_skill when a skill matches the task.
 - Use git_status / git_diff / git_log for version control; git_commit and git_push require user confirmation.
-- Paths are relative to the workspace root. Never escape it.
+- Prefer paths relative to the workspace root; absolute paths and ~ are allowed when needed (e.g. ~/.code-agent/skills).
 - Be concise. Show your work via tools rather than dumping huge code in chat.
 - After edits, mention which files changed.
 {thinking_prompt(thinking_level)}
@@ -278,6 +278,23 @@ async def _stream_graph(
     think_block: str | None = None
     tool_blocks: dict[str, str] = {}
     got_thought = False
+    # After answer/tool content starts, ignore further reasoning so UI order stays
+    # thinking → tools/markdown (models often interleave them).
+    answer_phase = False
+
+    async def _close_thinking() -> None:
+        nonlocal think_block
+        if not think_block:
+            return
+        await broker.publish(run_id, "block.completed", {"block_id": think_block, "status": "ok"})
+        think_block = None
+
+    async def _close_markdown() -> None:
+        nonlocal md_block
+        if not md_block:
+            return
+        await broker.publish(run_id, "block.completed", {"block_id": md_block, "status": "ok"})
+        md_block = None
 
     async for event in graph.astream_events(
         {"messages": messages},
@@ -304,10 +321,12 @@ async def _stream_graph(
                             text += part.get("text") or ""
                     elif isinstance(part, str):
                         text += part
-            if thought and emit_thinking:
+            if thought and emit_thinking and not answer_phase:
                 got_thought = True
                 think_block = await _emit_thinking(run_id, think_block, thought)
             if text:
+                answer_phase = True
+                await _close_thinking()
                 if md_block is None:
                     md_block = new_id()
                     await broker.publish(
@@ -319,16 +338,17 @@ async def _stream_graph(
         elif kind == "on_chat_model_end":
             output = data.get("output")
             leftover = _thinking_from_chunk(output)
-            if leftover and emit_thinking and not got_thought:
+            if leftover and emit_thinking and not got_thought and not answer_phase:
                 think_block = await _emit_thinking(run_id, think_block, leftover)
             got_thought = False
-            if md_block:
-                await broker.publish(run_id, "block.completed", {"block_id": md_block, "status": "ok"})
-                md_block = None
-            if think_block:
-                await broker.publish(run_id, "block.completed", {"block_id": think_block, "status": "ok"})
-                think_block = None
+            await _close_thinking()
+            await _close_markdown()
+            # Next model call in the agent loop may think again
+            answer_phase = False
         elif kind == "on_tool_start":
+            answer_phase = True
+            await _close_thinking()
+            await _close_markdown()
             call_id = str(event.get("run_id") or new_id())
             block_id = new_id()
             tool_blocks[call_id] = block_id

@@ -1,31 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
-
-type PortItem = {
-  port: number
-  address: string
-  pid: number | null
-  process: string | null
-  cmdline: string | null
-  url: string
-  preview_path: string
-  connect_host?: string
-  reachable?: boolean
-  self?: boolean
-}
+import { usePortsWatch, type PortItem } from '@/composables/usePortsWatch'
 
 const store = useAppStore()
-const ports = ref<PortItem[]>([])
-const error = ref('')
-const loading = ref(false)
+const { ports: livePorts, error, loading, refresh: refreshShared } = usePortsWatch()
 const killing = ref<number | null>(null)
 const query = ref('')
 const previewPort = ref<number | null>(null)
+/** When off, freeze the list in the panel; shared poller still runs for toast. */
 const autoRefresh = ref(true)
-let timer: ReturnType<typeof setInterval> | null = null
+const frozenPorts = ref<PortItem[] | null>(null)
+
+const ports = computed(() => frozenPorts.value ?? livePorts.value)
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -40,20 +29,20 @@ const previewUrl = computed(() =>
   previewPort.value != null ? `/api/preview/${previewPort.value}/` : null,
 )
 
-async function refresh() {
-  loading.value = true
-  error.value = ''
-  try {
-    const data = await api<{ ports: PortItem[] }>('/api/ports')
-    ports.value = data.ports || []
-    if (previewPort.value != null && !ports.value.some((p) => p.port === previewPort.value)) {
+watch(
+  ports,
+  (list) => {
+    if (previewPort.value != null && !list.some((p) => p.port === previewPort.value)) {
       previewPort.value = null
     }
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    loading.value = false
-  }
+  },
+  { deep: true },
+)
+
+async function refresh() {
+  frozenPorts.value = null
+  autoRefresh.value = true
+  await refreshShared()
 }
 
 function openExternal(item: PortItem) {
@@ -106,31 +95,10 @@ async function killPort(item: PortItem) {
   }
 }
 
-function startTimer() {
-  stopTimer()
-  if (!autoRefresh.value) return
-  timer = setInterval(() => {
-    void refresh()
-  }, 3000)
-}
-
-function stopTimer() {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-
-onMounted(() => {
-  void refresh()
-  startTimer()
-})
-
-onUnmounted(stopTimer)
-
 function onToggleAuto() {
   autoRefresh.value = !autoRefresh.value
-  startTimer()
+  if (autoRefresh.value) frozenPorts.value = null
+  else frozenPorts.value = livePorts.value.map((p) => ({ ...p }))
 }
 </script>
 

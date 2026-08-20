@@ -21,12 +21,19 @@ def workspace_root(root: str) -> Path:
 
 
 def resolve_in_workspace(root: str, rel: str) -> Path:
+    """Resolve a path for tools/APIs.
+
+    - Relative paths resolve against the workspace root (also supports ``..``).
+    - Absolute paths and ``~`` are allowed with no workspace sandbox.
+    """
     base = workspace_root(root)
-    raw = (rel or ".").lstrip("/")
-    target = (base / raw).resolve()
-    if not target.is_relative_to(base):
-        raise PathEscapeError()
-    return target
+    raw = (rel or ".").strip() or "."
+    if raw.startswith("~"):
+        return Path(raw).expanduser().resolve()
+    candidate = Path(raw)
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (base / raw).resolve()
 
 
 def is_ignored(rel: str, extra: list[str] | None = None) -> bool:
@@ -82,7 +89,10 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail={"code": "path.denied", "message": str(exc)})
     for child in entries:
-        rel_child = str(child.relative_to(workspace_root(root))).replace("\\", "/")
+        try:
+            rel_child = str(child.relative_to(workspace_root(root))).replace("\\", "/")
+        except ValueError:
+            rel_child = str(child)
         if is_ignored(rel_child, ignores) or child.name.startswith(".git"):
             continue
         items.append(

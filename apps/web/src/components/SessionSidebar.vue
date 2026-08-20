@@ -31,7 +31,7 @@ const navItems = [
 ]
 
 const footItems = [
-  { id: 'skills', component: 'skills', title: 'Skill', label: 'Skill', icon: 'book' },
+  { id: 'skills', component: 'skills', title: 'Skill', label: 'Skill', icon: 'puzzle' },
   { id: 'models', component: 'models', title: '模型', label: '模型', icon: 'chip' },
   { id: 'settings', component: 'settings', title: '设置', label: '设置', icon: 'sliders' },
 ]

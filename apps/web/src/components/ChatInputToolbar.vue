@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import ToolbarSelect, { type ToolbarSelectOption } from '@/components/ToolbarSelect.vue'
 import { THINKING_LEVELS, type ThinkingLevel } from '@/types/thinking'
-import type { LlmModel } from '@/types/llm'
 
 const store = useAppStore()
 
@@ -47,16 +46,6 @@ const modelOptions = computed(() => {
   return options
 })
 
-const selectedModel = computed(() => {
-  for (const provider of store.providers) {
-    const model = (provider.models || []).find((item: LlmModel) => item.id === store.modelId)
-    if (model) return model as LlmModel
-  }
-  return null
-})
-
-const thinkingSupported = computed(() => selectedModel.value?.capabilities?.thinking?.supported ?? true)
-
 const thinkingOptions = computed(() =>
   THINKING_LEVELS.map((item) => ({
     value: item.value,
@@ -71,18 +60,11 @@ function onThinkingChange(value: string | null) {
   if (!value) return
   store.thinkingLevel = value as ThinkingLevel
 }
-
-watch([() => store.modelId, thinkingSupported], () => {
-  if (!thinkingSupported.value && store.thinkingLevel !== 'off') {
-    store.thinkingLevel = 'off'
-  }
-})
 </script>
 
 <template>
   <div class="chat-input-toolbar">
     <ToolbarSelect
-      v-if="thinkingSupported"
       :model-value="store.thinkingLevel"
       :options="thinkingOptions"
       :min-width="96"
