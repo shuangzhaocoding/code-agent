@@ -23,6 +23,11 @@ workspace:
   max_file_bytes: 1048576
   tree_max_children: 400
   grep_max_hits: 200
+  # Explorer tree: hide only these. Dotfiles (.env, .gitignore, …) are shown.
+  # Dependency dirs (node_modules, venv, …) stay visible here; search still uses default_ignores.
+  tree_ignores:
+    - .git
+    - .code-agent/data
   default_ignores:
     - .git
     - node_modules

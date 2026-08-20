@@ -82,7 +82,7 @@ async def get_file(workspace_id: str, path: str):
 
 
 @router.get("/{workspace_id}/file/raw")
-async def get_file_raw(workspace_id: str, path: str):
+async def get_file_raw(workspace_id: str, path: str, download: bool = False):
     ws = await _get_ws(workspace_id)
     file_path = resolve_in_workspace(ws.root_path, path)
     if not file_path.is_file():
@@ -102,7 +102,7 @@ async def get_file_raw(workspace_id: str, path: str):
         path=file_path,
         media_type=media_type,
         filename=file_path.name,
-        content_disposition_type="inline",
+        content_disposition_type="attachment" if download else "inline",
     )
 
 
@@ -172,8 +172,6 @@ async def browse(path: str = "~"):
         p = p.parent
     items = []
     for child in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-        if child.name.startswith(".") and child.name not in {".code-agent"}:
-            continue
         items.append({"name": child.name, "path": str(child), "is_dir": child.is_dir()})
         if len(items) >= 400:
             break

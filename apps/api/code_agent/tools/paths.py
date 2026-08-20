@@ -9,6 +9,10 @@ from fastapi import HTTPException
 from code_agent.config import settings
 
 DEFAULT_IGNORES = list(settings.get("workspace.default_ignores") or [])
+TREE_IGNORES = list(
+    settings.get("workspace.tree_ignores")
+    or [".git", ".code-agent/data"]
+)
 
 
 class PathEscapeError(HTTPException):
@@ -36,16 +40,22 @@ def resolve_in_workspace(root: str, rel: str) -> Path:
     return (base / raw).resolve()
 
 
-def is_ignored(rel: str, extra: list[str] | None = None) -> bool:
+def matches_ignore(rel: str, patterns: list[str]) -> bool:
     name = rel.replace("\\", "/")
-    patterns = DEFAULT_IGNORES + (extra or [])
     parts = name.split("/")
     for pat in patterns:
+        if not pat:
+            continue
         if fnmatch.fnmatch(name, pat) or fnmatch.fnmatch(parts[0] if parts else name, pat):
             return True
         if any(fnmatch.fnmatch(p, pat) for p in parts):
             return True
     return False
+
+
+def is_ignored(rel: str, extra: list[str] | None = None) -> bool:
+    """Full ignore set for search / walk (defaults + gitignore + workspace globs)."""
+    return matches_ignore(rel, DEFAULT_IGNORES + (extra or []))
 
 
 def load_ignore_file(root: str) -> list[str]:
@@ -76,12 +86,18 @@ def read_text_file(path: Path, max_bytes: int | None = None) -> str:
 
 
 def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -> list[dict]:
+    """List one directory for the explorer tree.
+
+    Uses ``tree_ignores`` only (not ``default_ignores`` / ``.gitignore``), so
+    dependency dirs like ``node_modules`` and ``venv`` remain browsable.
+    Search/walk still use the full ignore set via ``is_ignored``.
+    """
     path = resolve_in_workspace(root, rel)
     if not path.exists():
         raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": "Not found"})
     if not path.is_dir():
         raise HTTPException(status_code=400, detail={"code": "path.not_dir", "message": "Not a directory"})
-    ignores = load_ignore_file(root) + (extra_ignores or [])
+    ignores = TREE_IGNORES + (extra_ignores or [])
     max_children = int(settings.get("workspace.tree_max_children") or 400)
     items = []
     try:
@@ -93,7 +109,7 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
             rel_child = str(child.relative_to(workspace_root(root))).replace("\\", "/")
         except ValueError:
             rel_child = str(child)
-        if is_ignored(rel_child, ignores) or child.name.startswith(".git"):
+        if matches_ignore(rel_child, ignores):
             continue
         items.append(
             {

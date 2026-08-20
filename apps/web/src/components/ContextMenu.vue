@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import AppIcon from '@/components/AppIcon.vue'
 
 export type ContextMenuItem = {
   id: string
   label?: string
+  icon?: string
   danger?: boolean
   disabled?: boolean
   separator?: boolean
@@ -95,7 +97,8 @@ onBeforeUnmount(() => {
         :disabled="item.disabled"
         @click="onSelect(item)"
       >
-        {{ item.label }}
+        <AppIcon v-if="item.icon" class="ctx-ico" :name="item.icon" :size="15" />
+        <span>{{ item.label }}</span>
       </button>
     </template>
   </div>
@@ -120,6 +123,9 @@ onBeforeUnmount(() => {
   background: var(--border);
 }
 .ctx button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   border: 0;
   background: transparent;
@@ -130,10 +136,17 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.3;
 }
+.ctx-ico {
+  flex: 0 0 16px;
+  width: 16px;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+}
 .ctx button:hover:not(:disabled) { background: var(--bg-muted); color: var(--text-h); }
+.ctx button:hover:not(:disabled) .ctx-ico { color: var(--text-h); }
 .ctx button:disabled {
   opacity: 0.4;
   cursor: default;
 }
 .ctx button.danger { color: var(--danger); }
+.ctx button.danger .ctx-ico { color: var(--danger); }
 </style>

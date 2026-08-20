@@ -106,6 +106,22 @@ async function onDelete() {
   }
 }
 
+function onDownload() {
+  const item = menu.value?.item
+  if (!item || item.is_dir || !store.workspaceId) return
+  closeMenu()
+  const url =
+    `/api/workspaces/${store.workspaceId}/file/raw` +
+    `?path=${encodeURIComponent(item.path)}&download=1`
+  const a = document.createElement('a')
+  a.href = url
+  a.download = item.name
+  a.rel = 'noopener'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
 function onGlobalClick() {
   closeMenu()
 }
@@ -145,10 +161,26 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
       />
     </div>
     <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
-      <button type="button" @click="startCreate('file')">新建文件</button>
-      <button type="button" @click="startCreate('dir')">新建目录</button>
-      <button v-if="menu.item" type="button" @click="startRename">重命名</button>
-      <button v-if="menu.item" type="button" class="danger" @click="onDelete">删除</button>
+      <button type="button" @click="startCreate('file')">
+        <AppIcon class="ctx-ico" name="file-plus" :size="15" />
+        <span>新建文件</span>
+      </button>
+      <button type="button" @click="startCreate('dir')">
+        <AppIcon class="ctx-ico" name="folder-plus" :size="15" />
+        <span>新建目录</span>
+      </button>
+      <button v-if="menu.item && !menu.item.is_dir" type="button" @click="onDownload">
+        <AppIcon class="ctx-ico" name="download" :size="15" />
+        <span>下载</span>
+      </button>
+      <button v-if="menu.item" type="button" @click="startRename">
+        <AppIcon class="ctx-ico" name="pencil" :size="15" />
+        <span>重命名</span>
+      </button>
+      <button v-if="menu.item" type="button" class="danger" @click="onDelete">
+        <AppIcon class="ctx-ico" name="trash" :size="15" />
+        <span>删除</span>
+      </button>
     </div>
   </div>
 </template>
@@ -196,6 +228,9 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   flex-direction: column;
 }
 .ctx button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   text-align: left;
   border: 0;
   background: transparent;
@@ -205,6 +240,13 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   cursor: pointer;
   font-size: 13px;
 }
-.ctx button:hover { background: var(--bg-muted); }
+.ctx-ico {
+  flex: 0 0 16px;
+  width: 16px;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+}
+.ctx button:hover { background: var(--bg-muted); color: var(--text-h); }
+.ctx button:hover .ctx-ico { color: var(--text-h); }
 .ctx button.danger { color: var(--danger); }
+.ctx button.danger .ctx-ico { color: var(--danger); }
 </style>

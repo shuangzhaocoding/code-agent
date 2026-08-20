@@ -318,12 +318,12 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
   const files = store.openFiles
   const index = files.findIndex((f) => f.path === path)
   return [
-    { id: 'close', label: '关闭' },
-    { id: 'close-others', label: '关闭其他', disabled: files.length < 2 },
-    { id: 'close-right', label: '关闭右侧', disabled: index < 0 || index >= files.length - 1 },
-    { id: 'close-all', label: '关闭全部', disabled: files.length === 0 },
+    { id: 'close', label: '关闭', icon: 'close' },
+    { id: 'close-others', label: '关闭其他', icon: 'close-others', disabled: files.length < 2 },
+    { id: 'close-right', label: '关闭右侧', icon: 'close-right', disabled: index < 0 || index >= files.length - 1 },
+    { id: 'close-all', label: '关闭全部', icon: 'close-all', disabled: files.length === 0 },
     { id: 'sep-copy', separator: true },
-    { id: 'copy-path', label: '复制路径' },
+    { id: 'copy-path', label: '复制路径', icon: 'copy' },
   ]
 })
 
