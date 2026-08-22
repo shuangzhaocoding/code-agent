@@ -548,7 +548,7 @@ function openContextUsageDialog() {
               @toggle="onWorkToggle"
             />
           </template>
-          <div class="msg-bar" :class="msg.role">
+          <div v-if="msg.role === 'user' || !isAssistantStreaming(msg)" class="msg-bar" :class="msg.role">
             <span class="msg-time">
               <template v-if="msg.created_at">{{ fmtTime(msg.created_at) }}</template>
               <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · 耗时 {{ fmtDuration(msg) }}</template>

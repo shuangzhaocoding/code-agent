@@ -21,6 +21,25 @@ _tasks: set[asyncio.Task] = set()
 _cancel: dict[str, asyncio.Event] = {}
 
 
+def _plan_format_rules(mode: str) -> str:
+    if mode != "plan":
+        return ""
+    return """
+When mode is plan:
+- Research first with read-only tools if needed.
+- Do not edit files or run mutating commands.
+- End with a numbered plan the UI can render as cards, using this format:
+
+## 计划
+1. **任务标题**：这一步要做什么，涉及哪些文件
+2. **任务标题**：具体动作与验收标准
+3. **任务标题**：...
+
+Each step must start with a number and a bold title, then a colon and one or two sentences.
+Ask the user to confirm before implementation.
+"""
+
+
 def _system_prompt(workspace: Workspace, mode: str, thinking_level: str = "off") -> str:
     skills = list_skill_catalog(workspace.root_path)
     skill_lines = "\n".join(
@@ -32,7 +51,7 @@ def _system_prompt(workspace: Workspace, mode: str, thinking_level: str = "off")
 Workspace root: {workspace.root_path}
 Mode: {mode}
 - ask: read-only. Do not write files or run mutating commands.
-- plan: propose a numbered plan, wait if the user must confirm.
+- plan: research with read-only tools, then propose a numbered plan. Do not implement until the user confirms.
 - agent: you may edit files and run commands inside the workspace.
 
 Rules:
@@ -43,6 +62,7 @@ Rules:
 - Be concise. Show your work via tools rather than dumping huge code in chat.
 - After edits, mention which files changed.
 {thinking_prompt(thinking_level)}
+{_plan_format_rules(mode)}
 
 Available skills:
 {skill_lines}
