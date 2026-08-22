@@ -10,6 +10,8 @@ export type ToolbarSelectOption = {
   icon?: AppIconName | string
   accent?: string
   group?: string
+  badge?: string
+  badgeKind?: 'ok' | 'fail' | 'unknown'
 }
 
 const props = withDefaults(
@@ -159,7 +161,10 @@ onBeforeUnmount(() => {
         <AppIcon :name="selected.icon" :size="14" />
       </span>
       <span class="trigger-copy">
-        <span class="trigger-label">{{ selected?.label || placeholder }}</span>
+        <span class="trigger-label">
+          {{ selected?.label || placeholder }}
+          <em v-if="selected?.badge" class="option-badge" :class="selected.badgeKind">{{ selected.badge }}</em>
+        </span>
         <span v-if="selected?.description && grow" class="trigger-desc">{{ selected.description }}</span>
       </span>
       <AppIcon class="trigger-chev" name="chevron" :size="12" />
@@ -196,7 +201,10 @@ onBeforeUnmount(() => {
               <AppIcon :name="option.icon" :size="14" />
             </span>
             <span class="menu-copy">
-              <span class="menu-label">{{ option.label }}</span>
+              <span class="menu-label">
+                {{ option.label }}
+                <em v-if="option.badge" class="option-badge" :class="option.badgeKind">{{ option.badge }}</em>
+              </span>
               <span v-if="option.description" class="menu-desc">{{ option.description }}</span>
             </span>
             <AppIcon v-if="option.value === modelValue" class="menu-check" name="check" :size="14" />
@@ -271,6 +279,9 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   max-width: 100%;
   line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .trigger-desc {
   font-size: 10px;
@@ -355,6 +366,31 @@ html[data-theme='dark'] .toolbar-select-menu {
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.option-badge {
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  padding: 0 5px;
+  border-radius: 999px;
+  line-height: 1.5;
+  flex-shrink: 0;
+  background: var(--code-bg);
+  color: var(--text-muted);
+}
+.option-badge.ok {
+  color: #15803d;
+  background: color-mix(in srgb, #22c55e 16%, var(--panel-bg));
+}
+.option-badge.fail {
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 14%, var(--panel-bg));
+}
+.option-badge.unknown {
+  color: var(--text-muted);
 }
 .menu-desc {
   font-size: 11px;

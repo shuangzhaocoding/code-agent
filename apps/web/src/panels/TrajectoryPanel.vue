@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, ref, toRef, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import TrajectoryOverview from '@/components/TrajectoryOverview.vue'
 import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
+import { useThrottledTrajectory } from '@/composables/useThrottledTrajectory'
 import {
   TRAJECTORY_FILTERS,
-  buildTimelineSpans,
-  trajectoryEntriesForLedger,
   type TrajectoryEntry,
   type TrajectoryKind,
 } from '@/utils/trajectory'
@@ -29,8 +28,7 @@ const activeId = ref<string | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const followTail = ref(true)
 
-const entries = computed(() => trajectoryEntriesForLedger(store.messages))
-const timelineSpans = computed(() => buildTimelineSpans(entries.value))
+const { entries, timelineSpans } = useThrottledTrajectory(toRef(store, 'messages'))
 
 const filtered = computed(() => {
   if (filter.value === 'all') return entries.value
@@ -83,7 +81,7 @@ async function scrollToTail(force = false) {
 }
 
 watch(
-  () => [entries.value.length, entries.value.at(-1)?.block.text, entries.value.at(-1)?.block.status],
+  () => [entries.value.length, entries.value.at(-1)?.block.status],
   () => scrollToTail(),
 )
 

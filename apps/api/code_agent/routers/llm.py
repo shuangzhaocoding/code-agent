@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from code_agent.crypto import encrypt_secret
@@ -13,6 +16,7 @@ from code_agent.llm.hub import (
     provider_public,
 )
 from code_agent.llm.models_sync import fetch_remote_models, normalize_base_url, sync_provider_models
+from code_agent.llm.probe import iter_probe_provider_models, probe_provider_models
 from code_agent.plugins.base import registry
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -204,34 +208,28 @@ async def test_provider(provider_id: str):
     if not provider:
         raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
 
-    remote_count = 0
-    try:
-        remote = await fetch_remote_models(provider)
-        remote_count = len(remote)
-    except Exception:
-        remote = []
+    rows = await LlmModel.filter(provider_id=provider_id)
+    if not rows:
+        try:
+            await sync_provider_models(provider)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "provider.sync_failed", "message": str(exc)},
+            ) from exc
 
-    model = await LlmModel.filter(provider_id=provider_id, enabled=True).first()
-    if not model and remote:
-        await sync_provider_models(provider)
-        model = await LlmModel.filter(provider_id=provider_id, enabled=True).first()
+    async def gen():
+        try:
+            async for event in iter_probe_provider_models(provider):
+                yield json.dumps(event, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            yield json.dumps({"type": "error", "message": str(exc)}, ensure_ascii=False) + "\n"
 
-    if not model:
-        if remote_count:
-            return {"ok": True, "reply": f"已获取 {remote_count} 个模型，请同步后测试对话"}
-        raise HTTPException(status_code=400, detail={"code": "model.missing", "message": "无法获取模型列表"})
-
-    chat, _ = await get_chat_model(str(model.id))
-    if chat is None:
-        raise HTTPException(status_code=400, detail={"code": "provider.invalid"})
-    try:
-        msg = await chat.ainvoke("Reply with the single word pong.")
-        reply = getattr(msg, "content", str(msg))[:500]
-        if remote_count:
-            reply = f"{reply}（远程模型 {remote_count} 个）"
-        return {"ok": True, "reply": reply}
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail={"code": "provider.auth", "message": str(exc)})
+    return StreamingResponse(
+        gen(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.post("/models")

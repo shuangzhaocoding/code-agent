@@ -4,9 +4,20 @@ from typing import Any
 
 from code_agent.crypto import decrypt_secret, encrypt_secret, mask_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.capabilities import merge_runtime_params, supports_thinking
+from code_agent.llm.capabilities import merge_runtime_params, rejects_sampling_params, supports_thinking
+from code_agent.llm.codex_gateway import (
+    canonicalize_codex_base_url,
+    chat_runtime_kwargs,
+    is_codex_gateway,
+    request_headers as codex_request_headers,
+)
 from code_agent.llm.models_sync import normalize_base_url, sync_provider_models
-from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled, thinking_extra_body, thinking_off_extra_body
+from code_agent.llm.thinking import (
+    normalize_thinking_level,
+    thinking_enabled,
+    thinking_extra_body,
+    thinking_off_extra_body,
+)
 from code_agent.plugins.base import ProviderSpec, registry
 
 
@@ -68,14 +79,28 @@ def _compat_chat_cls():
 
 def openai_compat_factory(provider: LlmProvider, model: LlmModel):
     cls = _compat_chat_cls()
+    if is_codex_gateway(provider):
+        headers = codex_request_headers(provider.extra_headers)
+        base_url = canonicalize_codex_base_url(provider.base_url or "")
+    else:
+        headers = {"User-Agent": "code-agent/1.0"}
+        if provider.extra_headers:
+            headers.update({str(k): str(v) for k, v in provider.extra_headers.items() if v is not None})
+        base_url = provider.base_url or None
     kwargs: dict[str, Any] = {
         "model": model.model_id,
         "api_key": decrypt_secret(provider.api_key_encrypted) or "no-key",
-        "base_url": provider.base_url or None,
-        "streaming": True,
-        "default_headers": provider.extra_headers or None,
+        "base_url": base_url,
+        "default_headers": headers,
     }
+    if is_codex_gateway(provider):
+        kwargs.update(chat_runtime_kwargs(model.model_id, "off"))
+    elif provider.kind != "openai":
+        kwargs["use_responses_api"] = False
     kwargs.update(merge_runtime_params(model.capabilities_json, model.params_json))
+    if rejects_sampling_params(model.model_id) or is_codex_gateway(provider):
+        kwargs.pop("temperature", None)
+        kwargs.pop("top_p", None)
     return cls(**kwargs)
 
 
@@ -100,9 +125,9 @@ PROVIDER_PRESETS: dict[str, dict] = {
         "base_url": "https://api.openai.com/v1",
     },
     "aivalux": {
-        "name": "AIValux",
-        "kind": "gateway",
-        "title": "AIValux 中转站",
+        "name": "AIValux Codex",
+        "kind": "aivalux",
+        "title": "AIValux Codex 中转",
         "base_url": "https://www.aivalux.com/v1",
     },
 }
@@ -115,6 +140,7 @@ def register_builtin_providers() -> None:
         ("deepseek", "DeepSeek"),
         ("ollama", "Ollama"),
         ("gateway", "API Gateway"),
+        ("aivalux", "AIValux Codex"),
         ("custom", "Custom OpenAI Compatible"),
     ]
     for kind, title in kinds:
@@ -134,31 +160,48 @@ async def resolve_chat_model(model_pk: str | None, thinking_level: str = "off"):
     can_think = supports_thinking(caps)
     siblings = await LlmModel.filter(provider_id=row.provider_id, enabled=True)
 
+    def _pair_stem(model_id: str | None) -> str:
+        name = (model_id or "").lower()
+        for suffix in ("-reasoner", "-thinking", "-think"):
+            if name.endswith(suffix):
+                return name[: -len(suffix)]
+        return name
+
+    def _paired(want_reasoner: bool):
+        stem = _pair_stem(row.model_id)
+        for sibling in siblings:
+            if sibling.id == row.id:
+                continue
+            if _pair_stem(sibling.model_id) != stem:
+                continue
+            if _looks_reasoner(sibling.model_id) == want_reasoner:
+                return sibling
+        return None
+
     if thinking and can_think and not _looks_reasoner(row.model_id):
-        pick = next(
-            (
-                m
-                for m in siblings
-                if _looks_reasoner(m.model_id) or supports_thinking(m.capabilities_json)
-            ),
-            None,
-        )
-        if pick and pick.id != row.id:
+        pick = _paired(True)
+        if pick:
             chat, row = await get_chat_model(str(pick.id))
 
     if not thinking and _looks_reasoner(row.model_id):
-        pick = next((m for m in siblings if not _looks_reasoner(m.model_id)), None)
+        pick = _paired(False)
         if pick:
             chat, row = await get_chat_model(str(pick.id))
 
     if chat is not None:
         extra = dict(getattr(chat, "extra_body", None) or {})
-        if thinking and can_think:
-            extra.update(thinking_extra_body(level, row.model_id if row else None))
-        else:
+        provider = await row.provider
+        if is_codex_gateway(provider):
             extra.pop("thinking", None)
-            extra.update(thinking_off_extra_body(row.model_id if row else None))
-        chat = chat.model_copy(update={"extra_body": extra or None})
+            updates = {"extra_body": extra or None, **chat_runtime_kwargs(row.model_id, level)}
+        else:
+            if thinking and can_think:
+                extra.update(thinking_extra_body(level, row.model_id if row else None))
+            else:
+                extra.pop("thinking", None)
+                extra.update(thinking_off_extra_body(row.model_id if row else None))
+            updates = {"extra_body": extra or None}
+        chat = chat.model_copy(update=updates)
     return chat, row
 
 
@@ -195,6 +238,8 @@ def provider_public(p: LlmProvider) -> dict:
 
 
 def model_public(m: LlmModel) -> dict:
+    caps = m.capabilities_json or {}
+    availability = caps.get("availability") if isinstance(caps, dict) else None
     return {
         "id": str(m.id),
         "provider_id": str(m.provider_id),
@@ -203,7 +248,8 @@ def model_public(m: LlmModel) -> dict:
         "context_window": m.context_window,
         "supports_tools": m.supports_tools,
         "supports_vision": m.supports_vision,
-        "capabilities": m.capabilities_json or {},
+        "capabilities": caps,
+        "availability": availability if isinstance(availability, dict) else None,
         "params": m.params_json or {},
         "is_default": m.is_default,
         "enabled": m.enabled,
@@ -222,10 +268,19 @@ async def apply_preset(
         raise ValueError(f"unknown preset: {kind}")
     key = api_key if api_key not in (None, "") else preset.get("default_api_key") or ""
     provider = await LlmProvider.filter(kind=preset["kind"]).first()
+    if provider is None and preset["kind"] == "aivalux":
+        for row in await LlmProvider.all():
+            if is_codex_gateway(row):
+                provider = row
+                break
     if provider:
         if key:
             provider.api_key_encrypted = encrypt_secret(key)
-        provider.base_url = normalize_base_url(preset["base_url"])
+        provider.base_url = (
+            canonicalize_codex_base_url(preset["base_url"])
+            if preset["kind"] == "aivalux"
+            else normalize_base_url(preset["base_url"])
+        )
         provider.name = preset["name"]
         provider.kind = preset["kind"]
         provider.enabled = True
@@ -234,7 +289,11 @@ async def apply_preset(
         provider = await LlmProvider.create(
             name=preset["name"],
             kind=preset["kind"],
-            base_url=normalize_base_url(preset["base_url"]),
+            base_url=(
+                canonicalize_codex_base_url(preset["base_url"])
+                if preset["kind"] == "aivalux"
+                else normalize_base_url(preset["base_url"])
+            ),
             api_key_encrypted=encrypt_secret(key),
             enabled=True,
         )

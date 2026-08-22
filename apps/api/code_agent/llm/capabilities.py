@@ -10,6 +10,16 @@ def _looks_reasoner(model_id: str | None) -> bool:
     )
 
 
+def _looks_gpt5(model_id: str | None) -> bool:
+    name = (model_id or "").lower()
+    return name.startswith("gpt-5") and "chat" not in name
+
+
+def rejects_sampling_params(model_id: str | None) -> bool:
+    """gpt-5 / o-series reject temperature and top_p (OpenAI returns 400; gateways wrap as 502)."""
+    return _looks_reasoner(model_id) or _looks_gpt5(model_id)
+
+
 def _looks_vision(model_id: str | None) -> bool:
     name = (model_id or "").lower()
     return any(
@@ -36,6 +46,7 @@ def infer_capabilities(model_id: str, remote: dict | None = None) -> dict[str, A
     """Infer supported runtime parameters for a model id."""
     remote = remote or {}
     reasoner = _looks_reasoner(model_id)
+    no_sampling = rejects_sampling_params(model_id)
     vision = bool(remote.get("supports_vision")) or _looks_vision(model_id)
     tools = remote.get("supports_tools")
     if tools is None:
@@ -43,7 +54,7 @@ def infer_capabilities(model_id: str, remote: dict | None = None) -> dict[str, A
 
     caps: dict[str, Any] = {
         "temperature": {
-            "supported": not reasoner,
+            "supported": not no_sampling,
             "min": 0,
             "max": 2,
             "default": 0.2,
@@ -53,17 +64,19 @@ def infer_capabilities(model_id: str, remote: dict | None = None) -> dict[str, A
             "supported": True,
             "min": 1,
             "max": 128000,
-            "default": 4096,
+            "default": 16384 if _looks_gpt5(model_id) else 4096,
         },
         "top_p": {
-            "supported": not reasoner,
+            "supported": not no_sampling,
             "min": 0,
             "max": 1,
             "default": 1,
             "step": 0.05,
         },
         "thinking": {
-            "supported": reasoner or any(
+            "supported": reasoner
+            or _looks_gpt5(model_id)
+            or any(
                 token in (model_id or "").lower()
                 for token in ("deepseek", "qwen", "claude", "gemini", "grok")
             ),

@@ -37,33 +37,29 @@ def _looks_reasoner(model_id: str | None) -> bool:
     return any(token in name for token in ("reasoner", "thinking")) or name.startswith(("o1", "o3", "o4"))
 
 
-def thinking_off_extra_body(model_id: str | None) -> dict:
+def _uses_deepseek_thinking(model_id: str | None) -> bool:
+    """Only DeepSeek-style chat APIs accept extra_body.thinking.
+
+    Sending it through a GPT/Claude gateway often becomes 502
+    `Upstream access forbidden`.
+    """
     name = (model_id or "").lower()
-    if _looks_reasoner(model_id) or "deepseek" in name:
+    if name.startswith(("o1", "o3", "o4", "gpt-")):
+        return False
+    return "deepseek" in name or "reasoner" in name
+
+
+def thinking_off_extra_body(model_id: str | None) -> dict:
+    if _uses_deepseek_thinking(model_id):
         return {"thinking": {"type": "disabled"}}
     return {}
 
 
 def thinking_extra_body(level: str | bool | None, model_id: str | None) -> dict:
     normalized = normalize_thinking_level(level)
-    if normalized == "off":
+    if normalized == "off" or not _uses_deepseek_thinking(model_id):
         return {}
-
-    name = (model_id or "").lower()
     budget = _BUDGET.get(normalized, _BUDGET["medium"])
-
-    if _looks_reasoner(model_id):
-        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-
-    if "deepseek" in name:
-        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-
-    if name.startswith(("o1", "o3", "o4")):
-        return {}
-
-    if normalized == "low":
-        return {"thinking": {"type": "enabled", "budget_tokens": budget}}
-
     return {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 
@@ -72,3 +68,19 @@ def preferred_reasoner_level(level: str | bool | None) -> str:
     if normalized in {"medium", "high"}:
         return normalized
     return "low"
+
+
+def reasoning_effort_for_level(level: str | bool | None, model_id: str | None) -> str | None:
+    """Map UI thinking level to OpenAI Responses `reasoning.effort`.
+
+    Codex on AIValux uses `model_reasoning_effort = "xhigh"` with `wire_api = "responses"`.
+    """
+    name = (model_id or "").lower()
+    if not (name.startswith("gpt-5") or name.startswith(("o1", "o3", "o4"))):
+        return None
+    if "chat" in name and "gpt-5" in name:
+        return None
+    if not thinking_enabled(level):
+        return None
+    normalized = normalize_thinking_level(level)
+    return {"low": "low", "medium": "medium", "high": "xhigh"}.get(normalized, "medium")

@@ -305,7 +305,14 @@ async def _stream_graph(
             break
         kind = event.get("event")
         data = event.get("data") or {}
-        if kind == "on_chat_model_stream":
+        if kind == "on_chat_model_start":
+            # Each LLM turn gets its own thinking card. Do not inherit
+            # answer_phase from the previous tool/answer burst.
+            await _close_thinking()
+            await _close_markdown()
+            answer_phase = False
+            got_thought = False
+        elif kind == "on_chat_model_stream":
             chunk = data.get("chunk")
             if chunk is None:
                 continue
@@ -325,6 +332,10 @@ async def _stream_graph(
                 got_thought = True
                 think_block = await _emit_thinking(run_id, think_block, thought)
             if text:
+                # Ignore leading whitespace so a stray "\\n" does not swallow this
+                # turn's thinking (common after tool calls).
+                if not text.strip() and md_block is None:
+                    continue
                 answer_phase = True
                 await _close_thinking()
                 if md_block is None:
@@ -346,9 +357,11 @@ async def _stream_graph(
             # Next model call in the agent loop may think again
             answer_phase = False
         elif kind == "on_tool_start":
-            answer_phase = True
             await _close_thinking()
             await _close_markdown()
+            # Close open cards for ordering, but do not keep answer_phase
+            # across the next LLM turn (that turn may think again).
+            answer_phase = False
             call_id = str(event.get("run_id") or new_id())
             block_id = new_id()
             tool_blocks[call_id] = block_id

@@ -126,6 +126,7 @@ export const useAppStore = defineStore('app', () => {
   const skills = ref<any[]>([])
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
   const activity = ref('agent')
+  const pendingModelProbe = ref(false)
   const gitChangedPaths = ref<Record<string, string>>({})
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
@@ -170,6 +171,18 @@ export const useAppStore = defineStore('app', () => {
     ackedTreeMarks.value = {}
   }
 
+  function conversationStorageKey(wsId: string) {
+    return `ca.conversation.${wsId}`
+  }
+
+  function rememberConversation(id: string | null) {
+    const ws = workspaceId.value
+    if (!ws) return
+    const key = conversationStorageKey(ws)
+    if (id) localStorage.setItem(key, id)
+    else localStorage.removeItem(key)
+  }
+
   async function selectWorkspace(id: string) {
     workspaceId.value = id
     localStorage.setItem('ca.workspace', id)
@@ -180,8 +193,13 @@ export const useAppStore = defineStore('app', () => {
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
     await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
-    if (conversations.value[0]) {
-      await openConversation(conversations.value[0].id)
+    const saved = localStorage.getItem(conversationStorageKey(id))
+    const restore =
+      (saved && conversations.value.some((c) => c.id === saved) && saved) ||
+      conversations.value[0]?.id ||
+      null
+    if (restore) {
+      await openConversation(restore)
     } else {
       await newChat()
     }
@@ -808,6 +826,8 @@ export const useAppStore = defineStore('app', () => {
     // Leave the previous run stream behind so the new chat is not "busy"
     detachRun()
     conversationId.value = id
+    rememberConversation(id)
+    messages.value = []
     const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
     // Ignore late responses if user already switched again
     if (conversationId.value !== id) return
@@ -1178,8 +1198,17 @@ export const useAppStore = defineStore('app', () => {
   async function loadProviders() {
     providers.value = await api('/api/llm/providers')
     const models = providers.value.flatMap((p) => p.models || [])
-    const def = models.find((m: any) => m.is_default) || models[0]
-    if (def && !modelId.value) modelId.value = def.id
+    const available = models.filter((m: any) => m.availability?.ok === true)
+    const pool = available.length ? available : models
+    const current = models.find((m: any) => m.id === modelId.value)
+    const currentOk = current && (available.length ? current.availability?.ok === true : true)
+    if (!currentOk) {
+      const def = pool.find((m: any) => m.is_default) || pool[0]
+      if (def) modelId.value = def.id
+    } else if (!modelId.value) {
+      const def = pool.find((m: any) => m.is_default) || pool[0]
+      if (def) modelId.value = def.id
+    }
   }
 
   async function loadSkills() {
@@ -1250,6 +1279,7 @@ export const useAppStore = defineStore('app', () => {
     skills,
     settings,
     activity,
+    pendingModelProbe,
     loadWorkspaces,
     addWorkspace,
     clearWorkspace,

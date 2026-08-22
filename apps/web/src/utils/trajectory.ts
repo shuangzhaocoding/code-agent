@@ -71,6 +71,12 @@ function blockSubtitle(block: Block): string {
   }
   const path = String(block.meta.path || args.path || args.name || '')
   if (path) return path
+  // Avoid coupling ledger subtitle to growing stream text (major re-render cost).
+  if (block.status === 'streaming') {
+    if (block.type === 'assistant.thinking') return '思考中…'
+    if (block.type === 'tool.call' || block.type === 'tool.result') return '执行中…'
+    return '进行中…'
+  }
   if (block.text) {
     const oneLine = block.text.trim().split('\n')[0]
     return oneLine.length > 72 ? `${oneLine.slice(0, 72)}…` : oneLine
@@ -125,9 +131,10 @@ function toMs(value: number | string | undefined, fallback: number): number {
   return Number.isFinite(ms) ? ms : fallback
 }
 
-export function buildTrajectory(messages: ChatMessage[]): TrajectoryEntry[] {
+export function buildTrajectory(messages: ChatMessage[], opts?: { snapshot?: boolean }): TrajectoryEntry[] {
   const entries: TrajectoryEntry[] = []
   let turn = 0
+  const snapshot = opts?.snapshot === true
 
   for (const msg of messages) {
     if (msg.role === 'user') turn += 1
@@ -135,13 +142,19 @@ export function buildTrajectory(messages: ChatMessage[]): TrajectoryEntry[] {
 
     for (const block of msg.blocks) {
       const kind = classifyBlock(block)
+      const blockView = snapshot
+        ? ({
+            ...block,
+            meta: { ...(block.meta || {}) },
+          } as Block)
+        : block
       entries.push({
         id: `${msg.id}:${block.id}`,
         turn: effectiveTurn,
         kind,
-        label: blockLabel(block, kind),
-        subtitle: blockSubtitle(block),
-        block,
+        label: blockLabel(blockView, kind),
+        subtitle: blockSubtitle(blockView),
+        block: blockView,
         msgId: msg.id,
         msgRole: msg.role,
       })
@@ -152,7 +165,7 @@ export function buildTrajectory(messages: ChatMessage[]): TrajectoryEntry[] {
 }
 
 export function trajectoryEntriesForLedger(messages: ChatMessage[]): TrajectoryEntry[] {
-  return buildTrajectory(messages).filter((entry) => !isConversationBlock(entry.block.type))
+  return buildTrajectory(messages, { snapshot: true }).filter((entry) => !isConversationBlock(entry.block.type))
 }
 
 export function buildTimelineSpans(entries: TrajectoryEntry[]): TimelineSpan[] {
@@ -164,7 +177,8 @@ export function buildTimelineSpans(entries: TrajectoryEntry[]): TimelineSpan[] {
     const start = toMs(entry.block.started_at, base)
     let end = toMs(entry.block.ended_at, 0)
     if (!end || end <= start) {
-      end = entry.block.status === 'streaming' ? now : start + 600
+      // Streaming: keep a stable short bar instead of extending every paint with Date.now()
+      end = entry.block.status === 'streaming' ? start + 900 : start + 600
     }
     return { entry, start, end }
   })

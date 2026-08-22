@@ -11,7 +11,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 let raf = 0
 let lastRenderAt = 0
 /** Keep markdown while streaming; coalesce parse to ~1–2 frames. */
-const STREAM_RENDER_MS = 32
+const STREAM_RENDER_MS = 80
 
 function renderNow(text: string) {
   html.value = DOMPurify.sanitize(

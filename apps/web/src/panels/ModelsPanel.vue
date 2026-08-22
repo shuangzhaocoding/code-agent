@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
@@ -10,6 +10,15 @@ const error = ref('')
 const busy = ref(false)
 const showCustom = ref(false)
 const testingId = ref<string | null>(null)
+const probe = ref<{
+  providerId: string
+  total: number
+  done: number
+  ok: number
+  fail: number
+  current: string
+  byId: Record<string, { ok: boolean; error?: string }>
+} | null>(null)
 const syncingId = ref<string | null>(null)
 const editingProviderId = ref<string | null>(null)
 const editingModelId = ref<string | null>(null)
@@ -19,7 +28,7 @@ const presetMeta: Record<string, { desc: string; icon: string; accent: string }>
   deepseek: { desc: '官方 OpenAI 兼容接口', icon: 'sparkles', accent: '#4f6bff' },
   ollama: { desc: '本地模型服务', icon: 'chip', accent: '#059669' },
   openai: { desc: 'GPT 系列模型', icon: 'globe', accent: '#0891b2' },
-  aivalux: { desc: 'AI 中转站 · 多模型聚合', icon: 'globe', accent: '#7c3aed' },
+  aivalux: { desc: 'Codex 专用中转 · Responses API', icon: 'globe', accent: '#7c3aed' },
 }
 
 const form = reactive({
@@ -60,7 +69,23 @@ const presetCards = computed(() =>
 
 onMounted(async () => {
   await Promise.all([store.loadProviders(), loadPresets()])
+  await runPendingProbe()
 })
+
+watch(
+  () => store.pendingModelProbe,
+  (pending) => {
+    if (pending) void runPendingProbe()
+  },
+)
+
+async function runPendingProbe() {
+  if (!store.pendingModelProbe) return
+  store.pendingModelProbe = false
+  for (const provider of store.providers) {
+    await testProvider(provider.id)
+  }
+}
 
 async function loadPresets() {
   try {
@@ -77,7 +102,10 @@ function onKindChange() {
     form.base_url = preset.base_url
     return
   }
-  if (form.kind === 'gateway') {
+  if (form.kind === 'aivalux') {
+    form.name = 'AIValux Codex'
+    form.base_url = 'https://www.aivalux.com'
+  } else if (form.kind === 'gateway') {
     form.name = 'API Gateway'
     form.base_url = 'https://api.example.com/v1'
   } else if (form.kind === 'openai_compat' || form.kind === 'custom') {
@@ -199,14 +227,85 @@ async function syncModels(id: string) {
 async function testProvider(id: string) {
   testingId.value = id
   error.value = ''
+  probe.value = { providerId: id, total: 0, done: 0, ok: 0, fail: 0, current: '', byId: {} }
   try {
-    const res = await api<{ ok: boolean; reply: string }>(`/api/llm/providers/${id}/test`, { method: 'POST' })
-    error.value = `连接成功：${res.reply?.slice(0, 120) || 'pong'}`
+    const res = await fetch(`/api/llm/providers/${id}/test`, { method: 'POST' })
+    if (!res.ok || !res.body) {
+      const raw = await res.text()
+      throw new Error(raw || res.statusText)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.trim()) continue
+        const ev = JSON.parse(line) as Record<string, unknown>
+        const state = probe.value
+        if (!state) continue
+        if (ev.type === 'start') {
+          probe.value = { ...state, total: Number(ev.total || 0) }
+        } else if (ev.type === 'item') {
+          const mid = String(ev.id || '')
+          const byId = { ...state.byId }
+          if (mid) byId[mid] = { ok: Boolean(ev.ok), error: String(ev.error || '') }
+          probe.value = {
+            ...state,
+            done: Number(ev.done || 0),
+            total: Number(ev.total || state.total),
+            ok: Number(ev.ok_count || 0),
+            fail: Number(ev.fail_count || 0),
+            current: String(ev.display_name || ev.model_id || ''),
+            byId,
+          }
+        } else if (ev.type === 'done') {
+          const ok = Number(ev.ok_count || 0)
+          const fail = Number(ev.fail_count || 0)
+          const total = Number(ev.total || state.total)
+          probe.value = { ...state, ok, fail, done: total, total }
+          error.value = `已检测：${ok} 个可用 / ${fail} 个不可用`
+        } else if (ev.type === 'error') {
+          throw new Error(String(ev.message || '探测失败'))
+        }
+      }
+    }
+    await store.loadProviders()
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     testingId.value = null
+    probe.value = null
   }
+}
+
+function availabilityLabel(m: LlmModel, providerId?: string) {
+  const live = probe.value?.providerId === providerId ? probe.value.byId[m.id] : undefined
+  if (probe.value?.providerId === providerId && !live) {
+    return { text: '检测中', kind: 'checking', title: '正在探测…' }
+  }
+  if (live) {
+    return live.ok
+      ? { text: '可用', kind: 'ok', title: '探测成功' }
+      : { text: '不可用', kind: 'fail', title: live.error || '探测失败' }
+  }
+  const avail = m.availability
+  if (!avail || avail.ok == null) return { text: '未检测', kind: 'unknown', title: '点击测试连接以检测可用性' }
+  if (avail.ok) {
+    const ms = avail.latency_ms ? ` · ${avail.latency_ms}ms` : ''
+    return { text: '可用', kind: 'ok', title: `探测成功${ms}` }
+  }
+  return { text: '不可用', kind: 'fail', title: avail.error || '探测失败' }
+}
+
+function probePercent(providerId: string) {
+  const state = probe.value
+  if (!state || state.providerId !== providerId || !state.total) return 0
+  return Math.round((state.done / state.total) * 100)
 }
 
 function startEditModel(m: LlmModel) {
@@ -297,6 +396,7 @@ function kindLabel(kind: string) {
     ollama: 'Ollama',
     openai: 'OpenAI',
     gateway: '中转站',
+    aivalux: 'AIValux Codex',
     openai_compat: 'OpenAI 兼容',
     custom: 'Custom',
   }
@@ -370,6 +470,7 @@ function capabilityTags(m: LlmModel) {
               <span>类型</span>
               <select v-model="form.kind" class="field-control" @change="onKindChange">
                 <option value="deepseek">DeepSeek</option>
+                <option value="aivalux">AIValux Codex</option>
                 <option value="gateway">中转站</option>
                 <option value="openai_compat">OpenAI Compatible</option>
                 <option value="openai">OpenAI</option>
@@ -439,7 +540,14 @@ function capabilityTags(m: LlmModel) {
                 >
                   <AppIcon name="refresh" :size="16" />
                 </button>
-                <button type="button" class="icon-btn" title="测试连接" :disabled="testingId === p.id" @click="testProvider(p.id)">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  :class="{ testing: testingId === p.id }"
+                  title="测试连接"
+                  :disabled="testingId === p.id"
+                  @click="testProvider(p.id)"
+                >
                   <AppIcon name="zap" :size="16" />
                 </button>
                 <button type="button" class="icon-btn" title="编辑" @click="startEditProvider(p)">
@@ -451,6 +559,15 @@ function capabilityTags(m: LlmModel) {
               </div>
             </div>
             <p class="provider-meta">{{ p.base_url }} · {{ p.api_key_masked || '无 Key' }} · {{ (p.models || []).length }} 个模型</p>
+            <div v-if="probe?.providerId === p.id" class="probe-progress">
+              <div class="probe-bar"><i :style="{ width: probePercent(p.id) + '%' }" /></div>
+              <p class="probe-label">
+                {{ probe.current ? `正在检测 ${probe.current}` : '准备检测' }}
+                · {{ probe.done }}/{{ probe.total }}
+                · 可用 {{ probe.ok }}
+                · 失败 {{ probe.fail }}
+              </p>
+            </div>
 
             <ul class="model-list">
               <li v-for="m in p.models || []" :key="m.id" class="model-row">
@@ -522,6 +639,11 @@ function capabilityTags(m: LlmModel) {
                     {{ m.display_name }}
                     <span v-if="m.is_default" class="default-badge">默认</span>
                   </button>
+                  <span
+                    class="avail-badge"
+                    :class="availabilityLabel(m, p.id).kind"
+                    :title="availabilityLabel(m, p.id).title"
+                  >{{ availabilityLabel(m, p.id).text }}</span>
                   <code class="model-id">{{ m.model_id }}</code>
                   <div class="cap-tags">
                     <span v-for="tag in capabilityTags(m)" :key="tag" class="cap-tag">{{ tag }}</span>
@@ -541,7 +663,7 @@ function capabilityTags(m: LlmModel) {
         </article>
       </section>
 
-      <p v-if="error" class="status-msg" :class="{ ok: error.startsWith('连接成功') || error.startsWith('已同步') }">{{ error }}</p>
+      <p v-if="error" class="status-msg" :class="{ ok: error.startsWith('连接成功') || error.startsWith('已同步') || error.startsWith('已检测') }">{{ error }}</p>
     </div>
   </div>
 </template>
@@ -794,6 +916,32 @@ function capabilityTags(m: LlmModel) {
   background: var(--code-bg);
   color: var(--text-muted);
 }
+.avail-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--code-bg);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.avail-badge.ok {
+  color: #15803d;
+  background: color-mix(in srgb, #22c55e 16%, var(--panel-bg));
+}
+.avail-badge.fail {
+  color: #b91c1c;
+  background: color-mix(in srgb, #ef4444 14%, var(--panel-bg));
+}
+.avail-badge.checking {
+  color: var(--primary);
+  background: var(--primary-soft);
+  animation: avail-blink 0.9s ease-in-out infinite;
+}
+@keyframes avail-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 .model-actions {
   display: flex;
   gap: 2px;
@@ -838,6 +986,41 @@ function capabilityTags(m: LlmModel) {
 .icon-btn.danger:hover {
   background: color-mix(in srgb, var(--danger) 12%, var(--code-bg));
   color: var(--danger);
+}
+.icon-btn.testing {
+  color: var(--primary);
+  background: var(--primary-soft);
+  pointer-events: none;
+}
+.icon-btn.testing :deep(svg) {
+  animation: zap-pulse 0.7s ease-in-out infinite;
+}
+@keyframes zap-pulse {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 1; }
+  40% { transform: scale(1.18) rotate(-12deg); opacity: 0.7; }
+  70% { transform: scale(0.92) rotate(8deg); opacity: 1; }
+}
+.probe-progress {
+  margin: 0 0 8px;
+}
+.probe-bar {
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--primary) 16%, var(--code-bg));
+}
+.probe-bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 0.25s ease;
+}
+.probe-label {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .btn-sm {
   height: 26px;

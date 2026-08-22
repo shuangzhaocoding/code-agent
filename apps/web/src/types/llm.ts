@@ -21,6 +21,13 @@ export type ModelParams = {
   top_p?: number
 }
 
+export type ModelAvailability = {
+  ok?: boolean
+  error?: string
+  checked_at?: string
+  latency_ms?: number
+}
+
 export type LlmModel = {
   id: string
   model_id: string
@@ -30,6 +37,7 @@ export type LlmModel = {
   supports_vision?: boolean
   context_window?: number
   capabilities?: ModelCapabilities
+  availability?: ModelAvailability | null
   params?: ModelParams
 }
 

@@ -6,6 +6,7 @@ import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
 import ChatInputToolbar from '@/components/ChatInputToolbar.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import { useChatAttachments } from '@/composables/useChatAttachments'
@@ -39,6 +40,18 @@ function toggleExpand(id: string) {
   if (s.has(id)) s.delete(id)
   else s.add(id)
   expandedMsgs.value = s
+}
+
+function isAssistantStreaming(msg: (typeof store.messages)[0]): boolean {
+  if (msg.role !== 'assistant') return false
+  if (msg.ended_at) return false
+  if (!running()) return false
+  return store.messages.at(-1)?.id === msg.id
+}
+
+function onWorkToggle() {
+  // Expanding work must not yank the viewport to the bottom.
+  pauseFollow()
 }
 
 function msgPlainText(msg: (typeof store.messages)[0]): string {
@@ -337,20 +350,37 @@ function onPointerDown(e: PointerEvent) {
 
 function followOutput() {
   if (!stick.value) return
+  // Only auto-follow while a run is actively producing output.
+  if (!running()) return
   if (raf) return
   raf = requestAnimationFrame(() => {
     raf = 0
-    if (!stick.value) return
+    if (!stick.value || !running()) return
     scrollToEnd()
   })
 }
 
+/** Force pin to bottom (conversation switch / initial load). */
+async function pinToBottom() {
+  stick.value = true
+  followGen += 1
+  const token = followGen
+  await nextTick()
+  if (token !== followGen) return
+  jumpToEnd()
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  if (token !== followGen || !stick.value) return
+  jumpToEnd()
+}
+
 onMounted(() => {
   if (timelineInner.value) {
-    resizeObs = new ResizeObserver(() => followOutput())
+    resizeObs = new ResizeObserver(() => {
+      if (running() && stick.value) followOutput()
+    })
     resizeObs.observe(timelineInner.value)
   }
-  followOutput()
+  if (store.messages.length) void pinToBottom()
 })
 
 onBeforeUnmount(() => {
@@ -361,19 +391,25 @@ onBeforeUnmount(() => {
 
 watch(
   () => store.conversationId,
-  async () => {
+  () => {
     stick.value = true
-    await nextTick()
-    jumpToEnd()
-    requestAnimationFrame(jumpToEnd)
   },
 )
 
 watch(
-  () => [store.conversationId, store.messages.length, store.runStatus] as const,
-  async () => {
-    await nextTick()
-    followOutput()
+  () => [store.conversationId, store.messages.length] as const,
+  async ([, len], prev) => {
+    if (!len) return
+    const switched = !prev || prev[0] !== store.conversationId
+    const filled = switched || (prev[1] === 0 && len > 0)
+    if (switched || filled) await pinToBottom()
+  },
+)
+
+watch(
+  () => store.runStatus,
+  () => {
+    if (running() && stick.value) followOutput()
   },
 )
 
@@ -506,9 +542,11 @@ function openContextUsageDialog() {
             >{{ expandedMsgs.has(msg.id) ? '收起' : '展开全部' }}</button>
           </template>
           <template v-else>
-            <section v-for="block in msg.blocks" :key="block.id" class="block">
-              <component :is="rendererFor(block.type)" :block="block as Block" />
-            </section>
+            <AssistantMessageBody
+              :msg="msg"
+              :streaming="isAssistantStreaming(msg)"
+              @toggle="onWorkToggle"
+            />
           </template>
           <div class="msg-bar" :class="msg.role">
             <span class="msg-time">

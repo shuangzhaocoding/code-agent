@@ -8,6 +8,13 @@ import httpx
 from code_agent.crypto import decrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
 from code_agent.llm.capabilities import default_params, infer_capabilities
+from code_agent.llm.codex_gateway import (
+    canonicalize_codex_base_url,
+    is_codex_chat_model,
+    is_codex_gateway,
+    preferred_model_id,
+    request_headers as codex_request_headers,
+)
 
 
 def normalize_base_url(base_url: str) -> str:
@@ -54,13 +61,19 @@ def _format_http_error(res: httpx.Response) -> str:
 async def fetch_remote_models(provider: LlmProvider) -> list[dict[str, Any]]:
     """Fetch model list from an OpenAI-compatible /v1/models endpoint."""
     api_key = decrypt_secret(provider.api_key_encrypted) or ""
-    headers = dict(provider.extra_headers or {})
+    if is_codex_gateway(provider):
+        headers = codex_request_headers(provider.extra_headers)
+        normalized = canonicalize_codex_base_url(provider.base_url or "")
+    else:
+        headers = dict(provider.extra_headers or {})
+        normalized = normalize_base_url(provider.base_url)
     if api_key and "Authorization" not in headers:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    normalized = normalize_base_url(provider.base_url)
     if normalized != (provider.base_url or "").rstrip("/"):
         provider.base_url = normalized
+        if is_codex_gateway(provider) and provider.kind != "aivalux":
+            provider.kind = "aivalux"
         await provider.save()
 
     url = _models_url(normalized)
@@ -105,6 +118,7 @@ async def sync_provider_models(
     existing = {m.model_id: m for m in await LlmModel.filter(provider_id=provider.id)}
     remote_ids = {item["model_id"] for item in remote_models}
     has_default = any(m.is_default for m in existing.values())
+    preferred = preferred_model_id([item["model_id"] for item in remote_models]) if is_codex_gateway(provider) else None
 
     if make_default and not has_default:
         await LlmModel.all().update(is_default=False)
@@ -114,14 +128,19 @@ async def sync_provider_models(
         model_id = item["model_id"]
         caps = infer_capabilities(model_id, item.get("remote"))
         row = existing.get(model_id)
-        is_default = make_default and index == 0 and not has_default
+        chat_ok = is_codex_chat_model(model_id) if is_codex_gateway(provider) else True
+        is_default = False
+        if is_codex_gateway(provider) and not has_default:
+            is_default = model_id == preferred
+        elif make_default and index == 0 and not has_default:
+            is_default = True
 
         if row:
             row.display_name = item["display_name"]
             row.capabilities_json = caps
             row.supports_tools = bool(caps.get("tools", {}).get("supported"))
             row.supports_vision = bool(caps.get("vision", {}).get("supported"))
-            row.enabled = True
+            row.enabled = chat_ok
             if is_default:
                 row.is_default = True
             if not row.params_json:
@@ -138,7 +157,7 @@ async def sync_provider_models(
                 capabilities_json=caps,
                 params_json=default_params(caps),
                 is_default=is_default,
-                enabled=True,
+                enabled=chat_ok,
             )
         saved.append(row)
 

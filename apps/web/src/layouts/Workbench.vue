@@ -60,11 +60,13 @@ onMounted(() => {
   window.addEventListener('ca-theme', onTheme)
   window.addEventListener('ca-focus-editor', focusEditor)
   window.addEventListener('ca-focus-agent', focusAgent)
+  window.addEventListener('ca-open-models', openModels)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-focus-editor', focusEditor)
   window.removeEventListener('ca-focus-agent', focusAgent)
+  window.removeEventListener('ca-open-models', openModels)
   stopResize()
 })
 
@@ -74,6 +76,10 @@ function focusEditor() {
 
 function focusAgent() {
   openPanel('agent', 'agent', 'Agent')
+}
+
+function openModels() {
+  openPanel('models', 'models', '模型')
 }
 
 function seed(apiRef: DockviewApi) {
