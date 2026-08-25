@@ -16,12 +16,13 @@ const meta: Record<string, { icon: string; label: string }> = {
   workspace: { icon: 'home', label: '工作空间' },
   explorer: { icon: 'folder', label: '文件' },
   editor: { icon: 'file', label: '编辑器' },
-  agent: { icon: 'sparkles', label: 'Agent' },
+  agent: { icon: 'atom', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },
-  ports: { icon: 'globe', label: '端口' },
+  ports: { icon: 'ports', label: '端口' },
   chats: { icon: 'chat', label: '会话' },
   git: { icon: 'git', label: 'Git' },
-  skills: { icon: 'puzzle', label: 'Skill' },
+  skills: { icon: 'book', label: 'Skill' },
+  plugins: { icon: 'puzzle', label: '插件' },
   models: { icon: 'chip', label: '模型' },
   settings: { icon: 'sliders', label: '设置' },
   trajectory: { icon: 'clock', label: '轨迹' },
@@ -44,9 +45,11 @@ function close(e: MouseEvent) {
 
 <template>
   <div class="ptab" :title="info.label">
-    <AppIcon :name="info.icon" :size="14" />
+    <AppIcon class="ptab-ico" :name="info.icon" :size="13" />
     <span class="lbl">{{ info.label }}</span>
-    <button type="button" class="x" title="关闭" @mousedown.stop.prevent @click="close">×</button>
+    <button type="button" class="x" title="关闭" @mousedown.stop.prevent @click="close">
+      <AppIcon name="close" :size="11" />
+    </button>
   </div>
 </template>
 
@@ -56,30 +59,36 @@ function close(e: MouseEvent) {
   align-items: center;
   gap: 6px;
   height: 100%;
-  padding: 0 2px 0 8px;
+  padding: 0 4px 0 9px;
   color: inherit;
 }
+.ptab-ico {
+  opacity: 0.82;
+}
 .lbl {
-  font-size: 11px;
-  font-weight: 600;
-  max-width: 72px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  max-width: 88px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: inherit;
 }
 .x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 16px;
   height: 16px;
+  margin-left: 2px;
   border: 0;
   border-radius: 4px;
   background: transparent;
   color: inherit;
   opacity: 0;
   cursor: pointer;
-  font-size: 13px;
-  line-height: 1;
 }
-.ptab:hover .x { opacity: 0.55; }
-.x:hover { opacity: 1 !important; background: color-mix(in srgb, currentColor 12%, transparent); }
+.ptab:hover .x { opacity: 0.5; }
+.x:hover { opacity: 1 !important; background: color-mix(in srgb, currentColor 14%, transparent); }
 </style>

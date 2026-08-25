@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme } from '@/theme'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import FilePreviewHost from '@/preview/FilePreviewHost.vue'
@@ -146,7 +147,7 @@ function ensureOrigModel(path: string, content: string) {
 const editorOptions = {
   automaticLayout: true,
   minimap: { enabled: false },
-  fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 13,
   scrollBeyondLastLine: false,
   padding: { top: 12 },
@@ -407,7 +408,10 @@ async function onTabMenuSelect(id: string) {
       />
       <div ref="host" class="host" :class="{ hidden: !!review || showMarkdownPreview || showFilePreview }" />
       <div ref="diffHost" class="host" :class="{ hidden: !review }" />
-      <div v-if="!store.openFile" class="empty">从左侧打开文件</div>
+      <div v-if="!store.openFile" class="empty">
+        <AppIcon name="file" :size="28" />
+        <p>从侧栏打开文件</p>
+      </div>
     </div>
     <ContextMenu
       v-if="tabMenu"
@@ -588,10 +592,13 @@ async function onTabMenuSelect(id: string) {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 10px;
   color: var(--text-muted);
   font-size: 13px;
   background: var(--editor-bg);
 }
+.empty p { margin: 0; }
 </style>

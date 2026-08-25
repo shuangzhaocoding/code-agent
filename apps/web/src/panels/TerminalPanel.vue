@@ -89,7 +89,7 @@ function createAndMount(entry: TermEntry) {
   entry.el = div
 
   const term = new Terminal({
-    fontFamily: 'IBM Plex Mono, ui-monospace, monospace',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 13,
     lineHeight: 1.25,
     theme: termTheme(currentTheme()),

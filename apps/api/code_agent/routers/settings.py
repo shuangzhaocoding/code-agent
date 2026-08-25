@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from code_agent.config import SETTINGS_SCHEMA, settings
 from code_agent.db.models import Setting
@@ -48,21 +49,22 @@ async def list_plugins():
             "enabled": spec.enabled,
             "modes": list(spec.modes),
             "description": spec.description,
+            "plugin_id": spec.plugin_id,
         }
         for spec in registry.tools.values()
     ]
-    plugins = [
+    plugins = [registry.plugin_public(p) for p in registry.plugins.values()]
+    providers = [
         {
-            "id": p.plugin_id,
-            "title": p.title,
-            "source": p.source,
-            "enabled": p.enabled,
-            "description": p.description,
-            "kind": p.kind,
+            "kind": spec.kind,
+            "title": spec.title,
+            "source": spec.source,
+            "enabled": spec.enabled,
+            "plugin_id": spec.plugin_id,
         }
-        for p in registry.plugins.values()
+        for spec in registry.providers.values()
     ]
-    return {"tools": tools, "plugins": plugins, "providers": [p.kind for p in registry.providers.values()]}
+    return {"tools": tools, "plugins": plugins, "providers": providers}
 
 
 @router.patch("/plugins/tools/{name}")
@@ -71,6 +73,40 @@ async def toggle_tool(name: str, body: dict):
     if spec:
         spec.enabled = bool(body.get("enabled", True))
     return {"ok": True, "name": name, "enabled": spec.enabled if spec else None}
+
+
+@router.get("/plugins/{plugin_id}/icon")
+async def get_plugin_icon(plugin_id: str):
+    from code_agent.plugins.icon_assets import icon_media_type, resolve_icon_file
+
+    info = registry.plugins.get(plugin_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail={"code": "plugin.not_found"})
+    path = resolve_icon_file(info)
+    if path is None:
+        raise HTTPException(status_code=404, detail={"code": "plugin.icon_not_found"})
+    return FileResponse(path, media_type=icon_media_type(path))
+
+
+@router.patch("/plugins/{plugin_id}")
+async def patch_plugin(plugin_id: str, body: dict):
+    from fastapi import HTTPException
+
+    from code_agent.db.models import PluginState
+
+    info = registry.plugins.get(plugin_id)
+    if info is None:
+        raise HTTPException(status_code=404, detail={"code": "plugin.not_found"})
+    if "enabled" in body:
+        enabled = bool(body.get("enabled"))
+        registry.set_plugin_enabled(plugin_id, enabled)
+        row = await PluginState.get_or_none(plugin_id=plugin_id)
+        if row:
+            row.enabled = enabled
+            await row.save()
+        else:
+            await PluginState.create(plugin_id=plugin_id, enabled=enabled)
+    return {"ok": True, "plugin": registry.plugin_public(info)}
 
 
 @router.get("/layout")

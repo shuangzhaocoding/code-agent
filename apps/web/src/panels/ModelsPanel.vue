@@ -25,10 +25,13 @@ const editingModelId = ref<string | null>(null)
 const presets = ref<LlmPreset[]>([])
 
 const presetMeta: Record<string, { desc: string; icon: string; accent: string }> = {
-  deepseek: { desc: '官方 OpenAI 兼容接口', icon: 'sparkles', accent: '#4f6bff' },
+  deepseek: { desc: 'DeepSeek 官方 · thinking.budget_tokens', icon: 'think', accent: '#4f6bff' },
+  qwen: { desc: '阿里云 DashScope · enable_thinking', icon: 'think', accent: '#f97316' },
   ollama: { desc: '本地模型服务', icon: 'chip', accent: '#059669' },
-  openai: { desc: 'GPT 系列模型', icon: 'globe', accent: '#0891b2' },
-  aivalux: { desc: 'Codex 专用中转 · Responses API', icon: 'globe', accent: '#7c3aed' },
+  openai: { desc: 'OpenAI 官方 · reasoning.effort', icon: 'globe', accent: '#0891b2' },
+  aivalux: { desc: 'Codex 中转 · Responses API', icon: 'globe', accent: '#7c3aed' },
+  gateway: { desc: 'OpenAI 兼容中转 · 按模型推断思考参数', icon: 'globe', accent: '#6366f1' },
+  ccx: { desc: 'CCX 网关 · Chat + Responses 双入口', icon: 'globe', accent: '#0ea5e9' },
 }
 
 const form = reactive({
@@ -108,6 +111,9 @@ function onKindChange() {
   } else if (form.kind === 'gateway') {
     form.name = 'API Gateway'
     form.base_url = 'https://api.example.com/v1'
+  } else if (form.kind === 'ccx') {
+    form.name = 'CCX'
+    form.base_url = 'http://127.0.0.1:3000/v1'
   } else if (form.kind === 'openai_compat' || form.kind === 'custom') {
     form.name = 'OpenAI Compatible'
     form.base_url = 'https://api.openai.com/v1'
@@ -396,6 +402,7 @@ function kindLabel(kind: string) {
     ollama: 'Ollama',
     openai: 'OpenAI',
     gateway: '中转站',
+    ccx: 'CCX',
     aivalux: 'AIValux Codex',
     openai_compat: 'OpenAI 兼容',
     custom: 'Custom',
@@ -471,6 +478,7 @@ function capabilityTags(m: LlmModel) {
               <select v-model="form.kind" class="field-control" @change="onKindChange">
                 <option value="deepseek">DeepSeek</option>
                 <option value="aivalux">AIValux Codex</option>
+                <option value="ccx">CCX</option>
                 <option value="gateway">中转站</option>
                 <option value="openai_compat">OpenAI Compatible</option>
                 <option value="openai">OpenAI</option>
@@ -908,6 +916,20 @@ function capabilityTags(m: LlmModel) {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+@media (hover: hover) {
+  .model-id,
+  .cap-tags {
+    display: none;
+  }
+  .model-row:hover .model-id,
+  .model-row:focus-within .model-id {
+    display: block;
+  }
+  .model-row:hover .cap-tags,
+  .model-row:focus-within .cap-tags {
+    display: flex;
+  }
 }
 .cap-tag {
   font-size: 10px;

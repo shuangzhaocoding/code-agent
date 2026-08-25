@@ -38,8 +38,8 @@ html[data-theme='light'] {
   --sidebar-w: 260px;
   --activity-w: var(--sidebar-rail-w);
   --aside-w: 220px;
-  --font: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --font: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   --bg: var(--page-bg);
   --bg-elevated: var(--panel-bg);
   --bg-muted: var(--code-bg);
@@ -227,6 +227,16 @@ body {
 }
 
 button, input, textarea, select { font: inherit; }
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 70%, transparent);
+  outline-offset: 2px;
+}
 
 a { color: inherit; text-align: inherit; text-decoration: none; }
 
@@ -789,16 +799,20 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
 .search-box-btn:hover { background: var(--primary-hover); }
 
 .dockview-theme-codeagent .dv-tabs-and-actions-container {
-  padding: 0 8px;
-  gap: 6px;
+  padding: 0 8px 0 6px;
+  gap: 4px;
   border-bottom: var(--border-width) solid var(--border);
   background-color: var(--page-bg);
   color: var(--text);
 }
 
 .dockview-theme-codeagent .dv-tabs-container {
-  gap: 4px;
-  padding: 4px 0 0;
+  gap: 2px;
+  padding: 3px 0 0;
+}
+
+.dockview-theme-codeagent .dv-tabs-container.dv-horizontal .dv-tab:not(:first-child)::before {
+  display: none;
 }
 
 .dockview-theme-codeagent .dv-void-container {
@@ -810,16 +824,17 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
 .dockview-theme-codeagent .dv-tab {
   cursor: grab;
   min-width: 0;
-  height: 28px;
+  height: 30px;
   margin: 0;
   padding: 0;
-  border: 0;
-  border-radius: 8px 8px 0 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 0;
   background: transparent;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
 }
 
 .dockview-theme-codeagent .dv-tab > div {
@@ -829,18 +844,40 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
 .dockview-theme-codeagent.dockview-theme-light .dv-tab:hover,
 .dockview-theme-codeagent.dockview-theme-dark .dv-tab:hover,
 .dockview-theme-codeagent .dv-tab:hover {
-  background: var(--bg-muted);
+  background: color-mix(in srgb, var(--panel-bg) 78%, transparent);
   color: var(--text-h) !important;
 }
 
 .dockview-theme-codeagent.dockview-theme-light .dv-tab.dv-active-tab,
 .dockview-theme-codeagent.dockview-theme-dark .dv-tab.dv-active-tab,
-.dockview-theme-codeagent .dv-tab.dv-active-tab {
+.dockview-theme-codeagent .dv-tab.dv-active-tab,
+.dockview-theme-codeagent .dv-groupview.dv-active-group .dv-tab.dv-active-tab,
+.dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
   background: var(--panel-bg) !important;
-  color: var(--primary) !important;
+  color: var(--text-h) !important;
   font-weight: 600;
-  box-shadow: none;
-  border-bottom: 2px solid var(--primary);
+  border-color: var(--border);
+  border-bottom: 1px solid var(--panel-bg);
+  margin-bottom: -1px;
+  padding-bottom: 1px;
+  z-index: 1;
+}
+
+.dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  color: var(--text) !important;
+}
+
+.dockview-theme-codeagent .dv-tab.dv-active-tab .ptab-ico {
+  color: var(--primary);
+  opacity: 1;
+}
+
+.dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab .ptab-ico {
+  color: color-mix(in srgb, var(--primary) 70%, var(--text));
+}
+
+.dockview-theme-codeagent .dv-tab.dv-active-tab .x {
+  opacity: 0.42;
 }
 
 .dockview-theme-codeagent.dockview-theme-light .dv-tab.dv-inactive-tab,
@@ -911,6 +948,7 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   --tr-text-secondary: var(--text);
 }
 
+.tiny-tooltip.tiny-tooltip__popper,
 .tiny-tooltip.tiny-tooltip__popper.tr-action-button-tooltip-popper,
 .tiny-tooltip.tiny-tooltip__popper.tr-submit-button-tooltip-popper {
   --tv-Tooltip-popper-light-bg-color: var(--tr-tooltip-bg-color);
@@ -918,30 +956,77 @@ a { color: inherit; text-align: inherit; text-decoration: none; }
   --tv-Tooltip-box-shadow: var(--tr-tooltip-shadow);
 }
 
+.tiny-tooltip.tiny-tooltip__popper .tr-sender-tooltip-inner,
+.tiny-tooltip.tiny-tooltip__popper .tiny-tooltip__inner,
 .tiny-tooltip.tiny-tooltip__popper.tr-action-button-tooltip-popper .tr-sender-tooltip-inner,
 .tiny-tooltip.tiny-tooltip__popper.tr-submit-button-tooltip-popper .tr-sender-tooltip-inner,
-.tr-tooltip .tr-tooltip-content {
+.tr-tooltip .tr-tooltip-content,
+.app-tooltip {
   color: var(--tr-tooltip-color);
   background: var(--tr-tooltip-bg-color);
   box-shadow: var(--tr-tooltip-shadow);
   border: var(--border-width) solid var(--border-strong);
 }
 
+.app-tooltip {
+  position: fixed;
+  z-index: 30000;
+  display: none;
+  min-width: 10px;
+  max-width: 280px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.app-tooltip.is-comfortable {
+  max-width: 450px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app-tooltip[data-placement='bottom'] {
+  transform: translateY(-2px);
+}
+
+.app-tooltip.is-visible {
+  display: block;
+  opacity: 1;
+  transform: none;
+}
+
+.tiny-tooltip.tiny-tooltip__popper .tr-sender-tooltip-inner,
+.tiny-tooltip.tiny-tooltip__popper .tiny-tooltip__inner {
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  border-radius: 6px;
+}
+
+html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper,
 html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper.tr-action-button-tooltip-popper,
 html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper.tr-submit-button-tooltip-popper {
   --tv-color-bg-2: var(--tr-tooltip-bg-color);
   --tv-color-text: var(--tr-tooltip-color);
 }
 
+html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper .tr-sender-tooltip-inner,
+html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper .tiny-tooltip__inner,
 html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper.tr-action-button-tooltip-popper .tr-sender-tooltip-inner,
-html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper.tr-submit-button-tooltip-popper .tr-sender-tooltip-inner {
-  color: var(--tr-anchor-tooltip-color);
-  background: var(--tr-anchor-tooltip-bg);
-  border-color: var(--border-strong);
-  box-shadow: var(--tr-anchor-tooltip-shadow);
-}
-
-html[data-theme='dark'] .tr-tooltip .tr-tooltip-content {
+html[data-theme='dark'] .tiny-tooltip.tiny-tooltip__popper.tr-submit-button-tooltip-popper .tr-sender-tooltip-inner,
+html[data-theme='dark'] .tr-tooltip .tr-tooltip-content,
+html[data-theme='dark'] .app-tooltip {
   color: var(--tr-anchor-tooltip-color);
   background: var(--tr-anchor-tooltip-bg);
   border-color: var(--border-strong);

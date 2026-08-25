@@ -1,5 +1,14 @@
 PLUGIN_TITLE = "Git"
 PLUGIN_DESCRIPTION = "Workspace Git tools: status, diff, log, branch, add, commit, push, pull, checkout, reset."
+PLUGIN_KIND = "tools"
+PLUGIN_VERSION = "1.0.0"
+PLUGIN_AUTHOR = "Code Agent"
+PLUGIN_HOMEPAGE = "https://git-scm.com/"
+PLUGIN_REPOSITORY = "https://github.com/git/git"
+PLUGIN_LICENSE = "GPL-2.0"
+PLUGIN_ICON = "git"
+PLUGIN_ACCENT = "#f97316"
+PLUGIN_KEYWORDS = ("git", "version-control", "scm")
 
 
 def register(registry) -> None:

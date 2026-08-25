@@ -12,7 +12,7 @@ from code_agent.db.models import LlmModel, LlmProvider
 from code_agent.db.schema import upgrade_llm_schema
 from code_agent.llm.hub import apply_preset, register_builtin_providers
 from code_agent.llm.models_sync import sync_provider_models
-from code_agent.plugins.loader import load_plugins
+from code_agent.plugins.loader import apply_plugin_states, load_plugins
 from code_agent.routers import conversations, git, llm, preview, runs, settings as settings_router, skills, terminals, uploads, workspaces
 from code_agent.tools.host import register_builtin_tools
 
@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
         register_builtin_providers()
         register_builtin_tools()
         load_plugins()
+        await apply_plugin_states()
         await upgrade_llm_schema()
         await _seed_llm_from_env()
         print(f"Code Agent API on {settings.get('server.host')}:{settings.get('server.port')}")

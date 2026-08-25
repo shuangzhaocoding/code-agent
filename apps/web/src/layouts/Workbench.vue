@@ -16,12 +16,14 @@ import AgentPanel from '@/panels/AgentPanel.vue'
 import TerminalPanel from '@/panels/TerminalPanel.vue'
 import ChatListPanel from '@/panels/ChatListPanel.vue'
 import SkillsPanel from '@/panels/SkillsPanel.vue'
+import PluginsPanel from '@/panels/PluginsPanel.vue'
 import ModelsPanel from '@/panels/ModelsPanel.vue'
 import SettingsPanel from '@/panels/SettingsPanel.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import GitPanel from '@/panels/GitPanel.vue'
 import PortsPanel from '@/panels/PortsPanel.vue'
+import CommandPalette from '@/components/CommandPalette.vue'
 import { getSidebarCollapsed, getTrajectoryOpen, setSidebarCollapsed, setTrajectoryOpen } from '@/utils/layoutPrefs'
 
 const store = useAppStore()
@@ -31,6 +33,7 @@ const sidebarWidth = ref(260)
 const trajectoryOpen = ref(getTrajectoryOpen())
 const trajectoryWidth = ref(340)
 const resizing = ref<'sidebar' | 'trajectory' | null>(null)
+const paletteOpen = ref(false)
 
 watch(sidebarCollapsed, (value) => setSidebarCollapsed(value))
 watch(trajectoryOpen, (value) => setTrajectoryOpen(value))
@@ -43,6 +46,7 @@ const components = {
   terminal: TerminalPanel,
   chats: ChatListPanel,
   skills: SkillsPanel,
+  plugins: PluginsPanel,
   models: ModelsPanel,
   settings: SettingsPanel,
   git: GitPanel,
@@ -119,6 +123,7 @@ const placements: Record<string, { referencePanel: string; direction: 'left' | '
   git: { referencePanel: 'agent', direction: 'left' },
   ports: { referencePanel: 'agent', direction: 'below' },
   skills: { referencePanel: 'agent', direction: 'right' },
+  plugins: { referencePanel: 'agent', direction: 'right' },
   models: { referencePanel: 'agent', direction: 'right' },
   settings: { referencePanel: 'agent', direction: 'right' },
   trajectory: { referencePanel: 'agent', direction: 'right' },
@@ -261,6 +266,14 @@ const dockThemeClass = computed(() =>
       @cancel="store.closeConfirm(false)"
     />
     <PortNotifyToast />
+    <CommandPalette
+      v-model:open="paletteOpen"
+      @open-panel="openPanel"
+      @toggle-theme="onToggleTheme"
+      @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
+      @toggle-trajectory="toggleTrajectory"
+      @open-trajectory-dock="openTrajectoryDock"
+    />
   </div>
 </template>
 
@@ -292,8 +305,7 @@ const dockThemeClass = computed(() =>
   height: 100%;
 }
 .dock :deep(.dv-tabs-and-actions-container) {
-  min-height: 34px;
-  padding-top: 2px;
+  min-height: 36px;
 }
 .sidebar-resizer,
 .details-resizer {

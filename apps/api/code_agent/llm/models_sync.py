@@ -33,6 +33,16 @@ def normalize_base_url(base_url: str) -> str:
     return urlunparse(parsed._replace(path=path)).rstrip("/")
 
 
+def normalize_base_url_for_kind(kind: str, base_url: str) -> str:
+    from code_agent.plugins.base import registry
+
+    spec = registry.providers.get(kind)
+    adapter = getattr(spec, "adapter", None) if spec else None
+    if adapter is not None and hasattr(adapter, "normalize_base_url"):
+        return adapter.normalize_base_url(base_url)
+    return normalize_base_url(base_url)
+
+
 def _models_url(base_url: str) -> str:
     base = normalize_base_url(base_url)
     return f"{base}/models"
@@ -59,49 +69,11 @@ def _format_http_error(res: httpx.Response) -> str:
 
 
 async def fetch_remote_models(provider: LlmProvider) -> list[dict[str, Any]]:
-    """Fetch model list from an OpenAI-compatible /v1/models endpoint."""
-    api_key = decrypt_secret(provider.api_key_encrypted) or ""
-    if is_codex_gateway(provider):
-        headers = codex_request_headers(provider.extra_headers)
-        normalized = canonicalize_codex_base_url(provider.base_url or "")
-    else:
-        headers = dict(provider.extra_headers or {})
-        normalized = normalize_base_url(provider.base_url)
-    if api_key and "Authorization" not in headers:
-        headers["Authorization"] = f"Bearer {api_key}"
+    """Fetch model list through the provider's LLM adapter plugin."""
+    from code_agent.llm.adapters import get_llm_adapter
 
-    if normalized != (provider.base_url or "").rstrip("/"):
-        provider.base_url = normalized
-        if is_codex_gateway(provider) and provider.kind != "aivalux":
-            provider.kind = "aivalux"
-        await provider.save()
-
-    url = _models_url(normalized)
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-        res = await client.get(url, headers=headers or None)
-        if res.status_code >= 400:
-            raise ValueError(_format_http_error(res))
-        payload = res.json()
-
-    data = payload.get("data")
-    if not isinstance(data, list):
-        raise ValueError("Invalid models response: missing data array")
-
-    models: list[dict[str, Any]] = []
-    for item in data:
-        if not isinstance(item, dict):
-            continue
-        model_id = item.get("id") or item.get("name")
-        if not model_id:
-            continue
-        models.append(
-            {
-                "model_id": str(model_id),
-                "display_name": str(item.get("display_name") or model_id),
-                "remote": item,
-            }
-        )
-    return models
+    adapter = get_llm_adapter(provider)
+    return await adapter.list_models(provider)
 
 
 async def sync_provider_models(

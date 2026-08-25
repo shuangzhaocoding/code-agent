@@ -14,7 +14,7 @@ function writeBool(key: string, value: boolean) {
   localStorage.setItem(key, value ? '1' : '0')
 }
 
-export function getSidebarCollapsed(defaultValue = false): boolean {
+export function getSidebarCollapsed(defaultValue = true): boolean {
   return readBool(KEYS.sidebarCollapsed, defaultValue)
 }
 

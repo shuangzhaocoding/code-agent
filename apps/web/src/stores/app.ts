@@ -13,6 +13,8 @@ export type Conversation = {
   mode: string
   model_id: string | null
   active_run_id: string | null
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export type FsItem = { name: string; path: string; is_dir: boolean }
@@ -1198,6 +1200,10 @@ export const useAppStore = defineStore('app', () => {
   async function loadProviders() {
     providers.value = await api('/api/llm/providers')
     const models = providers.value.flatMap((p) => p.models || [])
+    if (!models.length) {
+      modelId.value = ''
+      return
+    }
     const available = models.filter((m: any) => m.availability?.ok === true)
     const pool = available.length ? available : models
     const current = models.find((m: any) => m.id === modelId.value)

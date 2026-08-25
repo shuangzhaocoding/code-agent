@@ -273,6 +273,9 @@ async def load_skill(name: str) -> str:
 
 
 def register_builtin_tools() -> None:
+    from code_agent.plugins.base import PluginInfo
+
+    registry.loading_plugin_id = "builtin.tools"
     for t, modes in [
         (read_file, ("ask", "agent", "plan")),
         (list_dir, ("ask", "agent", "plan")),
@@ -286,3 +289,19 @@ def register_builtin_tools() -> None:
         (run_command, ("agent",)),
     ]:
         registry.register_tool(t, source="builtin", modes=modes)
+    registry.register_plugin(
+        PluginInfo(
+            plugin_id="builtin.tools",
+            source="builtin",
+            title="内置工作区工具",
+            description="读写文件、搜索、终端命令等核心 Agent 工具。",
+            kind="tools",
+            origin="builtin",
+            contributes=("tools",),
+            author="Code Agent",
+            icon="wrench",
+            accent="#4f6bff",
+            keywords=("files", "terminal", "search", "skills"),
+        )
+    )
+    registry.loading_plugin_id = ""

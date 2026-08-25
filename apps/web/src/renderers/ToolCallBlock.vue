@@ -29,7 +29,7 @@ const catalog: Record<string, { icon: string; label: string; tone: Tone }> = {
   grep_search: { icon: 'search', label: '搜索内容', tone: 'default' },
   run_command: { icon: 'terminal', label: '运行命令', tone: 'default' },
   load_skill: { icon: 'book', label: '加载 Skill', tone: 'tool' },
-  list_skills: { icon: 'puzzle', label: '列出 Skill', tone: 'default' },
+  list_skills: { icon: 'book', label: '列出 Skill', tone: 'default' },
   'file.read': { icon: 'eye', label: '读取文件', tone: 'default' },
   'skill.activated': { icon: 'book', label: '加载 Skill', tone: 'tool' },
   'tool.call': { icon: 'wrench', label: '工具调用', tone: 'tool' },

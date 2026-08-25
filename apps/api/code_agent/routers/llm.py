@@ -8,15 +8,10 @@ from pydantic import BaseModel, Field
 
 from code_agent.crypto import encrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.hub import (
-    PROVIDER_PRESETS,
-    apply_preset,
-    get_chat_model,
-    model_public,
-    provider_public,
-)
-from code_agent.llm.models_sync import fetch_remote_models, normalize_base_url, sync_provider_models
+from code_agent.llm.hub import apply_preset, get_chat_model, model_public, provider_public
+from code_agent.llm.models_sync import fetch_remote_models, normalize_base_url_for_kind, sync_provider_models
 from code_agent.llm.probe import iter_probe_provider_models, probe_provider_models
+from code_agent.llm.provider_access import require_provider_available, require_provider_kind
 from code_agent.plugins.base import registry
 
 router = APIRouter(prefix="/api/llm", tags=["llm"])
@@ -52,9 +47,15 @@ class SyncModelsIn(BaseModel):
 @router.get("/kinds")
 async def kinds():
     return [
-        {"kind": spec.kind, "title": spec.title, "source": spec.source}
+        {
+            "kind": spec.kind,
+            "title": spec.title,
+            "source": spec.source,
+            "plugin_id": spec.plugin_id,
+            "config_schema": spec.config_schema or {},
+        }
         for spec in registry.providers.values()
-        if spec.enabled
+        if registry.is_provider_kind_available(spec.kind)
     ]
 
 
@@ -68,7 +69,8 @@ async def list_presets():
             "base_url": spec["base_url"],
             "needs_key": "default_api_key" not in spec,
         }
-        for kind, spec in PROVIDER_PRESETS.items()
+        for kind, spec in registry.presets.items()
+        if registry.is_preset_available(kind)
     ]
 
 
@@ -79,9 +81,14 @@ class PresetIn(BaseModel):
 
 @router.post("/presets/{kind}")
 async def create_from_preset(kind: str, body: PresetIn = PresetIn()):
-    if kind not in PROVIDER_PRESETS:
+    preset = registry.presets.get(kind)
+    if not preset:
         raise HTTPException(status_code=404, detail={"code": "preset.not_found"})
-    preset = PROVIDER_PRESETS[kind]
+    if not registry.is_preset_available(kind):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "plugin.disabled", "message": f"预设 {kind} 对应的插件已停用"},
+        )
     key = body.api_key or preset.get("default_api_key") or ""
     if "default_api_key" not in preset and not key:
         raise HTTPException(status_code=400, detail={"code": "provider.auth", "message": "API Key 必填"})
@@ -102,6 +109,8 @@ async def list_providers():
     rows = await LlmProvider.all()
     out = []
     for p in rows:
+        if not registry.is_provider_kind_available(p.kind):
+            continue
         item = provider_public(p)
         models = await LlmModel.filter(provider_id=p.id, enabled=True)
         item["models"] = [model_public(m) for m in models]
@@ -111,10 +120,11 @@ async def list_providers():
 
 @router.post("/providers")
 async def create_provider(body: ProviderIn):
+    require_provider_kind(body.kind)
     row = await LlmProvider.create(
         name=body.name,
         kind=body.kind,
-        base_url=normalize_base_url(body.base_url),
+        base_url=normalize_base_url_for_kind(body.kind, body.base_url),
         api_key_encrypted=encrypt_secret(body.api_key or ""),
         extra_headers=body.extra_headers,
         enabled=body.enabled,
@@ -138,12 +148,16 @@ async def update_provider(provider_id: str, body: dict):
     row = await LlmProvider.get_or_none(id=provider_id)
     if not row:
         raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    if "kind" in body:
+        require_provider_kind(str(body["kind"]))
+    await require_provider_available(row)
     if "name" in body:
         row.name = body["name"]
     if "kind" in body:
         row.kind = body["kind"]
     if "base_url" in body:
-        row.base_url = normalize_base_url(str(body["base_url"]))
+        kind = str(body.get("kind") or row.kind)
+        row.base_url = normalize_base_url_for_kind(kind, str(body["base_url"]))
     if "api_key" in body and body["api_key"]:
         row.api_key_encrypted = encrypt_secret(body["api_key"])
     if "extra_headers" in body:
@@ -167,8 +181,7 @@ async def delete_provider(provider_id: str):
 @router.post("/providers/{provider_id}/sync-models")
 async def sync_models(provider_id: str, body: SyncModelsIn = SyncModelsIn()):
     provider = await LlmProvider.get_or_none(id=provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    await require_provider_available(provider)
     try:
         models = await sync_provider_models(
             provider,
@@ -190,8 +203,7 @@ async def sync_models(provider_id: str, body: SyncModelsIn = SyncModelsIn()):
 @router.get("/providers/{provider_id}/remote-models")
 async def list_remote_models(provider_id: str):
     provider = await LlmProvider.get_or_none(id=provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    await require_provider_available(provider)
     try:
         models = await fetch_remote_models(provider)
     except Exception as exc:
@@ -205,8 +217,7 @@ async def list_remote_models(provider_id: str):
 @router.post("/providers/{provider_id}/test")
 async def test_provider(provider_id: str):
     provider = await LlmProvider.get_or_none(id=provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    await require_provider_available(provider)
 
     rows = await LlmModel.filter(provider_id=provider_id)
     if not rows:
@@ -235,8 +246,7 @@ async def test_provider(provider_id: str):
 @router.post("/models")
 async def create_model(body: ModelIn):
     provider = await LlmProvider.get_or_none(id=body.provider_id)
-    if not provider:
-        raise HTTPException(status_code=404, detail={"code": "provider.not_found"})
+    await require_provider_available(provider)
     if body.is_default:
         await LlmModel.all().update(is_default=False)
     from code_agent.llm.capabilities import default_params, infer_capabilities

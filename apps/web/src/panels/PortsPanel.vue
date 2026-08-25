@@ -106,7 +106,7 @@ function onToggleAuto() {
   <div class="panel-shell ports panel-chromeless">
     <div class="ports-bar">
       <span class="title">
-        <AppIcon name="globe" :size="14" />
+        <AppIcon name="ports" :size="14" />
         端口
         <span class="count">{{ filtered.length }}</span>
       </span>

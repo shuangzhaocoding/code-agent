@@ -71,7 +71,7 @@ watch(
       <TransitionGroup name="port-toast">
         <article v-for="item in notices" :key="item.id" class="port-toast">
           <header>
-            <AppIcon name="globe" :size="16" />
+            <AppIcon name="ports" :size="16" />
             <div class="titles">
               <strong>发现新端口 {{ item.port }}</strong>
               <span>{{ item.process || 'unknown' }} · {{ item.address }}</span>

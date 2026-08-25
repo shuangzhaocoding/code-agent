@@ -133,7 +133,7 @@ onMounted(() => {
       </header>
 
       <section class="tip-card">
-        <span class="tip-icon"><AppIcon name="puzzle" :size="16" /></span>
+        <span class="tip-icon"><AppIcon name="book" :size="16" /></span>
         <div class="tip-copy">
           <strong>安装位置</strong>
           <p>
@@ -171,7 +171,7 @@ onMounted(() => {
       </div>
 
       <div v-if="!filtered.length" class="empty">
-        <AppIcon name="puzzle" :size="28" />
+        <AppIcon name="book" :size="28" />
         <p>{{ skills.length ? '没有匹配的 Skill' : '还没有发现 Skill' }}</p>
         <small>每个 Skill 是一个包含 SKILL.md 的目录，目录名需与 name 一致。</small>
       </div>
@@ -185,7 +185,7 @@ onMounted(() => {
         >
           <button type="button" class="skill-main" @click="toggleDetail(s)">
             <span class="skill-icon" :style="{ '--accent': sourceMeta(s.source).accent }">
-              <AppIcon name="puzzle" :size="18" />
+              <AppIcon name="book" :size="18" />
             </span>
             <span class="skill-copy">
               <span class="skill-title-row">

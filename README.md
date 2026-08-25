@@ -46,8 +46,9 @@ Ollama 示例：`CODE_AGENT_OPENAI_BASE_URL=http://127.0.0.1:11434/v1` 且 `CODE
 | 扩展 | 怎么加 |
 | --- | --- |
 | Skill | 目录 + `SKILL.md`，放到 `skills/`、`~/.code-agent/skills/`、工作区 `.agents/skills/` 或 `.cursor/skills/` |
-| Python 插件 | `plugins/*.py` 导出 `register(registry)` |
-| LLM | Models 面板添加任意 OpenAI 兼容端点 |
+| Python 插件 | `plugins/*.py` 或 `plugin.json` + `plugin.py`，导出 `register(registry)` |
+| LLM 适配器 | 实现 `LlmAdapter` 并 `register_llm_adapter`；内置 OpenAI 兼容适配器 |
+| 插件管理 | 侧栏「插件」页查看已安装/已注册的插件 |
 | 布局 | 拖动标签分屏，自动保存；活动栏可重新打开窗口 |
 | 配置 | `config/default.yaml` → `~/.code-agent/config.yaml` → `.code-agent/config.yaml` → 设置页 |
 

@@ -36,61 +36,59 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 
 <template>
   <div class="launch-page">
-    <header class="layout-header">
-      <div class="layout-brand">
-        <BrandMark :size="26" />
-        <span class="brand-name">Code Agent</span>
+    <header class="launch-header">
+      <div class="launch-brand">
+        <BrandMark :size="24" />
+        <span>Code Agent</span>
       </div>
-      <div class="layout-actions">
-        <button type="button" class="icon-btn icon-btn-ghost" title="切换主题" @click="onToggleTheme">
-          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
-        </button>
-      </div>
+      <button type="button" class="launch-theme" title="切换主题" @click="onToggleTheme">
+        <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
+      </button>
     </header>
 
-    <main class="launch-main">
-      <section class="launch-hero">
-        <BrandMark :size="48" class="hero-logo" />
-        <h1>打开工作空间</h1>
-        <p>本地优先 · 无登录 · 刷新后续流</p>
-        <div class="search-box">
-          <AppIcon class="search-box-icon" name="folder" :size="18" />
-          <input v-model="path" placeholder="输入项目路径…" @keydown.enter="open" />
-          <button type="button" class="search-box-btn" @click="open">打开</button>
-        </div>
-      </section>
+    <main class="launch-body">
+      <div class="launch-path">
+        <AppIcon name="folder" :size="15" />
+        <input v-model="path" placeholder="输入项目路径…" @keydown.enter="open" />
+        <button type="button" class="btn btn-primary" @click="open">打开</button>
+      </div>
 
-      <section v-if="recents.length" class="recents">
-        <h2>最近打开</h2>
-        <div class="recents-scroll">
+      <div class="launch-split">
+        <section class="launch-col">
+          <h2>最近打开</h2>
+          <p v-if="!recents.length" class="launch-empty">还没有工作空间</p>
           <button
             v-for="ws in recents"
             :key="ws.id"
             type="button"
-            class="workspace-card"
+            class="recent-item"
+            :title="ws.root_path"
             @click="store.selectWorkspace(ws.id)"
           >
-            <strong>{{ ws.name }}</strong>
-            <span>{{ ws.root_path }}</span>
+            <AppIcon name="folder" :size="15" />
+            <span class="recent-copy">
+              <strong>{{ ws.name }}</strong>
+              <span>{{ ws.root_path }}</span>
+            </span>
           </button>
-        </div>
-      </section>
+        </section>
 
-      <section class="browse-section">
-        <div class="browse-head">
-          <span class="browse-label">浏览目录</span>
-          <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">上级</button>
-        </div>
-        <p class="browse-path">{{ browsing?.path }}</p>
-        <ul class="dirs">
-          <li v-for="item in dirs" :key="item.path">
-            <button type="button" class="dir-item" @click="browse(item.path)">
-              <AppIcon name="folder" :size="15" />
-              {{ item.name }}
-            </button>
-          </li>
-        </ul>
-      </section>
+        <section class="launch-col">
+          <div class="browse-head">
+            <h2>浏览目录</h2>
+            <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">上级</button>
+          </div>
+          <p class="browse-path" :title="browsing?.path">{{ browsing?.path }}</p>
+          <ul class="dirs">
+            <li v-for="item in dirs" :key="item.path">
+              <button type="button" class="dir-item" @click="browse(item.path)">
+                <AppIcon name="folder" :size="15" />
+                {{ item.name }}
+              </button>
+            </li>
+          </ul>
+        </section>
+      </div>
     </main>
   </div>
 </template>
@@ -102,119 +100,156 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   flex-direction: column;
   background: var(--page-bg);
 }
-.launch-main {
-  flex: 1;
+.launch-header {
+  height: 48px;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 32px;
-  padding: 32px 20px 56px;
-  max-width: 720px;
-  margin: 0 auto;
-  width: 100%;
+  justify-content: space-between;
+  padding: 0 14px 0 12px;
+  background: var(--sidebar-bg);
+  border-bottom: var(--border-width) solid var(--border);
+  flex-shrink: 0;
 }
-.launch-hero {
-  width: 100%;
-  text-align: center;
-}
-.hero-logo {
-  margin: 0 auto 16px;
-}
-.launch-hero h1 {
-  margin: 0 0 8px;
-  font-size: 24px;
+.launch-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   font-weight: 600;
+  font-size: 14px;
+  color: var(--text-h);
   letter-spacing: -0.02em;
+}
+.launch-theme {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.launch-theme:hover {
+  background: var(--code-bg);
   color: var(--text-h);
 }
-.launch-hero p {
-  margin: 0 0 20px;
-  font-size: 14px;
-  color: var(--text-secondary);
-}
-.launch-hero .search-box {
-  max-width: 480px;
-  margin: 0 auto;
-  padding: 5px 5px 5px 12px;
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
-}
-.launch-hero .search-box input {
-  height: 38px;
-  font-size: 14px;
-}
-.launch-hero .search-box-btn {
-  height: 38px;
-  min-width: 72px;
-  padding: 0 16px;
-  font-size: 13px;
-  border-radius: var(--radius-sm);
-}
-.recents {
-  width: 100%;
-}
-.recents h2 {
-  margin: 0 0 12px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text-secondary);
-}
-.recents-scroll {
+.launch-body {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
-  scrollbar-width: thin;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: 960px;
+  width: 100%;
+  margin: 0 auto;
 }
-.workspace-card {
-  flex: 0 0 220px;
-  min-height: 88px;
-  padding: 14px;
+.launch-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 6px 0 10px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--text-muted);
+}
+.launch-path input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-h);
+  outline: none;
+  font-size: 13px;
+  font-family: var(--mono);
+}
+.launch-path .btn {
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.launch-split {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 12px;
+}
+.launch-col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
-  color: inherit;
+  overflow: auto;
+}
+.launch-col h2,
+.browse-head h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.launch-col > h2 {
+  padding: 10px 12px;
+  border-bottom: var(--border-width) solid var(--border);
+}
+.launch-empty {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.recent-item,
+.dir-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
+}
+.recent-item:hover,
+.dir-item:hover {
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+.recent-copy {
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  gap: 2px;
 }
-.workspace-card:hover {
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-  background: color-mix(in srgb, var(--primary-soft) 50%, var(--panel-bg));
-}
-.workspace-card strong {
-  font-size: 14px;
+.recent-copy strong {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-h);
 }
-.workspace-card span {
+.recent-copy span {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-muted);
-  word-break: break-all;
-  line-height: 1.4;
-}
-.browse-section {
-  width: 100%;
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .browse-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: var(--border-width) solid var(--border);
-}
-.browse-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-secondary);
 }
 .browse-up {
   border: 0;
@@ -244,25 +279,12 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   list-style: none;
   margin: 0;
   padding: 4px;
-  max-height: 240px;
   overflow: auto;
+  flex: 1;
 }
-.dir-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  text-align: left;
-}
-.dir-item:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
+@media (max-width: 720px) {
+  .launch-split {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

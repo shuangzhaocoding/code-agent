@@ -80,32 +80,16 @@ async def iter_probe_provider_models(provider: LlmProvider):
         yield {"type": "done", "ok_count": 0, "fail_count": 0, "total": 0}
         return
 
-    api_key = decrypt_secret(provider.api_key_encrypted) or ""
-    responses = is_codex_gateway(provider)
-    if responses:
-        base_url = canonicalize_codex_base_url(provider.base_url or "")
-        headers = codex_request_headers(provider.extra_headers)
-    else:
-        base_url = normalize_base_url(provider.base_url or "")
-        headers = dict(provider.extra_headers or {})
-        headers.setdefault("User-Agent", "code-agent/1.0")
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    headers["Content-Type"] = "application/json"
+    from code_agent.llm.adapters import get_llm_adapter
 
+    adapter = get_llm_adapter(provider)
     sem = asyncio.Semaphore(PROBE_CONCURRENCY)
     checked_at = datetime.now(timezone.utc).isoformat()
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     async def run(row: LlmModel) -> None:
         async with sem:
-            result = await _probe_one(
-                client,
-                base_url=base_url,
-                headers=headers,
-                model_id=row.model_id,
-                responses=responses,
-            )
+            result = await adapter.probe_model(provider, row.model_id)
         caps = dict(row.capabilities_json or {})
         caps["availability"] = {
             "ok": result["ok"],
@@ -126,32 +110,31 @@ async def iter_probe_provider_models(provider: LlmProvider):
             }
         )
 
-    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT, follow_redirects=True) as client:
-        tasks = [asyncio.create_task(run(row)) for row in models]
-        done = 0
-        ok_count = 0
-        fail_count = 0
-        try:
-            while done < total:
-                item = await queue.get()
-                done += 1
-                if item.get("ok"):
-                    ok_count += 1
-                else:
-                    fail_count += 1
-                yield {
-                    "type": "item",
-                    "done": done,
-                    "total": total,
-                    "ok_count": ok_count,
-                    "fail_count": fail_count,
-                    **item,
-                }
-            await asyncio.gather(*tasks)
-        except Exception:
-            for task in tasks:
-                task.cancel()
-            raise
+    tasks = [asyncio.create_task(run(row)) for row in models]
+    done = 0
+    ok_count = 0
+    fail_count = 0
+    try:
+        while done < total:
+            item = await queue.get()
+            done += 1
+            if item.get("ok"):
+                ok_count += 1
+            else:
+                fail_count += 1
+            yield {
+                "type": "item",
+                "done": done,
+                "total": total,
+                "ok_count": ok_count,
+                "fail_count": fail_count,
+                **item,
+            }
+        await asyncio.gather(*tasks)
+    except Exception:
+        for task in tasks:
+            task.cancel()
+        raise
     yield {"type": "done", "ok_count": ok_count, "fail_count": fail_count, "total": total}
 
 

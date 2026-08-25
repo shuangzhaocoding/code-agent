@@ -16,13 +16,14 @@ type SchemaSpec = {
 const store = useAppStore()
 const local = reactive<Record<string, unknown>>({})
 const saved = ref(false)
+const activeGroup = ref('')
 
 const schema = computed(() => (store.settings?.schema?.properties || {}) as Record<string, SchemaSpec>)
 
 const groups = computed(() => {
   const map = new Map<string, { id: string; title: string; icon: string; keys: string[] }>()
   const defs: Record<string, { title: string; icon: string }> = {
-    agent: { title: 'Agent', icon: 'sparkles' },
+    agent: { title: 'Agent', icon: 'atom' },
     policy: { title: '策略与安全', icon: 'shield' },
     terminal: { title: '终端', icon: 'terminal' },
     llm: { title: '模型', icon: 'chip' },
@@ -30,13 +31,19 @@ const groups = computed(() => {
   }
   for (const key of Object.keys(schema.value)) {
     const prefix = key.split('.')[0] || 'other'
-    const def = defs[prefix] || { title: prefix, icon: 'settings' }
+    const def = defs[prefix] || { title: prefix, icon: 'gear' }
     const group = map.get(prefix) || { id: prefix, title: def.title, icon: def.icon, keys: [] }
     group.keys.push(key)
     map.set(prefix, group)
   }
   return [...map.values()]
 })
+
+watch(groups, (list) => {
+  if (list.length && !list.some((g) => g.id === activeGroup.value)) {
+    activeGroup.value = list[0].id
+  }
+}, { immediate: true })
 
 onMounted(async () => {
   await store.loadSettings()
@@ -49,6 +56,11 @@ watch(
     if (s) Object.assign(local, s.values)
   },
 )
+
+function jump(id: string) {
+  activeGroup.value = id
+  document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 
 function specFor(key: string) {
   return schema.value[key] || {}
@@ -84,12 +96,25 @@ async function save() {
         </button>
       </header>
 
-      <div class="settings-grid">
-        <section v-for="group in groups" :key="group.id" class="settings-group">
-          <div class="group-head">
-            <span class="group-icon"><AppIcon :name="group.icon" :size="18" /></span>
-            <h2>{{ group.title }}</h2>
-          </div>
+      <div class="settings-layout">
+        <nav v-if="groups.length" class="settings-toc" aria-label="设置分组">
+          <button
+            v-for="group in groups"
+            :key="group.id"
+            type="button"
+            :class="{ active: activeGroup === group.id }"
+            @click="jump(group.id)"
+          >
+            <AppIcon :name="group.icon" :size="14" />
+            {{ group.title }}
+          </button>
+        </nav>
+        <div class="settings-main">
+          <section v-for="group in groups" :id="`settings-${group.id}`" :key="group.id" class="settings-group">
+            <div class="group-head">
+              <span class="group-icon"><AppIcon :name="group.icon" :size="18" /></span>
+              <h2>{{ group.title }}</h2>
+            </div>
 
           <div v-for="key in group.keys" :key="key" class="setting-row">
             <div class="setting-copy">
@@ -135,6 +160,7 @@ async function save() {
             <input v-else :id="key" v-model="local[key]" class="field-control setting-input" />
           </div>
         </section>
+        </div>
       </div>
     </div>
   </div>
@@ -179,12 +205,63 @@ async function save() {
 .page-head .btn.saved {
   background: color-mix(in srgb, var(--primary) 80%, #059669);
 }
-.settings-grid {
+.settings-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: 148px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.settings-toc {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-toc button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-toc button:hover {
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+.settings-toc button.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+@media (max-width: 720px) {
+  .settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .settings-toc {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .settings-toc button {
+    width: auto;
+  }
+}
+.settings-main {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 .settings-group {
+  scroll-margin-top: 8px;
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);

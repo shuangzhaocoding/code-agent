@@ -6,11 +6,13 @@ import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
 import ChatInputToolbar from '@/components/ChatInputToolbar.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import ConversationSwitcher from '@/components/ConversationSwitcher.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
+import { paletteShortcutLabel } from '@/utils/relativeTime'
 import {
   attachmentFileMatchers,
   UPLOAD_ACCEPT,
@@ -19,6 +21,7 @@ import {
 } from '@/utils/fileTypes'
 
 const store = useAppStore()
+const commandShortcut = paletteShortcutLabel()
 const scroller = ref<HTMLElement | null>(null)
 
 /* ---- message actions ---- */
@@ -502,9 +505,10 @@ function openContextUsageDialog() {
 
 <template>
   <div class="panel-shell agent">
+    <ConversationSwitcher />
     <Transition name="toast-fade">
       <div v-if="copyToast" class="copy-toast">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+        <AppIcon name="check" :size="16" />
         已复制
       </div>
     </Transition>
@@ -515,6 +519,7 @@ function openContextUsageDialog() {
             <AppIcon name="atom" :size="32" />
           </div>
           <p class="empty-lead">描述你想改的代码，或用 Skill / 自备模型开始。</p>
+          <p class="empty-hint"><kbd>{{ commandShortcut }}</kbd> 打开命令面板</p>
           <div class="quick-prompts">
             <button
               v-for="item in quickPrompts"
@@ -555,10 +560,10 @@ function openContextUsageDialog() {
             </span>
             <div class="msg-actions">
               <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" title="编辑" @click="startEdit(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                <AppIcon name="pencil" :size="14" />
               </button>
               <button type="button" class="msg-icon-btn" title="复制" @click="copyMsg(msg)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                <AppIcon name="copy" :size="14" />
               </button>
             </div>
           </div>
@@ -575,7 +580,7 @@ function openContextUsageDialog() {
         <div v-if="mentionOpen && mentionItems.length" class="mention-popup">
           <div v-if="mentionDir" class="mention-dir-back">
             <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+              <AppIcon name="arrow-left" :size="12" />
               返回
             </button>
             <span class="mention-dir-label">{{ mentionDir }}</span>
@@ -589,8 +594,7 @@ function openContextUsageDialog() {
               @mouseenter="mentionActiveIdx = i"
               @mousedown.prevent="mentionBrowse(item)"
             >
-              <svg v-if="item.is_dir" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              <AppIcon :name="item.is_dir ? 'folder' : 'file'" :size="14" />
               <span class="mention-name">{{ item.name }}</span>
               <span v-if="item.is_dir" class="mention-arrow">›</span>
             </li>
@@ -612,7 +616,9 @@ function openContextUsageDialog() {
             <span class="queue-text" :title="item.text">{{ item.text }}</span>
             <div class="queue-actions">
               <button type="button" class="queue-send" title="立即发送" @click="onSendQueuedNow(item.id)">发送</button>
-              <button type="button" class="queue-remove" title="移除" @click="store.removeQueuedSend(item.id)">×</button>
+              <button type="button" class="queue-remove" title="移除" @click="store.removeQueuedSend(item.id)">
+                <AppIcon name="close" :size="12" />
+              </button>
             </div>
           </div>
         </div>
@@ -620,11 +626,12 @@ function openContextUsageDialog() {
       <div v-if="mentionFiles.length" class="mention-chips">
         <span v-for="f in mentionFiles" :key="f.path" class="mention-chip">
           <span class="mention-chip-body" @click="store.openPath(f.path, f.is_dir)">
-            <svg v-if="f.is_dir" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-            <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <AppIcon :name="f.is_dir ? 'folder' : 'file'" :size="12" />
             <span class="mention-chip-path">@{{ f.path }}</span>
           </span>
-          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" title="移除">×</button>
+          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" title="移除">
+            <AppIcon name="close" :size="10" />
+          </button>
         </span>
       </div>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
@@ -737,10 +744,25 @@ function openContextUsageDialog() {
   color: var(--primary);
 }
 .empty-lead {
-  margin: 0 0 16px;
+  margin: 0 0 8px;
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.6;
+}
+.empty-hint {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.empty-hint kbd {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 1px 6px;
+  margin-right: 4px;
+  border-radius: 4px;
+  border: var(--border-width) solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-secondary);
 }
 .quick-prompts {
   display: flex;
@@ -1079,13 +1101,14 @@ html[data-theme='dark'] .agent-sender-wrap {
   border-color: var(--primary);
 }
 .queue-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
   cursor: pointer;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0 2px;
+  padding: 2px;
 }
 
 .agent-sender {
@@ -1200,22 +1223,25 @@ html[data-theme='dark'] .agent-sender-wrap {
 
 .copy-toast {
   position: absolute;
-  top: 50px;
+  top: 48px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 100;
   display: flex;
   align-items: center;
   gap: 6px;
-  background: #fff;
-  color: #333;
+  background: var(--panel-bg);
+  color: var(--text-h);
   font-size: 13px;
   font-weight: 500;
   padding: 8px 16px;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.08);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border);
   pointer-events: none;
   white-space: nowrap;
+}
+.copy-toast :deep(.app-icon) {
+  color: var(--ok);
 }
 .toast-fade-enter-active, .toast-fade-leave-active { transition: opacity 0.2s, transform 0.2s; }
 .toast-fade-enter-from { opacity: 0; transform: translateX(-50%) translateY(-6px); }

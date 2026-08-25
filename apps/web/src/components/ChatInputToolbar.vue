@@ -20,14 +20,14 @@ const modeOptions: ToolbarSelectOption[] = [
     value: 'agent',
     label: 'Agent',
     description: '自主调用工具完成任务',
-    icon: 'sparkles',
+    icon: 'atom',
     accent: 'var(--primary)',
   },
   {
     value: 'plan',
     label: 'Plan',
     description: '先规划步骤，再逐步执行',
-    icon: 'rocket',
+    icon: 'list',
     accent: '#d97706',
   },
 ]
@@ -74,7 +74,7 @@ const thinkingOptions = computed(() =>
     value: item.value,
     label: item.label,
     description: item.description,
-    icon: item.value === 'off' ? 'think' : 'sparkles',
+    icon: 'think',
     accent: item.value === 'off' ? undefined : '#7c3aed',
   })),
 )
