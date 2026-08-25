@@ -117,7 +117,12 @@ function fmtTime(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 const timelineInner = ref<HTMLElement | null>(null)
-const sender = ref<{ clear: () => void; setContent: (content: string) => void } | null>(null)
+const sender = ref<{
+  clear: () => void
+  setContent: (content: string) => void
+  focus?: () => void
+  editor?: SenderEditor | { value?: SenderEditor }
+} | null>(null)
 const draft = ref('')
 
 const quickPrompts = [
@@ -222,6 +227,62 @@ function mentionKeydown(e: KeyboardEvent) {
 
 /* ---- sender resize ---- */
 const senderContentHeight = ref<number | null>(null)
+
+type SenderEditor = {
+  chain: () => {
+    insertContentAt: (pos: number, content: string) => { focus: (pos?: string) => { run: () => boolean } }
+  }
+  state: { doc: { content: { size: number } } }
+}
+
+function getSenderEditor(): SenderEditor | null {
+  const raw = sender.value?.editor
+  if (!raw) return null
+  if (typeof (raw as SenderEditor).chain === 'function') return raw as SenderEditor
+  const inner = (raw as { value?: SenderEditor }).value
+  return inner && typeof inner.chain === 'function' ? inner : null
+}
+
+function readEditorLineHeight(pm: HTMLElement, last: HTMLElement) {
+  const style = getComputedStyle(last.tagName === 'P' ? last : pm)
+  if (style.lineHeight.endsWith('px')) return parseFloat(style.lineHeight)
+  const font = parseFloat(style.fontSize) || 14
+  const numeric = parseFloat(style.lineHeight)
+  if (!Number.isNaN(numeric) && style.lineHeight !== 'normal') return numeric * font
+  return last.getBoundingClientRect().height || 26
+}
+
+function insertBlankEditorLines(count: number) {
+  const editor = getSenderEditor()
+  if (editor) {
+    editor.chain().insertContentAt(editor.state.doc.content.size, '<p><br></p>'.repeat(count)).focus('end').run()
+    return
+  }
+  const next = `${draft.value}${'\n'.repeat(count)}`
+  draft.value = next
+  sender.value?.setContent?.(next)
+  nextTick(() => sender.value?.focus?.())
+}
+
+function onSenderBlankPointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+  const wrap = e.currentTarget as HTMLElement
+  const content = wrap.querySelector('.tr-sender-content') as HTMLElement | null
+  if (!content?.contains(e.target as Node)) return
+  if ((e.target as HTMLElement).closest('button, a, input, textarea')) return
+
+  const pm = wrap.querySelector('.ProseMirror') as HTMLElement | null
+  if (!pm) return
+  const last = (pm.lastElementChild as HTMLElement) || pm
+  const lastBottom = last.getBoundingClientRect().bottom
+  if (e.clientY <= lastBottom + 1) return
+
+  const lineHeight = readEditorLineHeight(pm, last)
+  const extra = Math.max(1, Math.round((e.clientY - lastBottom) / lineHeight))
+  e.preventDefault()
+  e.stopPropagation()
+  insertBlankEditorLines(extra)
+}
 
 function onResizeHandlePointerDown(e: PointerEvent) {
   e.preventDefault()
@@ -635,7 +696,7 @@ function openContextUsageDialog() {
         </span>
       </div>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
-      <div class="agent-sender-wrap" @keydown.capture="onSenderCaptureKeydown" @keydown="mentionKeydown">
+      <div class="agent-sender-wrap" @pointerdown.capture="onSenderBlankPointerDown" @keydown.capture="onSenderCaptureKeydown" @keydown="mentionKeydown">
         <TrSender
           ref="sender"
           v-model="draft"
@@ -1134,12 +1195,23 @@ html[data-theme='dark'] .agent-sender-wrap {
   overflow-y: auto;
   min-height: var(--sender-content-height, var(--tr-sender-line-height, 26px));
   max-height: var(--sender-content-height, none);
+  height: var(--sender-content-height, auto);
   box-sizing: border-box;
 }
 
 .agent-sender :deep(.tr-sender-editor-scroll) {
+  min-height: 100%;
+  height: 100%;
   max-height: var(--sender-content-height, none) !important;
   overflow-y: auto;
+}
+
+.agent-sender :deep(.tr-sender-editor-wrapper),
+.agent-sender :deep(.tr-sender-editor-content),
+.agent-sender :deep(.tr-sender-content .ProseMirror) {
+  min-height: 100%;
+  box-sizing: border-box;
+  color: var(--text-h);
 }
 
 .agent-sender :deep(.tr-sender-footer) {
@@ -1162,10 +1234,6 @@ html[data-theme='dark'] .agent-sender-wrap {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.agent-sender :deep(.tr-sender-content .ProseMirror) {
-  color: var(--text-h);
 }
 
 .agent-sender :deep(.tr-sender-content .ProseMirror p.is-editor-empty:first-child::before) {
