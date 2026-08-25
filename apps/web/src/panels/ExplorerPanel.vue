@@ -1,15 +1,30 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useAppStore, type FsItem } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
+import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 
 const store = useAppStore()
 const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
-const prompt = ref<{ kind: 'file' | 'dir' | 'rename'; dir: string; from?: string; value: string } | null>(null)
-const promptEl = ref<HTMLInputElement | null>(null)
+const creating = ref<{ kind: 'file' | 'dir'; dir: string; value: string; id: number } | null>(null)
 const error = ref('')
 const renamingPath = ref<string | null>(null)
+const selectedItem = ref<FsItem | null>(null)
+let createSeq = 0
+
+const workspaceTitle = computed(() => store.workspace?.name || '工作空间')
+
+const menuDir = computed(() => {
+  const item = menu.value?.item
+  if (!item) return ''
+  return item.is_dir ? item.path : ''
+})
+const menuFile = computed(() => {
+  const item = menu.value?.item
+  if (!item || item.is_dir) return ''
+  return item.path
+})
 
 function closeMenu() {
   menu.value = null
@@ -18,27 +33,42 @@ function closeMenu() {
 function onContext(e: MouseEvent, item: FsItem | null) {
   e.preventDefault()
   e.stopPropagation()
+  selectedItem.value = item
   menu.value = { x: e.clientX, y: e.clientY, item }
 }
 
 function targetDir() {
-  const item = menu.value?.item
-  if (!item) return ''
-  return item.is_dir ? item.path : store.parentPath(item.path)
+  if (menu.value) {
+    const item = menu.value.item
+    if (!item) return ''
+    return item.is_dir ? item.path : store.parentPath(item.path)
+  }
+  const item = selectedItem.value
+  if (item) return item.is_dir ? item.path : store.parentPath(item.path)
+  if (store.activePath) return store.parentPath(store.activePath)
+  return ''
 }
 
-function startCreate(kind: 'file' | 'dir') {
+async function startCreate(kind: 'file' | 'dir') {
   const dir = targetDir()
   closeMenu()
-  prompt.value = { kind, dir, value: kind === 'dir' ? 'untitled' : 'untitled.txt' }
+  renamingPath.value = null
   error.value = ''
-  nextTick(() => promptEl.value?.select())
+  if (dir) await store.expandDir(dir)
+  await nextTick()
+  creating.value = {
+    kind,
+    dir,
+    value: '',
+    id: ++createSeq,
+  }
 }
 
 function startRename() {
   const item = menu.value?.item
   if (!item) return
   closeMenu()
+  creating.value = null
   renamingPath.value = item.path
 }
 
@@ -67,24 +97,39 @@ function validName(name: string) {
   return ''
 }
 
-async function confirmPrompt() {
-  if (!prompt.value) return
-  const msg = validName(prompt.value.value)
-  if (msg) {
-    error.value = msg
+function cancelCreate() {
+  creating.value = null
+  error.value = ''
+}
+
+function retryCreate() {
+  if (!creating.value) return
+  creating.value = { ...creating.value, id: ++createSeq }
+}
+
+async function commitCreate() {
+  if (!creating.value) return
+  if (!creating.value.value.trim()) {
+    cancelCreate()
     return
   }
-  const rel = store.joinPath(prompt.value.dir, prompt.value.value.trim())
+  const msg = validName(creating.value.value)
+  if (msg) {
+    error.value = msg
+    retryCreate()
+    return
+  }
+  const rel = store.joinPath(creating.value.dir, creating.value.value.trim())
+  const currentId = creating.value.id
   try {
-    if (prompt.value.kind === 'rename' && prompt.value.from) {
-      await store.renameEntry(prompt.value.from, rel)
-    } else {
-      await store.createEntry(rel, prompt.value.kind)
+    await store.createEntry(rel, creating.value.kind)
+    if (creating.value?.id === currentId) {
+      creating.value = null
+      error.value = ''
     }
-    prompt.value = null
-    error.value = ''
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
+    if (creating.value?.id === currentId) retryCreate()
   }
 }
 
@@ -122,6 +167,17 @@ function onDownload() {
   a.remove()
 }
 
+function searchIn(path: string) {
+  closeMenu()
+  store.openSearch(path ? { include: path } : { clearInclude: true, include: null })
+}
+
+function excludeFromSearch(path: string) {
+  closeMenu()
+  if (!path) return
+  store.openSearch({ addExclude: path })
+}
+
 function onGlobalClick() {
   closeMenu()
 }
@@ -132,32 +188,54 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 
 <template>
   <div class="panel-shell panel-chromeless" @contextmenu="onContext($event, null)">
-    <button type="button" class="tree-refresh icon-btn icon-btn-ghost" title="刷新" @click="store.refreshTree()">
-      <AppIcon name="refresh" :size="14" />
-    </button>
-    <form v-if="prompt" class="prompt" @submit.prevent="confirmPrompt">
-      <input
-        ref="promptEl"
-        v-model="prompt.value"
-        class="field-control"
-        :placeholder="prompt.kind === 'dir' ? '目录名' : '文件名'"
-        @keydown.esc="prompt = null"
-      />
-      <button type="submit" class="btn btn-primary">确定</button>
-      <button type="button" class="btn" @click="prompt = null">取消</button>
-    </form>
+    <div class="explorer-bar">
+      <span class="explorer-title" :title="workspaceTitle">{{ workspaceTitle }}</span>
+      <div class="explorer-actions">
+        <button type="button" class="icon-btn icon-btn-ghost" title="新建文件" @click.stop="startCreate('file')">
+          <AppIcon name="file-plus" :size="14" />
+        </button>
+        <button type="button" class="icon-btn icon-btn-ghost" title="新建目录" @click.stop="startCreate('dir')">
+          <AppIcon name="folder-plus" :size="14" />
+        </button>
+        <button type="button" class="icon-btn icon-btn-ghost" title="刷新" @click.stop="store.refreshTree()">
+          <AppIcon name="refresh" :size="14" />
+        </button>
+        <button type="button" class="icon-btn icon-btn-ghost" title="折叠全部" @click.stop="store.collapseAllDirs()">
+          <AppIcon name="collapse-all" :size="14" />
+        </button>
+        <button type="button" class="icon-btn icon-btn-ghost" title="展开全部" @click.stop="store.expandAllDirs()">
+          <AppIcon name="expand-all" :size="14" />
+        </button>
+      </div>
+    </div>
     <p v-if="error" class="err">{{ error }}</p>
     <div class="tree">
+      <ExplorerCreateRow
+        v-if="creating && creating.dir === ''"
+        :key="creating.id"
+        :kind="creating.kind"
+        :depth="0"
+        :dir="''"
+        :model-value="creating.value"
+        @update:model-value="(v) => creating && (creating.value = v)"
+        @commit="commitCreate"
+        @cancel="cancelCreate"
+      />
       <ExplorerTreeNode
         v-for="item in store.childrenOf('')"
         :key="item.path"
         :item="item"
         :depth="0"
         :renaming-path="renamingPath"
+        :creating="creating"
         @context="onContext"
+        @select="(item) => selectedItem = item"
         @start-rename="(p) => renamingPath = p"
         @commit-rename="commitInlineRename"
         @cancel-rename="cancelInlineRename"
+        @update:creating="(v) => creating && (creating.value = v)"
+        @commit-create="commitCreate"
+        @cancel-create="cancelCreate"
       />
     </div>
     <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
@@ -181,28 +259,60 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
         <AppIcon class="ctx-ico" name="trash" :size="15" />
         <span>删除</span>
       </button>
+      <div class="ctx-sep" />
+      <button v-if="menuDir" type="button" @click="searchIn(menuDir)">
+        <AppIcon class="ctx-ico" name="search" :size="15" />
+        <span>在此目录中搜索</span>
+      </button>
+      <button v-if="menuDir" type="button" @click="excludeFromSearch(menuDir)">
+        <AppIcon class="ctx-ico" name="close" :size="15" />
+        <span>从搜索中排除此目录</span>
+      </button>
+      <button v-if="menuFile" type="button" @click="searchIn(menuFile)">
+        <AppIcon class="ctx-ico" name="search" :size="15" />
+        <span>在此文件中搜索</span>
+      </button>
+      <button v-if="menuFile" type="button" @click="excludeFromSearch(menuFile)">
+        <AppIcon class="ctx-ico" name="close" :size="15" />
+        <span>从搜索中排除此文件</span>
+      </button>
+      <button type="button" @click="searchIn('')">
+        <AppIcon class="ctx-ico" name="folder" :size="15" />
+        <span>在整个工作区中搜索</span>
+      </button>
     </div>
   </div>
 </template>
 
 <style scoped>
 .panel-shell { overflow: hidden; position: relative; background: var(--sidebar-bg); }
-.tree-refresh {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-}
-.prompt {
+.explorer-bar {
   display: flex;
-  gap: 6px;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 10px;
+  flex-shrink: 0;
 }
-.prompt .field-control { flex: 1; min-width: 0; }
-.btn { height: 28px; padding: 0 10px; font-size: 12px; }
+.explorer-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.explorer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.icon-btn { width: 28px; height: 28px; flex-shrink: 0; }
 .err {
   margin: 0;
   padding: 6px 12px;
@@ -212,20 +322,23 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
 .tree {
   flex: 1;
   overflow: auto;
-  padding: 36px 0 12px;
+  padding: 0 0 12px;
 }
-.icon-btn { width: 28px; height: 28px; }
 .ctx {
   position: fixed;
   z-index: 80;
-  min-width: 140px;
+  min-width: 168px;
   padding: 6px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: none;
   display: flex;
   flex-direction: column;
+}
+.ctx-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
 }
 .ctx button {
   display: flex;

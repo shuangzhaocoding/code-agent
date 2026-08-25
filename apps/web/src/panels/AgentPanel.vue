@@ -784,7 +784,7 @@ function openContextUsageDialog() {
 .timeline-inner {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   width: 100%;
   min-height: min-content;
 }
@@ -850,10 +850,11 @@ function openContextUsageDialog() {
 article.msg-wrap.user {
   align-self: flex-end;
   margin-left: auto;
-  max-width: min(78%, 520px);
+  margin-right: 0;
+  width: fit-content;
+  max-width: min(78%, 560px);
   margin-top: 12px;
   margin-bottom: 4px;
-  margin-right: 0;
   overflow-anchor: none;
   display: flex;
   flex-direction: column;
@@ -868,6 +869,10 @@ article.msg-wrap.user {
   width: fit-content;
   max-width: 100%;
   box-sizing: border-box;
+}
+.msg-wrap.user .msg-bubble {
+  margin-left: auto;
+  text-align: left;
 }
 .msg-bubble :deep(.markdown-body p) {
   margin: 0;

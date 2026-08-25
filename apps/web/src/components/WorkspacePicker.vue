@@ -1,29 +1,29 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { api } from '@/api/http'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
+import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandMark from '@/components/BrandMark.vue'
+import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
 const store = useAppStore()
-const path = ref('')
 const theme = ref<Theme>(currentTheme())
-const browsing = ref<{ path: string; parent: string; items: { name: string; path: string; is_dir: boolean }[] } | null>(null)
+const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse('~')
 
 onMounted(async () => {
   await store.loadWorkspaces()
   await browse('~')
 })
 
-async function browse(p: string) {
-  browsing.value = await api(`/api/workspaces/browse?path=${encodeURIComponent(p)}`)
-  path.value = browsing.value?.path || p
-}
-
 async function open() {
   if (!path.value) return
-  await store.addWorkspace(path.value)
+  error.value = ''
+  try {
+    await store.addWorkspace(path.value)
+  } catch (err) {
+    error.value = errMessage(err)
+  }
 }
 
 function onToggleTheme() {
@@ -31,7 +31,6 @@ function onToggleTheme() {
 }
 
 const recents = computed(() => store.workspaces)
-const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 </script>
 
 <template>
@@ -52,6 +51,7 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
         <input v-model="path" placeholder="输入项目路径…" @keydown.enter="open" />
         <button type="button" class="btn btn-primary" @click="open">打开</button>
       </div>
+      <p v-if="error" class="launch-err">{{ error }}</p>
 
       <div class="launch-split">
         <section class="launch-col">
@@ -76,10 +76,22 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
         <section class="launch-col">
           <div class="browse-head">
             <h2>浏览目录</h2>
-            <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">上级</button>
+            <div class="browse-actions">
+              <button type="button" class="browse-up" @click="startCreate">新建文件夹</button>
+              <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">上级</button>
+            </div>
           </div>
           <p class="browse-path" :title="browsing?.path">{{ browsing?.path }}</p>
           <ul class="dirs">
+            <li v-if="creating">
+              <WorkspaceMkdirRow
+                :key="createKey"
+                :model-value="createValue"
+                @update:model-value="createValue = $event"
+                @commit="commitCreate"
+                @cancel="cancelCreate"
+              />
+            </li>
             <li v-for="item in dirs" :key="item.path">
               <button type="button" class="dir-item" @click="browse(item.path)">
                 <AppIcon name="folder" :size="15" />
@@ -170,6 +182,16 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
   height: 28px;
   padding: 0 12px;
   font-size: 12px;
+}
+.launch-err {
+  margin: 0;
+  color: var(--error-text);
+  font-size: 12px;
+}
+.browse-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .launch-split {
   flex: 1;

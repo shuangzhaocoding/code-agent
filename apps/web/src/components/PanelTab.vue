@@ -15,6 +15,7 @@ const props = defineProps<{
 const meta: Record<string, { icon: string; label: string }> = {
   workspace: { icon: 'home', label: '工作空间' },
   explorer: { icon: 'folder', label: '文件' },
+  search: { icon: 'search', label: '搜索' },
   editor: { icon: 'file', label: '编辑器' },
   agent: { icon: 'atom', label: 'Agent' },
   terminal: { icon: 'terminal', label: '终端' },

@@ -8,6 +8,7 @@ import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import FilePreviewHost from '@/preview/FilePreviewHost.vue'
 import { isPreviewKind } from '@/preview/classify'
+import { langOf } from '@/utils/editorLang'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
@@ -21,6 +22,8 @@ let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = nu
 let monacoMod: typeof import('monaco-editor') | null = null
 const models = new Map<string, import('monaco-editor').editor.ITextModel>()
 const origModels = new Map<string, import('monaco-editor').editor.ITextModel>()
+let searchDecorations: string[] = []
+let lastSearchHighlight: { path: string; line: number; query: string; caseSensitive?: boolean } | null = null
 const review = computed(() => store.pendingReview(store.activePath))
 const pendingCount = computed(() => store.pendingReviews.length)
 const reviewIndex = computed(() => {
@@ -68,26 +71,11 @@ function applyEditorTheme() {
   monacoMod.editor.setTheme('ca-editor')
 }
 
-function langOf(path: string) {
-  const ext = path.split('.').pop() || ''
-  const langMap: Record<string, string> = {
-    ts: 'typescript',
-    tsx: 'typescript',
-    js: 'javascript',
-    vue: 'html',
-    py: 'python',
-    md: 'markdown',
-    json: 'json',
-    css: 'css',
-    html: 'html',
-    yaml: 'yaml',
-    yml: 'yaml',
-  }
-  return langMap[ext] || 'plaintext'
-}
-
 function fileName(path: string) {
-  return path.split('/').pop() || path
+  const head = path.startsWith('HEAD:')
+  const raw = head ? path.slice(5) : path
+  const name = raw.split('/').pop() || raw
+  return head ? `${name} (HEAD)` : name
 }
 
 function isMarkdownFile(path: string) {
@@ -102,6 +90,7 @@ const showMarkdownPreview = computed(() => mdPreview.value && canMarkdownPreview
 const canSave = computed(
   () =>
     Boolean(store.openFile) &&
+    !store.openFile?.readonly &&
     !review.value &&
     !showMarkdownPreview.value &&
     !activeIsBinaryPreview.value &&
@@ -118,16 +107,17 @@ function uriOf(path: string, original = false) {
 
 function ensureModel(path: string, content: string) {
   if (!monacoMod) return null
+  const lang = langOf(path)
   let model = models.get(path)
   if (!model || model.isDisposed()) {
     const existing = monacoMod.editor.getModel(uriOf(path))
-    model = existing || monacoMod.editor.createModel(content, langOf(path), uriOf(path))
-    monacoMod.editor.setModelLanguage(model, langOf(path))
+    model = existing || monacoMod.editor.createModel(content, lang, uriOf(path))
     model.onDidChangeContent(() => {
       store.updateOpenContent(path, model!.getValue())
     })
     models.set(path, model)
   }
+  if (model.getLanguageId() !== lang) monacoMod.editor.setModelLanguage(model, lang)
   if (model.getValue() !== content) model.setValue(content)
   return model
 }
@@ -174,7 +164,84 @@ function showPath(path: string | null) {
   }
   const model = ensureModel(path, file.content ?? '')
   if (model) editor.setModel(model)
+  editor.updateOptions({ readOnly: Boolean(file.readonly) })
+  applySearchReveal(path)
   requestAnimationFrame(() => editor?.layout())
+}
+
+function clearSearchDecorations() {
+  if (!editor) return
+  searchDecorations = editor.deltaDecorations(searchDecorations, [])
+}
+
+function applySearchReveal(path: string) {
+  if (!editor || !monacoMod) return
+  const reveal = store.pendingReveal
+  if (reveal?.path === path && reveal.query?.trim()) {
+    lastSearchHighlight = {
+      path,
+      line: Math.max(1, reveal.line),
+      query: reveal.query.trim(),
+      caseSensitive: reveal.caseSensitive,
+    }
+  }
+  const spec = reveal?.path === path && reveal.query?.trim()
+    ? { ...reveal, query: reveal.query.trim(), line: Math.max(1, reveal.line) }
+    : lastSearchHighlight?.path === path
+      ? lastSearchHighlight
+      : null
+
+  if (reveal?.path === path && !spec?.query) {
+    const line = Math.max(1, reveal.line)
+    clearSearchDecorations()
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: 1 })
+    editor.focus()
+    store.pendingReveal = null
+    return
+  }
+
+  if (!spec?.query) {
+    clearSearchDecorations()
+    return
+  }
+
+  const model = editor.getModel()
+  if (!model) return
+  const matches = model.findMatches(spec.query, true, false, Boolean(spec.caseSensitive), null, false)
+  const current = matches.find((m) => m.range.startLineNumber === spec.line) || matches[0]
+  searchDecorations = editor.deltaDecorations(
+    searchDecorations,
+    matches.map((m) => {
+      const isCurrent =
+        !!current &&
+        m.range.startLineNumber === current.range.startLineNumber &&
+        m.range.startColumn === current.range.startColumn
+      return {
+        range: m.range,
+        options: {
+          className: isCurrent ? 'ca-search-current' : 'ca-search-match',
+          stickiness: monacoMod!.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+          overviewRuler: {
+            color: isCurrent ? '#7c9cff' : '#d7ba7d',
+            position: monacoMod!.editor.OverviewRulerLane.Center,
+          },
+        },
+      }
+    }),
+  )
+
+  if (reveal?.path === path) {
+    if (current) {
+      editor.setSelection(current.range)
+      editor.revealRangeInCenter(current.range)
+    } else {
+      editor.revealLineInCenter(spec.line)
+      editor.setPosition({ lineNumber: spec.line, column: 1 })
+    }
+    editor.focus()
+    store.pendingReveal = null
+  }
 }
 
 function showDiff(path: string, before: string, after: string) {
@@ -242,6 +309,15 @@ watch(
   async () => {
     await nextTick()
     showPath(store.activePath)
+  },
+)
+
+watch(
+  () => store.pendingReveal,
+  (reveal) => {
+    if (!reveal || !editor) return
+    if (store.activePath !== reveal.path) return
+    applySearchReveal(reveal.path)
   },
 )
 
@@ -601,4 +677,14 @@ async function onTabMenuSelect(id: string) {
   background: var(--editor-bg);
 }
 .empty p { margin: 0; }
+</style>
+
+<style>
+.ca-search-match {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.ca-search-current {
+  background: color-mix(in srgb, var(--primary) 42%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
 </style>

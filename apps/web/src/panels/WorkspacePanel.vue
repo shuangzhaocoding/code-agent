@@ -1,23 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { api } from '@/api/http'
+import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
 import AppIcon from '@/components/AppIcon.vue'
+import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
 const store = useAppStore()
-const path = ref(store.workspace?.root_path || '')
-const error = ref('')
-const browsing = ref<{ path: string; parent: string; items: { name: string; path: string; is_dir: boolean }[] } | null>(null)
+const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
 
 onMounted(async () => {
   await store.loadWorkspaces()
-  await browse(path.value || '~')
+  await browse(store.workspace?.root_path || '~')
 })
-
-async function browse(p: string) {
-  browsing.value = await api(`/api/workspaces/browse?path=${encodeURIComponent(p)}`)
-  path.value = browsing.value?.path || p
-}
 
 async function openPath() {
   if (!path.value) return
@@ -25,7 +19,7 @@ async function openPath() {
   try {
     await store.addWorkspace(path.value)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = errMessage(err)
   }
 }
 
@@ -34,12 +28,11 @@ async function openRecent(id: string) {
   try {
     await store.selectWorkspace(id)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    error.value = errMessage(err)
   }
 }
 
 const recents = computed(() => store.workspaces)
-const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
 </script>
 
 <template>
@@ -59,9 +52,19 @@ const dirs = computed(() => browsing.value?.items.filter((i) => i.is_dir) || [])
       <div class="nested-list browse">
         <div class="crumbs">
           <button type="button" class="btn btn-ghost mini" @click="browse(browsing?.parent || '~')">上级</button>
+          <button type="button" class="btn btn-ghost mini" @click="startCreate">新建文件夹</button>
           <span>{{ browsing?.path }}</span>
         </div>
         <ul class="dirs">
+          <li v-if="creating">
+            <WorkspaceMkdirRow
+              :key="createKey"
+              :model-value="createValue"
+              @update:model-value="createValue = $event"
+              @commit="commitCreate"
+              @cancel="cancelCreate"
+            />
+          </li>
           <li v-for="item in dirs" :key="item.path">
             <button type="button" class="menu-item" @click="browse(item.path)">
               <AppIcon name="folder" :size="14" />

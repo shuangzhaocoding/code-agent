@@ -25,6 +25,7 @@ export type OpenFile = {
   previewUrl?: string
   mime?: string
   dirty: boolean
+  readonly?: boolean
 }
 export type FileReview = {
   path: string
@@ -97,6 +98,29 @@ export const useAppStore = defineStore('app', () => {
   const activePath = ref<string | null>(null)
   const openFile = computed(() => openFiles.value.find((f) => f.path === activePath.value) || null)
   const fileNotice = ref<string | null>(null)
+  const pendingReveal = ref<{
+    path: string
+    line: number
+    query?: string
+    caseSensitive?: boolean
+  } | null>(null)
+  const searchIntent = ref<{
+    seq: number
+    include?: string | null
+    addExclude?: string
+    clearInclude?: boolean
+  }>({ seq: 0 })
+
+  function openSearch(opts?: { include?: string | null; addExclude?: string; clearInclude?: boolean }) {
+    searchIntent.value = { seq: searchIntent.value.seq + 1, ...opts }
+    window.dispatchEvent(new CustomEvent('ca-open-search'))
+  }
+
+  function openExplorerPanel() {
+    activity.value = 'explorer'
+    window.dispatchEvent(new CustomEvent('ca-open-explorer'))
+  }
+
   const reviews = ref<Record<string, FileReview>>({})
   const confirmDialog = ref<{
     title: string
@@ -177,6 +201,31 @@ export const useAppStore = defineStore('app', () => {
     return `ca.conversation.${wsId}`
   }
 
+  function expandedStorageKey(wsId: string) {
+    return `ca.tree.expanded.${wsId}`
+  }
+
+  function readExpanded(wsId: string) {
+    try {
+      const raw = localStorage.getItem(expandedStorageKey(wsId))
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+    } catch {
+      return []
+    }
+  }
+
+  function persistExpanded() {
+    const ws = workspaceId.value
+    if (!ws) return
+    localStorage.setItem(expandedStorageKey(ws), JSON.stringify([...expanded.value].slice(0, 500)))
+  }
+
+  function setExpanded(next: Set<string>) {
+    expanded.value = next
+    persistExpanded()
+  }
+
   function rememberConversation(id: string | null) {
     const ws = workspaceId.value
     if (!ws) return
@@ -188,6 +237,7 @@ export const useAppStore = defineStore('app', () => {
   async function selectWorkspace(id: string) {
     workspaceId.value = id
     localStorage.setItem('ca.workspace', id)
+    const savedExpanded = readExpanded(id)
     treePath.value = ''
     childrenMap.value = {}
     expanded.value = new Set()
@@ -195,6 +245,7 @@ export const useAppStore = defineStore('app', () => {
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
     await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
+    await restoreExpandedDirs(savedExpanded)
     const saved = localStorage.getItem(conversationStorageKey(id))
     const restore =
       (saved && conversations.value.some((c) => c.id === saved) && saved) ||
@@ -209,10 +260,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function loadTree(path = '') {
     if (!workspaceId.value) return
+    const ws = workspaceId.value
     const data = await api<{ items: typeof fileTree.value }>(
       `/api/workspaces/${workspaceId.value}/tree?path=${encodeURIComponent(path)}`,
     )
-    childrenMap.value = { ...childrenMap.value, [path]: data.items }
+    if (workspaceId.value !== ws) return
+    const next = childrenMap.value
+    next[path] = data.items
+    childrenMap.value = { ...next }
     if (!path) fileTree.value = data.items
     treePath.value = path
   }
@@ -221,23 +276,83 @@ export const useAppStore = defineStore('app', () => {
     return expanded.value.has(path)
   }
 
+  function depthOf(path: string) {
+    return path.split('/').filter(Boolean).length
+  }
+
+  async function restoreExpandedDirs(paths: string[]) {
+    const sorted = [...new Set(paths)].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
+    const kept = new Set<string>()
+    for (const path of sorted) {
+      const parent = parentPath(path)
+      if (parent && !kept.has(parent)) continue
+      try {
+        await loadTree(path)
+      } catch {
+        continue
+      }
+      if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
+    }
+    setExpanded(kept)
+  }
+
   async function toggleDir(path: string) {
     const next = new Set(expanded.value)
     if (next.has(path)) {
       next.delete(path)
-      expanded.value = next
+      setExpanded(next)
       return
     }
     next.add(path)
-    expanded.value = next
+    setExpanded(next)
+    await loadTree(path)
+  }
+
+  async function expandDir(path: string) {
+    if (!path) return
+    if (!expanded.value.has(path)) {
+      setExpanded(new Set([...expanded.value, path]))
+    }
     await loadTree(path)
   }
 
   async function refreshTree() {
+    const open = [...expanded.value].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
     await Promise.all([loadTree(''), loadGitChangedPaths()])
-    for (const path of [...expanded.value]) {
-      await loadTree(path)
+    const kept = new Set<string>()
+    for (const path of open) {
+      const parent = parentPath(path)
+      if (parent && !kept.has(parent)) continue
+      try {
+        await loadTree(path)
+      } catch {
+        continue
+      }
+      if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
     }
+    setExpanded(kept)
+  }
+
+  function collapseAllDirs() {
+    setExpanded(new Set())
+  }
+
+  async function expandAllDirs() {
+    const next = new Set<string>()
+    let layer = ['']
+    while (layer.length) {
+      await Promise.all(layer.map((dir) => loadTree(dir)))
+      const childDirs: string[] = []
+      for (const dir of layer) {
+        for (const item of childrenOf(dir)) {
+          if (!item.is_dir) continue
+          next.add(item.path)
+          childDirs.push(item.path)
+        }
+      }
+      layer = childDirs
+    }
+    setExpanded(next)
   }
 
   function gitMarkLabel(code: string) {
@@ -265,7 +380,11 @@ export const useAppStore = defineStore('app', () => {
       for (const file of status.files) {
         next[file.path] = gitMarkLabel(file.code)
       }
-      gitChangedPaths.value = next
+      const prev = gitChangedPaths.value
+      const same =
+        Object.keys(next).length === Object.keys(prev).length &&
+        Object.keys(next).every((path) => prev[path] === next[path])
+      if (!same) gitChangedPaths.value = next
       if (Object.keys(next).length) {
         const session = { ...sessionTreeMarks.value }
         for (const path of Object.keys(next)) delete session[path]
@@ -287,6 +406,7 @@ export const useAppStore = defineStore('app', () => {
       await loadTree(acc)
     }
     expanded.value = next
+    persistExpanded()
     await loadTree(parentPath(relPath) || '')
   }
 
@@ -337,10 +457,10 @@ export const useAppStore = defineStore('app', () => {
     })
     await loadTree(parentPath(relPath) || '')
     if (kind === 'dir') {
-      expanded.value = new Set([...expanded.value, parentPath(relPath) || '', relPath])
+      setExpanded(new Set([...expanded.value, parentPath(relPath) || '', relPath].filter(Boolean)))
       await loadTree(relPath)
     } else if (parentPath(relPath)) {
-      expanded.value = new Set([...expanded.value, parentPath(relPath)])
+      setExpanded(new Set([...expanded.value, parentPath(relPath)]))
     }
     if (kind === 'file') {
       sessionTreeMarks.value = { ...sessionTreeMarks.value, [relPath]: '新增' }
@@ -389,7 +509,7 @@ export const useAppStore = defineStore('app', () => {
     if (expanded.value.has(relPath)) {
       const next = new Set(expanded.value)
       next.delete(relPath)
-      expanded.value = next
+      setExpanded(next)
     }
     await loadTree(parent)
     const session = { ...sessionTreeMarks.value }
@@ -539,6 +659,54 @@ export const useAppStore = defineStore('app', () => {
     await openPath(path, false)
   }
 
+  async function openRevisionFile(relPath: string, rev = 'HEAD') {
+    if (!workspaceId.value || !relPath) return
+    const tabPath = `${rev}:${relPath}`
+    const kind = classifyOpenKind(relPath)
+    try {
+      const data = await api<{ path: string; content: string }>(
+        `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(relPath)}&rev=${encodeURIComponent(rev)}`,
+      )
+      const existing = openFiles.value.find((f) => f.path === tabPath)
+      if (existing) {
+        existing.content = data.content
+        existing.dirty = false
+        existing.readonly = true
+        activePath.value = tabPath
+      } else {
+        openFiles.value = [
+          ...openFiles.value,
+          {
+            path: tabPath,
+            kind: isPreviewKind(kind) ? 'text' : kind,
+            content: data.content,
+            dirty: false,
+            readonly: true,
+          },
+        ]
+        activePath.value = tabPath
+      }
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: tabPath, content: data.content } }))
+      window.dispatchEvent(new Event('ca-focus-editor'))
+    } catch (err) {
+      fileNotice.value = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function openPathAtLine(
+    path: string,
+    line: number,
+    opts?: { query?: string; caseSensitive?: boolean },
+  ) {
+    pendingReveal.value = {
+      path,
+      line: Math.max(1, line),
+      query: opts?.query?.trim() || undefined,
+      caseSensitive: Boolean(opts?.caseSensitive),
+    }
+    await openPath(path, false)
+  }
+
   function pendingReview(path: string | null | undefined) {
     if (!path) return null
     const review = reviews.value[path]
@@ -679,7 +847,7 @@ export const useAppStore = defineStore('app', () => {
 
   function updateOpenContent(path: string, content: string) {
     const file = openFiles.value.find((f) => f.path === path)
-    if (!file || !isEditableKind(file.kind) || file.content === content) return
+    if (!file || file.readonly || !isEditableKind(file.kind) || file.content === content) return
     file.content = content
     file.dirty = true
     if (ackedTreeMarks.value[path]) {
@@ -691,7 +859,7 @@ export const useAppStore = defineStore('app', () => {
 
   async function saveOpenFile() {
     const file = openFile.value
-    if (!workspaceId.value || !file || !isEditableKind(file.kind)) return
+    if (!workspaceId.value || !file || file.readonly || !isEditableKind(file.kind)) return
     await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(file.path)}`, {
       method: 'PUT',
       body: JSON.stringify({ content: file.content }),
@@ -701,6 +869,27 @@ export const useAppStore = defineStore('app', () => {
       file.previewUrl = rawFileUrl(workspaceId.value, file.path)
     }
     void loadGitChangedPaths()
+  }
+
+  async function reloadOpenFile(path: string) {
+    if (!workspaceId.value) return
+    const file = openFiles.value.find((f) => f.path === path)
+    if (!file || !isEditableKind(file.kind)) return
+    try {
+      const head = path.match(/^(HEAD|[0-9a-fA-F]{7,40}):(.+)$/)
+      const data = head
+        ? await api<{ path: string; content: string }>(
+            `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(head[2])}&rev=${encodeURIComponent(head[1])}`,
+          )
+        : await api<{ path: string; content: string }>(
+            `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+          )
+      file.content = data.content
+      file.dirty = false
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+    } catch {
+      /* keep previous */
+    }
   }
 
   async function loadConversations() {
@@ -1234,8 +1423,38 @@ export const useAppStore = defineStore('app', () => {
     return openFiles.value.some((f) => f.path === path && f.dirty)
   }
 
+  const markedAncestorPaths = computed(() => {
+    const out = new Set<string>()
+    const addAncestors = (path: string) => {
+      const parts = path.split('/').filter(Boolean)
+      let acc = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i]
+        out.add(acc)
+      }
+    }
+    for (const file of openFiles.value) {
+      if (file.dirty) addAncestors(file.path)
+    }
+    for (const [path, review] of Object.entries(reviews.value)) {
+      if (review.status === 'pending') addAncestors(path)
+    }
+    for (const path of Object.keys(gitChangedPaths.value)) {
+      if (!ackedTreeMarks.value[path]) addAncestors(path)
+    }
+    for (const path of Object.keys(sessionTreeMarks.value)) {
+      if (!ackedTreeMarks.value[path]) addAncestors(path)
+    }
+    return out
+  })
+
   function fileTreeMark(path: string, isDir = false) {
-    if (isDir) return { show: false, title: '' }
+    if (isDir) {
+      const own = gitChangedPaths.value[path] || sessionTreeMarks.value[path]
+      if (own) return { show: true, title: own }
+      if (markedAncestorPaths.value.has(path)) return { show: true, title: '包含改动' }
+      return { show: false, title: '' }
+    }
     if (isFileDirty(path)) return { show: true, title: '未保存' }
     const review = pendingReview(path)
     if (review) {
@@ -1272,6 +1491,10 @@ export const useAppStore = defineStore('app', () => {
     openFile,
     fileNotice,
     clearFileNotice,
+    pendingReveal,
+    searchIntent,
+    openSearch,
+    openExplorerPanel,
     reviews,
     pendingReview,
     pendingReviews,
@@ -1292,8 +1515,11 @@ export const useAppStore = defineStore('app', () => {
     selectWorkspace,
     loadTree,
     refreshTree,
+    collapseAllDirs,
+    expandAllDirs,
     revealInTree,
     toggleDir,
+    expandDir,
     isExpanded,
     childrenOf,
     parentPath,
@@ -1302,7 +1528,9 @@ export const useAppStore = defineStore('app', () => {
     renameEntry,
     deleteEntry,
     openPath,
+    openPathAtLine,
     openAgentFile,
+    openRevisionFile,
     acceptReview,
     rejectReview,
     activateFile,
@@ -1312,6 +1540,7 @@ export const useAppStore = defineStore('app', () => {
     closeAllFiles,
     updateOpenContent,
     saveOpenFile,
+    reloadOpenFile,
     isFileDirty,
     fileTreeMark,
     loadGitChangedPaths,

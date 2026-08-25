@@ -4,7 +4,17 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from code_agent.db.models import Workspace
-from code_agent.tools.git_ops import GitError, parse_status, run_git
+from code_agent.tools.git_ops import (
+    GitError,
+    discard_paths,
+    file_diff,
+    ignore_paths,
+    parse_commit,
+    parse_log,
+    parse_status,
+    run_git,
+    show_blob,
+)
 from code_agent.tools.paths import resolve_in_workspace
 
 router = APIRouter(prefix="/api/workspaces", tags=["git"])
@@ -40,22 +50,62 @@ def _git(root: str, args: list[str], timeout: int = 60) -> str:
         raise HTTPException(status_code=400, detail={"code": "git.error", "message": str(exc)}) from exc
 
 
+def _safe_paths(root: str, paths: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in paths:
+        rel = (raw or "").replace("\\", "/").strip().lstrip("/")
+        if not rel or rel in {".", ".."} or rel.startswith("../"):
+            continue
+        resolve_in_workspace(root, rel)
+        out.append(rel)
+    return out
+
+
 @router.get("/{workspace_id}/git/status")
 async def git_status(workspace_id: str):
     ws = await _ws(workspace_id)
     return parse_status(ws.root_path)
 
 
+@router.get("/{workspace_id}/git/log")
+async def git_log(workspace_id: str, limit: int = 80):
+    ws = await _ws(workspace_id)
+    return parse_log(ws.root_path, limit=limit)
+
+
+@router.get("/{workspace_id}/git/commits/{rev}")
+async def git_commit_detail(workspace_id: str, rev: str):
+    ws = await _ws(workspace_id)
+    data = parse_commit(ws.root_path, rev)
+    if not data.get("ok"):
+        raise HTTPException(status_code=400, detail={"code": "git.commit", "message": data.get("error") or "commit not found"})
+    return data
+
+
 @router.get("/{workspace_id}/git/diff")
 async def git_diff(workspace_id: str, path: str = "", staged: bool = False):
     ws = await _ws(workspace_id)
-    args = ["diff"]
-    if staged:
-        args.append("--cached")
     if path:
         resolve_in_workspace(ws.root_path, path)
-        args.extend(["--", path])
-    return {"path": path, "staged": staged, "diff": _git(ws.root_path, args)}
+    try:
+        patch = file_diff(ws.root_path, path, staged=staged)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.missing", "message": "git is not installed"}) from exc
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.error", "message": str(exc)}) from exc
+    return {"path": path, "staged": staged, "diff": patch}
+
+
+@router.get("/{workspace_id}/git/blob")
+async def git_blob(workspace_id: str, path: str, rev: str = "HEAD"):
+    ws = await _ws(workspace_id)
+    resolve_in_workspace(ws.root_path, path)
+    try:
+        return show_blob(ws.root_path, path, rev=rev)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.missing", "message": "git is not installed"}) from exc
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.blob", "message": str(exc)}) from exc
 
 
 @router.post("/{workspace_id}/git/stage")
@@ -64,6 +114,34 @@ async def git_stage(workspace_id: str, body: GitPaths):
     paths = body.paths or ["."]
     _git(ws.root_path, ["add", "--", *paths])
     return parse_status(ws.root_path)
+
+
+@router.post("/{workspace_id}/git/discard")
+async def git_discard(workspace_id: str, body: GitPaths):
+    ws = await _ws(workspace_id)
+    paths = _safe_paths(ws.root_path, body.paths)
+    if not paths:
+        raise HTTPException(status_code=400, detail={"code": "git.paths", "message": "path required"})
+    try:
+        return discard_paths(ws.root_path, paths)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.missing", "message": "git is not installed"}) from exc
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.error", "message": str(exc)}) from exc
+
+
+@router.post("/{workspace_id}/git/ignore")
+async def git_ignore(workspace_id: str, body: GitPaths):
+    ws = await _ws(workspace_id)
+    paths = _safe_paths(ws.root_path, body.paths)
+    if not paths:
+        raise HTTPException(status_code=400, detail={"code": "git.paths", "message": "path required"})
+    try:
+        return ignore_paths(ws.root_path, paths)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.missing", "message": "git is not installed"}) from exc
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail={"code": "git.error", "message": str(exc)}) from exc
 
 
 @router.post("/{workspace_id}/git/unstage")

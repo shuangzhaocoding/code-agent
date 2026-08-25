@@ -45,6 +45,7 @@ const staticCommands = computed<PaletteItem[]>(() => [
   },
   { id: 'agent', title: '打开对话', icon: 'atom', group: '面板', run: () => emit('openPanel', 'agent', 'agent', 'Agent') },
   { id: 'explorer', title: '打开文件目录', icon: 'folder', group: '面板', run: () => emit('openPanel', 'explorer', 'explorer', '文件目录') },
+  { id: 'search', title: '打开搜索', icon: 'search', group: '面板', keywords: 'find replace grep', run: () => store.openSearch() },
   { id: 'editor', title: '打开编辑器', icon: 'file', group: '面板', run: () => emit('openPanel', 'editor', 'editor', '编辑器') },
   { id: 'terminal', title: '打开终端', icon: 'terminal', group: '面板', run: () => emit('openPanel', 'terminal', 'terminal', '终端') },
   { id: 'ports', title: '打开端口', icon: 'ports', group: '面板', run: () => emit('openPanel', 'ports', 'ports', '端口') },

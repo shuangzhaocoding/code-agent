@@ -26,6 +26,7 @@ const navItems = [
   { id: 'agent', component: 'agent', title: 'Agent', label: '对话', icon: 'atom' },
   { id: 'trajectory', component: '', title: '', label: '轨迹', icon: 'clock', action: 'trajectory' as const },
   { id: 'explorer', component: 'explorer', title: '文件目录', label: '文件', icon: 'folder' },
+  { id: 'search', component: 'search', title: '搜索', label: '搜索', icon: 'search' },
   { id: 'editor', component: 'editor', title: '编辑器', label: '编辑器', icon: 'file' },
   { id: 'terminal', component: 'terminal', title: '终端', label: '终端', icon: 'terminal' },
   { id: 'ports', component: 'ports', title: '端口', label: '端口', icon: 'ports' },
@@ -79,6 +80,10 @@ function open(id: string, component: string, title: string, action?: 'trajectory
       return
     }
     emit('toggleTrajectory')
+    return
+  }
+  if (id === 'search') {
+    store.openSearch()
     return
   }
   emit('openPanel', id, component, title)

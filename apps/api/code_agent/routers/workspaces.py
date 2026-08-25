@@ -10,7 +10,15 @@ from pydantic import BaseModel, Field
 
 from code_agent.db.models import Workspace
 from code_agent.policy.engine import is_protected
-from code_agent.tools.paths import list_dir, read_text_file, resolve_in_workspace, workspace_root
+from code_agent.tools.paths import (
+    list_dir,
+    read_text_file,
+    replace_file_contents,
+    resolve_in_workspace,
+    search_file_contents,
+    split_patterns,
+    workspace_root,
+)
 
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
@@ -28,6 +36,14 @@ class FilePut(BaseModel):
     content: str
 
 
+class SearchReplaceIn(BaseModel):
+    q: str
+    replacement: str = ""
+    include: str = ""
+    exclude: str = ""
+    case_sensitive: bool = False
+
+
 class EntryCreate(BaseModel):
     path: str
     kind: str = "file"
@@ -36,6 +52,11 @@ class EntryCreate(BaseModel):
 class EntryRename(BaseModel):
     path: str
     new_path: str
+
+
+class MkdirIn(BaseModel):
+    parent: str
+    name: str
 
 
 @router.get("")
@@ -70,6 +91,51 @@ async def remove_workspace(workspace_id: str):
 async def tree(workspace_id: str, path: str = ""):
     ws = await _get_ws(workspace_id)
     return {"items": list_dir(ws.root_path, path, ws.ignore_globs)}
+
+
+@router.get("/{workspace_id}/search")
+async def search_workspace(
+    workspace_id: str,
+    q: str = "",
+    limit: int = 80,
+    include: str = "",
+    exclude: str = "",
+    case_sensitive: bool = False,
+):
+    ws = await _get_ws(workspace_id)
+    query = (q or "").strip()
+    if not query:
+        return {"query": query, "hits": []}
+    cap = max(1, min(int(limit or 80), 200))
+    hits = search_file_contents(
+        ws.root_path,
+        query,
+        extra_ignores=ws.ignore_globs,
+        limit=cap,
+        per_file=50,
+        includes=split_patterns(include),
+        excludes=split_patterns(exclude),
+        case_sensitive=case_sensitive,
+    )
+    return {"query": query, "hits": hits}
+
+
+@router.post("/{workspace_id}/replace")
+async def replace_workspace(workspace_id: str, body: SearchReplaceIn):
+    ws = await _get_ws(workspace_id)
+    query = (body.q or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail={"code": "search.empty", "message": "替换关键词不能为空"})
+    result = replace_file_contents(
+        ws.root_path,
+        query,
+        body.replacement,
+        extra_ignores=ws.ignore_globs,
+        includes=split_patterns(body.include),
+        excludes=split_patterns(body.exclude),
+        case_sensitive=body.case_sensitive,
+    )
+    return result
 
 
 @router.get("/{workspace_id}/file")
@@ -176,6 +242,28 @@ async def browse(path: str = "~"):
         if len(items) >= 400:
             break
     return {"path": str(p), "parent": str(p.parent), "items": items}
+
+
+@router.post("/mkdir")
+async def mkdir(body: MkdirIn):
+    parent = Path(body.parent).expanduser().resolve()
+    if not parent.exists() or not parent.is_dir():
+        raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "上级目录不存在"})
+    name = (body.name or "").strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "名称不合法"})
+    dest = (parent / name).resolve()
+    try:
+        dest.relative_to(parent)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "名称不合法"}) from exc
+    if dest.exists():
+        raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "已存在同名文件或目录"})
+    try:
+        dest.mkdir()
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail={"code": "path.denied", "message": "没有权限创建目录"}) from exc
+    return {"name": dest.name, "path": str(dest), "parent": str(parent)}
 
 
 async def _get_ws(workspace_id: str) -> Workspace:

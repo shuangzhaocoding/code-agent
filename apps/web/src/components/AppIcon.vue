@@ -70,6 +70,9 @@ export type AppIconName =
   | 'help'
   | 'pin'
   | 'command'
+  | 'tree'
+  | 'expand-all'
+  | 'collapse-all'
 
 const props = withDefaults(
   defineProps<{
@@ -307,6 +310,20 @@ const paths: Record<string, string[]> = {
   ],
   command: [
     'M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3',
+  ],
+  tree: [
+    'M4 5h8',
+    'M8 5v14',
+    'M8 12h10',
+    'M8 19h10',
+  ],
+  'expand-all': [
+    'M7 8l5 5 5-5',
+    'M7 13l5 5 5-5',
+  ],
+  'collapse-all': [
+    'M7 11l5-5 5 5',
+    'M7 18l5-5 5 5',
   ],
 }
 

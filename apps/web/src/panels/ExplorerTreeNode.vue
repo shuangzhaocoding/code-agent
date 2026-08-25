@@ -4,20 +4,26 @@ import type { FsItem } from '@/stores/app'
 import { useAppStore } from '@/stores/app'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
+import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 
 const props = defineProps<{
   item: FsItem
   depth: number
   renamingPath?: string | null
+  creating?: { kind: 'file' | 'dir'; dir: string; value: string; id: number } | null
 }>()
 
 const store = useAppStore()
 const mark = computed(() => store.fileTreeMark(props.item.path, props.item.is_dir))
 const emit = defineEmits<{
   context: [e: MouseEvent, item: FsItem]
+  select: [item: FsItem]
   'start-rename': [path: string]
   'commit-rename': [from: string, newName: string]
   'cancel-rename': []
+  'update:creating': [value: string]
+  'commit-create': []
+  'cancel-create': []
 }>()
 
 const renameVal = ref('')
@@ -42,6 +48,11 @@ function commitRename() {
     emit('cancel-rename')
   }
 }
+
+function onRowClick() {
+  emit('select', props.item)
+  store.openPath(props.item.path, props.item.is_dir)
+}
 </script>
 
 <template>
@@ -51,7 +62,7 @@ function commitRename() {
       class="row"
       :class="{ active: store.activePath === item.path }"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
-      @click="store.openPath(item.path, item.is_dir)"
+      @click="onRowClick"
       @contextmenu="emit('context', $event, item)"
     >
       <span class="twist" :class="{ on: item.is_dir && store.isExpanded(item.path), hidden: !item.is_dir }" />
@@ -80,16 +91,32 @@ function commitRename() {
       />
     </button>
     <template v-if="item.is_dir && store.isExpanded(item.path)">
+      <ExplorerCreateRow
+        v-if="creating && creating.dir === item.path"
+        :key="creating.id"
+        :kind="creating.kind"
+        :depth="depth + 1"
+        :dir="item.path"
+        :model-value="creating.value"
+        @update:model-value="(v) => emit('update:creating', v)"
+        @commit="emit('commit-create')"
+        @cancel="emit('cancel-create')"
+      />
       <ExplorerTreeNode
         v-for="child in store.childrenOf(item.path)"
         :key="child.path"
         :item="child"
         :depth="depth + 1"
         :renaming-path="renamingPath"
+        :creating="creating"
         @context="(e, it) => emit('context', e, it)"
+        @select="(it) => emit('select', it)"
         @start-rename="(p) => emit('start-rename', p)"
         @commit-rename="(from, name) => emit('commit-rename', from, name)"
         @cancel-rename="emit('cancel-rename')"
+        @update:creating="(v) => emit('update:creating', v)"
+        @commit-create="emit('commit-create')"
+        @cancel-create="emit('cancel-create')"
       />
     </template>
   </div>

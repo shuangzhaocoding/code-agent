@@ -11,6 +11,7 @@ import TrajectoryPanel from '@/panels/TrajectoryPanel.vue'
 import TrajectoryDockPanel from '@/panels/TrajectoryDockPanel.vue'
 import WorkspacePanel from '@/panels/WorkspacePanel.vue'
 import ExplorerPanel from '@/panels/ExplorerPanel.vue'
+import SearchPanel from '@/panels/SearchPanel.vue'
 import EditorPanel from '@/panels/EditorPanel.vue'
 import AgentPanel from '@/panels/AgentPanel.vue'
 import TerminalPanel from '@/panels/TerminalPanel.vue'
@@ -41,6 +42,7 @@ watch(trajectoryOpen, (value) => setTrajectoryOpen(value))
 const components = {
   workspace: WorkspacePanel,
   explorer: ExplorerPanel,
+  search: SearchPanel,
   editor: EditorPanel,
   agent: AgentPanel,
   terminal: TerminalPanel,
@@ -65,12 +67,18 @@ onMounted(() => {
   window.addEventListener('ca-focus-editor', focusEditor)
   window.addEventListener('ca-focus-agent', focusAgent)
   window.addEventListener('ca-open-models', openModels)
+  window.addEventListener('ca-open-search', openSearch)
+  window.addEventListener('ca-open-explorer', openExplorer)
+  window.addEventListener('keydown', onWorkbenchKey)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-focus-editor', focusEditor)
   window.removeEventListener('ca-focus-agent', focusAgent)
   window.removeEventListener('ca-open-models', openModels)
+  window.removeEventListener('ca-open-search', openSearch)
+  window.removeEventListener('ca-open-explorer', openExplorer)
+  window.removeEventListener('keydown', onWorkbenchKey)
   stopResize()
 })
 
@@ -84,6 +92,21 @@ function focusAgent() {
 
 function openModels() {
   openPanel('models', 'models', '模型')
+}
+
+function openSearch() {
+  openPanel('search', 'search', '搜索')
+}
+
+function openExplorer() {
+  openPanel('explorer', 'explorer', '文件目录')
+}
+
+function onWorkbenchKey(e: KeyboardEvent) {
+  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== 'f') return
+  if (e.repeat) return
+  e.preventDefault()
+  store.openSearch()
 }
 
 function seed(apiRef: DockviewApi) {
@@ -116,6 +139,7 @@ async function onReady(event: DockviewReadyEvent) {
 const placements: Record<string, { referencePanel: string; direction: 'left' | 'right' | 'below' }> = {
   workspace: { referencePanel: 'agent', direction: 'left' },
   explorer: { referencePanel: 'agent', direction: 'left' },
+  search: { referencePanel: 'agent', direction: 'left' },
   editor: { referencePanel: 'agent', direction: 'left' },
   terminal: { referencePanel: 'agent', direction: 'below' },
   agent: { referencePanel: 'agent', direction: 'right' },
