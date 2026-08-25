@@ -5,7 +5,8 @@ from typing import Any
 
 from code_agent.db.models import Conversation, Message, Workspace
 from code_agent.plugins.base import registry
-from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled, thinking_prompt
+from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled
+from code_agent.llm.vision import IMAGE_TOKEN_ESTIMATE
 from code_agent.streaming.run_manager import _system_prompt
 
 CONTEXT_LIMIT = 1_048_576
@@ -101,7 +102,8 @@ async def compute_context_usage(
         mime = str(item.get("type") or "")
         size = int(item.get("size") or 0)
         if mime.startswith("image/"):
-            file_tokens += max(512, min(4096, size // 800))
+            # DeepSeek vision: each image is capped ~384 tokens after resize
+            file_tokens += IMAGE_TOKEN_ESTIMATE
         else:
             file_tokens += estimate_tokens(str(item.get("name") or "")) + min(2048, size // 4)
 

@@ -252,13 +252,16 @@ async def create_model(body: ModelIn):
     from code_agent.llm.capabilities import default_params, infer_capabilities
 
     caps = infer_capabilities(body.model_id)
+    vision = body.supports_vision or bool(caps.get("vision", {}).get("supported"))
+    # Keep capabilities.vision in sync with the persisted flag
+    caps.setdefault("vision", {})["supported"] = vision
     row = await LlmModel.create(
         provider_id=body.provider_id,
         model_id=body.model_id,
         display_name=body.display_name or body.model_id,
         context_window=body.context_window,
         supports_tools=body.supports_tools,
-        supports_vision=body.supports_vision,
+        supports_vision=vision,
         capabilities_json=caps,
         params_json=body.params or default_params(caps),
         is_default=body.is_default,
@@ -277,6 +280,15 @@ async def update_model(model_id: str, body: dict):
     for field in ("display_name", "model_id", "context_window", "supports_tools", "supports_vision", "enabled"):
         if field in body:
             setattr(row, field, body[field])
+    if "model_id" in body or "supports_vision" in body:
+        from code_agent.llm.capabilities import infer_capabilities
+
+        caps = infer_capabilities(row.model_id)
+        if "supports_vision" in body:
+            caps.setdefault("vision", {})["supported"] = bool(row.supports_vision)
+        else:
+            row.supports_vision = bool(caps.get("vision", {}).get("supported"))
+        row.capabilities_json = {**(row.capabilities_json or {}), **caps}
     if "params" in body and isinstance(body["params"], dict):
         row.params_json = body["params"]
     await row.save()

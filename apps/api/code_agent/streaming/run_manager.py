@@ -71,7 +71,9 @@ Available skills:
 """.strip()
 
 
-def _history_messages(rows: list[Message]) -> list:
+def _history_messages(rows: list[Message], *, vision: bool = False) -> list:
+    from code_agent.llm.vision import build_user_content, message_files
+
     out = []
     for row in rows:
         text_parts = []
@@ -79,11 +81,15 @@ def _history_messages(rows: list[Message]) -> list:
             if block.get("type") in {"user.text", "assistant.markdown"} and block.get("text"):
                 text_parts.append(block["text"])
         text = "\n".join(text_parts).strip()
-        if not text:
-            continue
         if row.role == "user":
-            out.append(HumanMessage(content=text))
+            files = message_files(row.blocks)
+            content = build_user_content(text, files, vision=vision)
+            if content is None:
+                continue
+            out.append(HumanMessage(content=content))
         elif row.role == "assistant":
+            if not text:
+                continue
             out.append(AIMessage(content=text))
     return out
 
@@ -121,7 +127,10 @@ async def start_run(
         sort_key=sort_key,
     )
     if conv.title == "New chat":
-        conv.title = user_text.strip()[:72] or "New chat"
+        title = (user_text or "").strip()[:72]
+        if not title and files:
+            title = str(files[0].get("name") or "图片消息")[:72]
+        conv.title = title or "New chat"
     run = await Run.create(
         conversation_id=conversation_id,
         status="queued",
@@ -168,7 +177,24 @@ async def _execute(run_id: str) -> None:
         thinking_level = normalize_thinking_level((run.model_snapshot or {}).get("thinking_level"))
         if not (run.model_snapshot or {}).get("thinking_level") and (run.model_snapshot or {}).get("thinking"):
             thinking_level = "medium"
-        model, model_row = await resolve_chat_model(conv.model_id, thinking_level)
+
+        from code_agent.llm.hub import model_has_vision
+        from code_agent.llm.vision import is_image_file_meta, message_files
+
+        history = await Message.filter(conversation_id=conv.id).order_by("sort_key")
+        has_images = any(
+            is_image_file_meta(item)
+            for row in history
+            if row.role == "user"
+            for item in message_files(row.blocks)
+        )
+
+        model, model_row, switch_info = await resolve_chat_model(
+            conv.model_id,
+            thinking_level,
+            need_vision=has_images,
+            prefer_tools=run.mode == "agent",
+        )
         if model is None:
             await _fail(run_id, "model.missing", "没有可用的 LLM。请先在 Models 面板添加 Provider。")
             return
@@ -176,13 +202,46 @@ async def _execute(run_id: str) -> None:
             await _fail(run_id, "model.unsupported_tools", "当前模型不支持工具调用，请改用 Ask 或更换模型。")
             return
 
+        vision = model_has_vision(model_row)
+        if has_images and not vision:
+            await _fail(
+                run_id,
+                "model.unsupported_vision",
+                "消息包含图片，但没有可用的视觉模型。请在 Models 面板添加并启用视觉模型（如 deepseek-v4-flash-vision-exp）。",
+            )
+            return
+
+        if switch_info and switch_info.get("reason") == "vision":
+            snap = dict(run.model_snapshot or {})
+            snap["auto_vision_switch"] = switch_info
+            snap["effective_model_id"] = str(model_row.id)
+            snap["effective_model"] = model_row.model_id
+            run.model_snapshot = snap
+            await run.save(update_fields=["model_snapshot"])
+            notice_id = new_id()
+            notice = (
+                f"已自动切换到视觉模型 **{switch_info['to_name']}**"
+                f"（`{switch_info['to_model_id']}`），"
+                f"原模型 `{switch_info['from_name']}` 不支持图片理解。"
+            )
+            await broker.publish(
+                run_id,
+                "block.started",
+                {
+                    "block_id": notice_id,
+                    "block_type": "assistant.markdown",
+                    "meta": {"kind": "model_switch", "auto_vision_switch": switch_info},
+                },
+            )
+            await broker.publish(run_id, "block.delta", {"block_id": notice_id, "text": notice})
+            await broker.publish(run_id, "block.completed", {"block_id": notice_id, "status": "ok"})
+
         set_tool_context(run_id, {"id": str(workspace.id), "root_path": workspace.root_path})
         tools = registry.enabled_tools(run.mode)
         from langgraph.prebuilt import create_react_agent
 
         graph = create_react_agent(model, tools, prompt=_system_prompt(workspace, run.mode, thinking_level))
-        history = await Message.filter(conversation_id=conv.id).order_by("sort_key")
-        lc_messages = _history_messages(list(history))
+        lc_messages = _history_messages(list(history), vision=vision)
 
         timeout = int(settings.get("agent.run_timeout_sec") or 900)
         stored_limit = await Setting.get_or_none(key="agent.max_steps")

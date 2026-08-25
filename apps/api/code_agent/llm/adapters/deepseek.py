@@ -44,7 +44,7 @@ def _thinking_extra_body(level: str, model_id: str | None) -> dict[str, Any]:
 class DeepSeekAdapter:
     kind = "deepseek"
     title = "DeepSeek"
-    description = "DeepSeek 官方 API；思考强度通过 extra_body.thinking.budget_tokens 控制。"
+    description = "DeepSeek 官方 API；支持思考强度与视觉模型（如 deepseek-v4-flash-vision-exp）。"
     config_schema = CONFIG_SCHEMA
     presets = PRESETS
     thinking_levels = THINKING_LEVELS

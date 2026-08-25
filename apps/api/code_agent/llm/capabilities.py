@@ -31,8 +31,13 @@ def _looks_vision(model_id: str | None) -> bool:
             "claude-3",
             "gemini",
             "qwen-vl",
+            "qwen2-vl",
+            "qwen2.5-vl",
             "llava",
             "pixtral",
+            # DeepSeek vision (e.g. deepseek-v4-flash-vision-exp)
+            "deepseek-v4-flash-vision",
+            "deepseek-vl",
         )
     )
 

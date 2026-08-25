@@ -1,4 +1,4 @@
-export const UPLOAD_ACCEPT = 'image/*,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg'
+export const UPLOAD_ACCEPT = 'image/jpeg,image/png,image/gif,image/webp,.jpg,.jpeg,.png,.gif,.webp'
 export const UPLOAD_MAX_SIZE_MB = 20
 export const UPLOAD_MAX_COUNT = 8
 
@@ -8,19 +8,24 @@ export const attachmentFileMatchers = [
     matcher: (file: File | string) => {
       if (typeof file === 'string') {
         const ext = file.split('.').pop()?.toLowerCase() ?? ''
-        return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)
+        return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)
       }
-      return file.type.startsWith('image/')
+      return ['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)
+        || (file.type.startsWith('image/') && /\.(jpe?g|png|gif|webp)$/i.test(file.name))
     },
   },
 ]
 
 export function detectAttachmentFileType(file: File): string {
-  return file.type.startsWith('image/') ? 'image' : 'file'
+  return attachmentFileMatchers[0].matcher(file) ? 'image' : 'file'
 }
 
 export function detectAttachmentFileTypeFromMeta(name: string, type: string): string {
-  if (type.startsWith('image/')) return 'image'
+  if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(type)) return 'image'
+  if (type.startsWith('image/')) {
+    const ext = name.split('.').pop()?.toLowerCase() ?? ''
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return 'image'
+  }
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
-  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext) ? 'image' : 'file'
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext) ? 'image' : 'file'
 }

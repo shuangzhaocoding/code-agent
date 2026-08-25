@@ -4,7 +4,7 @@ from typing import Any
 
 from code_agent.crypto import decrypt_secret, encrypt_secret, mask_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.capabilities import supports_thinking
+from code_agent.llm.capabilities import _looks_vision, supports_thinking
 from code_agent.llm.codex_gateway import canonicalize_codex_base_url, is_codex_gateway
 from code_agent.llm.models_sync import normalize_base_url_for_kind, sync_provider_models
 from code_agent.llm.thinking import normalize_thinking_level, thinking_enabled
@@ -18,21 +18,68 @@ def _looks_reasoner(model_id: str | None) -> bool:
     )
 
 
+def model_has_vision(row: LlmModel | None) -> bool:
+    if not row:
+        return False
+    if row.supports_vision:
+        return True
+    caps = row.capabilities_json or {}
+    if (caps.get("vision") or {}).get("supported"):
+        return True
+    return _looks_vision(row.model_id)
+
+
+async def pick_vision_model(
+    *,
+    preferred_provider_id: Any = None,
+    prefer_tools: bool = False,
+    exclude_id: Any = None,
+) -> LlmModel | None:
+    """Pick an enabled vision model, preferring the same provider and tool support."""
+    rows = await LlmModel.filter(enabled=True)
+    candidates = [row for row in rows if model_has_vision(row) and str(row.id) != str(exclude_id or "")]
+    if not candidates:
+        return None
+    if prefer_tools:
+        with_tools = [row for row in candidates if row.supports_tools]
+        if with_tools:
+            candidates = with_tools
+
+    def _score(row: LlmModel) -> tuple:
+        same_provider = 0 if preferred_provider_id and str(row.provider_id) == str(preferred_provider_id) else 1
+        default = 0 if row.is_default else 1
+        tools = 0 if row.supports_tools else 1
+        return (same_provider, tools, default, (row.display_name or row.model_id).lower())
+
+    return sorted(candidates, key=_score)[0]
+
+
 def register_builtin_providers() -> None:
     from code_agent.plugins.builtin_llm import register_builtin_llm_plugins
 
     register_builtin_llm_plugins()
 
 
-async def resolve_chat_model(model_pk: str | None, thinking_level: str = "off"):
+async def resolve_chat_model(
+    model_pk: str | None,
+    thinking_level: str = "off",
+    *,
+    need_vision: bool = False,
+    prefer_tools: bool = False,
+):
+    """Resolve runtime chat model.
+
+    May auto-switch:
+    - reasoner ↔ chat based on thinking level (same provider pair)
+    - to a vision-capable model when need_vision and current model cannot see images
+    """
     level = normalize_thinking_level(thinking_level)
     thinking = thinking_enabled(level)
     chat, row = await get_chat_model(model_pk)
     if not row:
-        return chat, row
+        return chat, row, None
 
-    caps = row.capabilities_json or {}
-    can_think = supports_thinking(caps)
+    switch_info: dict[str, Any] | None = None
     siblings = await LlmModel.filter(provider_id=row.provider_id, enabled=True)
 
     def _pair_stem(model_id: str | None) -> str:
@@ -53,6 +100,31 @@ async def resolve_chat_model(model_pk: str | None, thinking_level: str = "off"):
                 return sibling
         return None
 
+    # Vision first: images require a vision model for the whole turn
+    if need_vision and not model_has_vision(row):
+        pick = await pick_vision_model(
+            preferred_provider_id=row.provider_id,
+            prefer_tools=prefer_tools,
+            exclude_id=row.id,
+        )
+        if pick:
+            switch_info = {
+                "reason": "vision",
+                "from_id": str(row.id),
+                "from_model_id": row.model_id,
+                "from_name": row.display_name or row.model_id,
+                "to_id": str(pick.id),
+                "to_model_id": pick.model_id,
+                "to_name": pick.display_name or pick.model_id,
+            }
+            chat, row = await get_chat_model(str(pick.id))
+            if not row:
+                return None, None, switch_info
+            siblings = await LlmModel.filter(provider_id=row.provider_id, enabled=True)
+
+    caps = row.capabilities_json or {}
+    can_think = supports_thinking(caps)
+
     if thinking and can_think and not _looks_reasoner(row.model_id):
         pick = _paired(True)
         if pick:
@@ -63,13 +135,13 @@ async def resolve_chat_model(model_pk: str | None, thinking_level: str = "off"):
         if pick:
             chat, row = await get_chat_model(str(pick.id))
 
-    if chat is not None:
+    if chat is not None and row is not None:
         from code_agent.llm.adapters import get_llm_adapter
 
         provider = await row.provider
         adapter = get_llm_adapter(provider)
         chat = adapter.apply_thinking(chat, provider, row, level)
-    return chat, row
+    return chat, row, switch_info
 
 
 async def get_chat_model(model_pk: str | None):
@@ -174,7 +246,9 @@ __all__ = [
     "apply_preset",
     "encrypt_secret",
     "get_chat_model",
+    "model_has_vision",
     "model_public",
+    "pick_vision_model",
     "provider_public",
     "register_builtin_providers",
     "resolve_chat_model",

@@ -321,6 +321,29 @@ const {
 
 const pendingFiles = computed(() => getPendingFiles())
 
+const selectedModel = computed(() => {
+  for (const provider of store.providers) {
+    const model = (provider.models || []).find((m) => m.id === store.modelId)
+    if (model) return model
+  }
+  return null
+})
+
+const modelSupportsVision = computed(() => {
+  const model = selectedModel.value
+  if (!model) return false
+  if (model.supports_vision) return true
+  if (model.capabilities?.vision?.supported) return true
+  const id = (model.model_id || '').toLowerCase()
+  return id.includes('vision') || id.includes('deepseek-vl')
+})
+
+const visionAttachHint = computed(() => {
+  if (!pendingFiles.value.length) return ''
+  if (modelSupportsVision.value) return ''
+  return '当前模型不支持图片；发送后将自动切换到可用的视觉模型。'
+})
+
 const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = useContextUsagePreview({
   conversationId: toRef(store, 'conversationId'),
   userContent: draft,
@@ -494,13 +517,14 @@ function normalizeSubmitText(text: string) {
 
 function buildPayload(text: string) {
   let value = normalizeSubmitText(text || '')
-  if (!value || hasUploadingAttachments()) return null
+  if (hasUploadingAttachments()) return null
+  const files = getPendingFiles()
+  if (!value && !files.length) return null
   if (mentionFiles.value.length) {
     const paths = mentionFiles.value.map((f) => `@${f.path}`).join(' ')
-    value = value + '\n' + paths
+    value = value ? `${value}\n${paths}` : paths
   }
   const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
-  const files = getPendingFiles()
   return { value, refs, files }
 }
 
@@ -535,7 +559,8 @@ function onSenderCaptureKeydown(e: KeyboardEvent) {
   if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
   if (!running()) return
   const value = normalizeSubmitText(draft.value || '')
-  if (!value || hasUploadingAttachments()) return
+  const files = getPendingFiles()
+  if ((!value && !files.length) || hasUploadingAttachments()) return
   e.preventDefault()
   e.stopPropagation()
   if (e.altKey) onSubmitNow()
@@ -549,6 +574,20 @@ function onCancel() {
 function handleFileSelect(files: File[]) {
   uploadError.value = ''
   addFiles(files)
+}
+
+function onComposerPaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items?.length) return
+  const imageFiles: File[] = []
+  for (const item of items) {
+    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+    const file = item.getAsFile()
+    if (file) imageFiles.push(file)
+  }
+  if (!imageFiles.length) return
+  e.preventDefault()
+  handleFileSelect(imageFiles)
 }
 
 function handleUploadError(error: Error) {
@@ -696,7 +735,13 @@ function openContextUsageDialog() {
         </span>
       </div>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
-      <div class="agent-sender-wrap" @pointerdown.capture="onSenderBlankPointerDown" @keydown.capture="onSenderCaptureKeydown" @keydown="mentionKeydown">
+      <div
+        class="agent-sender-wrap"
+        @pointerdown.capture="onSenderBlankPointerDown"
+        @keydown.capture="onSenderCaptureKeydown"
+        @keydown="mentionKeydown"
+        @paste.capture="onComposerPaste"
+      >
         <TrSender
           ref="sender"
           v-model="draft"
@@ -757,6 +802,7 @@ function openContextUsageDialog() {
         </TrSender>
       </div>
       <p v-if="uploadError" class="agent-upload-error">{{ uploadError }}</p>
+      <p v-else-if="visionAttachHint" class="agent-upload-hint">{{ visionAttachHint }}</p>
     </footer>
 
     <ChatContextUsageDialog
@@ -1445,5 +1491,10 @@ html[data-theme='dark'] .agent-sender-wrap {
   margin: 6px 0 0;
   font-size: 12px;
   color: var(--danger);
+}
+.agent-upload-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>
