@@ -84,3 +84,21 @@ def test_collect_skips_non_images():
 
 def test_image_token_cap():
     assert IMAGE_TOKEN_ESTIMATE == 384
+
+
+def test_turn_needs_vision_current_message():
+    from code_agent.llm.vision import turn_needs_vision
+
+    files = [{"name": "a.png", "url": "/api/uploads/a.png", "type": "image/png"}]
+    assert turn_needs_vision(current_text="你好", current_files=files, history_has_images=False)
+    assert not turn_needs_vision(current_text="你好", current_files=[], history_has_images=True)
+    assert turn_needs_vision(
+        current_text="这张图里有什么？",
+        current_files=[],
+        history_has_images=True,
+    )
+    assert not turn_needs_vision(
+        current_text="这张图里有什么？",
+        current_files=[],
+        history_has_images=False,
+    )

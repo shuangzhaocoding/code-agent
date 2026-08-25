@@ -465,7 +465,7 @@ function capabilityTags(m: LlmModel) {
             <AppIcon name="plus" :size="16" />
             {{ showCustom ? '收起自定义' : '自定义添加' }}
           </button>
-        </div>
+      </div>
 
         <form v-if="showCustom" class="custom-form" @submit.prevent="addCustom">
           <div class="form-grid">
@@ -475,16 +475,16 @@ function capabilityTags(m: LlmModel) {
             </label>
             <label>
               <span>类型</span>
-              <select v-model="form.kind" class="field-control" @change="onKindChange">
-                <option value="deepseek">DeepSeek</option>
+        <select v-model="form.kind" class="field-control" @change="onKindChange">
+          <option value="deepseek">DeepSeek</option>
                 <option value="aivalux">AIValux Codex</option>
                 <option value="ccx">CCX</option>
                 <option value="gateway">中转站</option>
-                <option value="openai_compat">OpenAI Compatible</option>
-                <option value="openai">OpenAI</option>
-                <option value="ollama">Ollama</option>
-                <option value="custom">Custom</option>
-              </select>
+          <option value="openai_compat">OpenAI Compatible</option>
+          <option value="openai">OpenAI</option>
+          <option value="ollama">Ollama</option>
+          <option value="custom">Custom</option>
+        </select>
             </label>
             <label class="span-2">
               <span>Base URL</span>
@@ -499,7 +499,7 @@ function capabilityTags(m: LlmModel) {
           <div class="form-actions">
             <button type="submit" class="btn btn-primary" :disabled="busy">添加并同步模型</button>
           </div>
-        </form>
+      </form>
 
         <p v-if="!providers.length" class="empty-note">暂无配置，使用上方快速添加或自定义接入。</p>
 
@@ -644,7 +644,7 @@ function capabilityTags(m: LlmModel) {
                     :class="{ default: m.is_default }"
                     @click="setDefaultModel(m)"
                   >
-                    {{ m.display_name }}
+              {{ m.display_name }}
                     <span v-if="m.is_default" class="default-badge">默认</span>
                   </button>
                   <span
@@ -665,8 +665,8 @@ function capabilityTags(m: LlmModel) {
                     </button>
                   </div>
                 </template>
-              </li>
-            </ul>
+            </li>
+          </ul>
           </template>
         </article>
       </section>

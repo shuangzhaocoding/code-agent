@@ -152,6 +152,84 @@ def message_files(row_blocks: list | None) -> list[dict[str, Any]]:
     return files
 
 
+def message_text(row_blocks: list | None) -> str:
+    parts: list[str] = []
+    for block in row_blocks or []:
+        if block.get("type") in {"user.text", "assistant.markdown"} and block.get("text"):
+            parts.append(str(block["text"]))
+    return "\n".join(parts).strip()
+
+
+# Phrases that suggest the user is referring to an image already in the thread.
+_IMAGE_INTENT_PATTERNS = (
+    "这张图",
+    "这张图片",
+    "图片里",
+    "图片中",
+    "图里",
+    "图中",
+    "截图",
+    "看图",
+    "识图",
+    "上面的图",
+    "刚才的图",
+    "那张图",
+    "该图",
+    "附图",
+    "照片里",
+    "描述一下图",
+    "图是什么",
+    "这个图",
+    "此图",
+    "ocr",
+    "this image",
+    "the image",
+    "the picture",
+    "the screenshot",
+    "in the image",
+    "in the picture",
+    "look at the image",
+    "describe the image",
+    "what.*in.*(image|picture|screenshot)",
+)
+
+
+def text_refers_to_image(text: str | None) -> bool:
+    """Heuristic: does this text ask about / refer to an image?"""
+    raw = (text or "").strip().lower()
+    if not raw:
+        return False
+    for token in _IMAGE_INTENT_PATTERNS:
+        if token.startswith("what.*") or ".*" in token:
+            import re
+
+            if re.search(token, raw, re.IGNORECASE):
+                return True
+        elif token.lower() in raw:
+            return True
+    return False
+
+
+def turn_needs_vision(
+    *,
+    current_text: str,
+    current_files: list[dict[str, Any]] | None,
+    history_has_images: bool,
+) -> bool:
+    """Decide whether this turn should use a vision model.
+
+    Priority:
+    1. Current message attaches images → yes
+    2. Current text refers to images AND context has prior images → yes
+    3. Otherwise (e.g. plain「你好」) → no, even if history once had images
+    """
+    if any(is_image_file_meta(item) for item in (current_files or [])):
+        return True
+    if history_has_images and text_refers_to_image(current_text):
+        return True
+    return False
+
+
 def build_user_content(
     text: str,
     files: list[dict[str, Any]] | None,
@@ -171,7 +249,7 @@ def build_user_content(
             return None
         if image_files and not vision:
             names = ", ".join(str(f.get("name") or "image") for f in image_files[:8])
-            note = f"[附件图片未发送：当前模型不支持视觉。文件：{names}]"
+            note = f"[此前消息附带图片：{names}]"
             return f"{text}\n\n{note}".strip() if text else note
         return text or None
 

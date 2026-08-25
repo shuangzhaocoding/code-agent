@@ -179,20 +179,34 @@ async def _execute(run_id: str) -> None:
             thinking_level = "medium"
 
         from code_agent.llm.hub import model_has_vision
-        from code_agent.llm.vision import is_image_file_meta, message_files
+        from code_agent.llm.vision import (
+            is_image_file_meta,
+            message_files,
+            message_text,
+            turn_needs_vision,
+        )
 
         history = await Message.filter(conversation_id=conv.id).order_by("sort_key")
-        has_images = any(
+        latest_user = next((row for row in reversed(history) if row.role == "user"), None)
+        current_files = message_files(latest_user.blocks) if latest_user else []
+        current_text = message_text(latest_user.blocks) if latest_user else ""
+        history_has_images = any(
             is_image_file_meta(item)
             for row in history
             if row.role == "user"
             for item in message_files(row.blocks)
         )
+        # Prefer this turn's intent; only pull vision from context when text refers to prior images.
+        need_vision = turn_needs_vision(
+            current_text=current_text,
+            current_files=current_files,
+            history_has_images=history_has_images,
+        )
 
         model, model_row, switch_info = await resolve_chat_model(
             conv.model_id,
             thinking_level,
-            need_vision=has_images,
+            need_vision=need_vision,
             prefer_tools=run.mode == "agent",
         )
         if model is None:
@@ -203,11 +217,11 @@ async def _execute(run_id: str) -> None:
             return
 
         vision = model_has_vision(model_row)
-        if has_images and not vision:
+        if need_vision and not vision:
             await _fail(
                 run_id,
                 "model.unsupported_vision",
-                "消息包含图片，但没有可用的视觉模型。请在 Models 面板添加并启用视觉模型（如 deepseek-v4-flash-vision-exp）。",
+                "当前消息需要理解图片，但没有可用的视觉模型。请在 Models 面板添加并启用视觉模型（如 deepseek-v4-flash-vision-exp）。",
             )
             return
 
@@ -241,7 +255,8 @@ async def _execute(run_id: str) -> None:
         from langgraph.prebuilt import create_react_agent
 
         graph = create_react_agent(model, tools, prompt=_system_prompt(workspace, run.mode, thinking_level))
-        lc_messages = _history_messages(list(history), vision=vision)
+        # Only attach image bytes when this turn actually needs vision.
+        lc_messages = _history_messages(list(history), vision=vision and need_vision)
 
         timeout = int(settings.get("agent.run_timeout_sec") or 900)
         stored_limit = await Setting.get_or_none(key="agent.max_steps")
