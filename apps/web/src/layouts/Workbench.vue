@@ -2,6 +2,8 @@
 import { DockviewVue } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
@@ -27,6 +29,7 @@ import PortsPanel from '@/panels/PortsPanel.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { getSidebarCollapsed, getTrajectoryOpen, setSidebarCollapsed, setTrajectoryOpen } from '@/utils/layoutPrefs'
 
+const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
 const sidebarCollapsed = ref(getSidebarCollapsed())
@@ -70,6 +73,7 @@ onMounted(() => {
   window.addEventListener('ca-open-search', openSearch)
   window.addEventListener('ca-open-explorer', openExplorer)
   window.addEventListener('keydown', onWorkbenchKey)
+  window.addEventListener('ca-locale', retitlePanels)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
@@ -79,27 +83,28 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-search', openSearch)
   window.removeEventListener('ca-open-explorer', openExplorer)
   window.removeEventListener('keydown', onWorkbenchKey)
+  window.removeEventListener('ca-locale', retitlePanels)
   stopResize()
 })
 
 function focusEditor() {
-  openPanel('editor', 'editor', '编辑器')
+  openPanel('editor', 'editor', panelTitle('editor'))
 }
 
 function focusAgent() {
-  openPanel('agent', 'agent', 'Agent')
+  openPanel('agent', 'agent', panelTitle('agent'))
 }
 
 function openModels() {
-  openPanel('models', 'models', '模型')
+  openPanel('models', 'models', panelTitle('models'))
 }
 
 function openSearch() {
-  openPanel('search', 'search', '搜索')
+  openPanel('search', 'search', panelTitle('search'))
 }
 
 function openExplorer() {
-  openPanel('explorer', 'explorer', '文件目录')
+  openPanel('explorer', 'explorer', panelTitle('explorer'))
 }
 
 function onWorkbenchKey(e: KeyboardEvent) {
@@ -110,7 +115,7 @@ function onWorkbenchKey(e: KeyboardEvent) {
 }
 
 function seed(apiRef: DockviewApi) {
-  apiRef.addPanel({ id: 'agent', component: 'agent', title: 'Agent' })
+  apiRef.addPanel({ id: 'agent', component: 'agent', title: panelTitle('agent') })
   store.activity = 'agent'
 }
 
@@ -154,6 +159,19 @@ const placements: Record<string, { referencePanel: string; direction: 'left' | '
   trajectory: { referencePanel: 'agent', direction: 'right' },
 }
 
+
+function retitlePanels() {
+  const apiRef = dock.value
+  if (!apiRef) return
+  for (const panel of apiRef.panels) {
+    try {
+      panel.api.setTitle(panelTitle(panel.id))
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function openPanel(id: string, component: string, title: string) {
   const apiRef = dock.value
   if (!apiRef) return
@@ -184,12 +202,12 @@ function toggleTrajectory() {
 }
 
 function popoutTrajectory() {
-  openPanel('trajectory', 'trajectory', '轨迹')
+  openPanel('trajectory', 'trajectory', panelTitle('trajectory'))
   trajectoryOpen.value = false
 }
 
 function openTrajectoryDock() {
-  openPanel('trajectory', 'trajectory', '轨迹')
+  openPanel('trajectory', 'trajectory', panelTitle('trajectory'))
 }
 
 function startSidebarResize(e: PointerEvent) {
@@ -252,7 +270,7 @@ const dockThemeClass = computed(() =>
       <div
         v-if="!sidebarCollapsed"
         class="sidebar-resizer"
-        title="拖拽调整侧栏宽度"
+        :title="t('workbench.resizeSidebar')"
         @pointerdown="startSidebarResize"
       />
       <div class="workbench-main">
@@ -267,7 +285,7 @@ const dockThemeClass = computed(() =>
         <div
           v-if="trajectoryOpen"
           class="details-resizer"
-          title="拖拽调整轨迹面板宽度"
+          :title="t('workbench.resizeTrajectory')"
           @pointerdown="startTrajectoryResize"
         />
         <TrajectoryPanel

@@ -1,5 +1,8 @@
 <script setup lang="ts">
-withDefaults(
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const props = withDefaults(
   defineProps<{
     title: string
     summary: string
@@ -8,10 +11,13 @@ withDefaults(
     cancelLabel?: string
     danger?: boolean
   }>(),
-  { confirmLabel: '确认', cancelLabel: '取消', danger: true, details: '' },
+  { confirmLabel: '', cancelLabel: '', danger: true, details: '' },
 )
 
+const { t } = useI18n()
 const emit = defineEmits<{ confirm: []; cancel: [] }>()
+const confirmText = computed(() => props.confirmLabel || t('common.confirm'))
+const cancelText = computed(() => props.cancelLabel || t('common.cancel'))
 </script>
 
 <template>
@@ -21,9 +27,9 @@ const emit = defineEmits<{ confirm: []; cancel: [] }>()
       <p class="summary">{{ summary }}</p>
       <pre v-if="details" class="details">{{ details }}</pre>
       <footer>
-        <button type="button" class="btn" @click="emit('cancel')">{{ cancelLabel }}</button>
+        <button type="button" class="btn" @click="emit('cancel')">{{ cancelText }}</button>
         <button type="button" class="btn" :class="danger ? 'danger' : 'primary'" @click="emit('confirm')">
-          {{ confirmLabel }}
+          {{ confirmText }}
         </button>
       </footer>
     </section>

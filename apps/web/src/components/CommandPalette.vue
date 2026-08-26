@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAppStore } from '@/stores/app'
 import { formatRelativeTime, isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   openTrajectoryDock: []
 }>()
 
+const { t } = useI18n()
 const store = useAppStore()
 const query = ref('')
 const active = ref(0)
@@ -34,31 +36,31 @@ const altShortcut = isMacMod() ? '⌘K' : 'Ctrl+K'
 const staticCommands = computed<PaletteItem[]>(() => [
   {
     id: 'new-chat',
-    title: '新会话',
+    title: t('commandPalette.newChat'),
     icon: 'plus',
-    group: '会话',
+    group: t('commandPalette.groupSession'),
     keywords: 'new chat',
     run: async () => {
       await store.newChat()
-      emit('openPanel', 'agent', 'agent', 'Agent')
+      emit('openPanel', 'agent', 'agent', t('panels.agent'))
     },
   },
-  { id: 'agent', title: '打开对话', icon: 'atom', group: '面板', run: () => emit('openPanel', 'agent', 'agent', 'Agent') },
-  { id: 'explorer', title: '打开文件目录', icon: 'folder', group: '面板', run: () => emit('openPanel', 'explorer', 'explorer', '文件目录') },
-  { id: 'search', title: '打开搜索', icon: 'search', group: '面板', keywords: 'find replace grep', run: () => store.openSearch() },
-  { id: 'editor', title: '打开编辑器', icon: 'file', group: '面板', run: () => emit('openPanel', 'editor', 'editor', '编辑器') },
-  { id: 'terminal', title: '打开终端', icon: 'terminal', group: '面板', run: () => emit('openPanel', 'terminal', 'terminal', '终端') },
-  { id: 'ports', title: '打开端口', icon: 'ports', group: '面板', run: () => emit('openPanel', 'ports', 'ports', '端口') },
-  { id: 'git', title: '打开 Git', icon: 'git', group: '面板', run: () => emit('openPanel', 'git', 'git', 'Git') },
-  { id: 'skills', title: '打开 Skill', icon: 'book', group: '面板', run: () => emit('openPanel', 'skills', 'skills', 'Skill') },
-  { id: 'plugins', title: '打开插件', icon: 'puzzle', group: '面板', run: () => emit('openPanel', 'plugins', 'plugins', '插件') },
-  { id: 'models', title: '打开模型', icon: 'chip', group: '面板', run: () => emit('openPanel', 'models', 'models', '模型') },
-  { id: 'settings', title: '打开设置', icon: 'sliders', group: '面板', run: () => emit('openPanel', 'settings', 'settings', '设置') },
-  { id: 'workspace', title: '打开工作空间', icon: 'home', group: '面板', run: () => emit('openPanel', 'workspace', 'workspace', '工作空间') },
-  { id: 'toggle-sidebar', title: '切换侧栏', icon: 'panel-left', group: '布局', run: () => emit('toggleSidebar') },
-  { id: 'toggle-trajectory', title: '切换轨迹', icon: 'clock', group: '布局', run: () => emit('toggleTrajectory') },
-  { id: 'popout-trajectory', title: '弹出轨迹面板', icon: 'clock', group: '布局', keywords: 'dock', run: () => emit('openTrajectoryDock') },
-  { id: 'toggle-theme', title: '切换主题', icon: 'sun', group: '布局', keywords: 'dark light', run: () => emit('toggleTheme') },
+  { id: 'agent', title: t('commandPalette.openAgent'), icon: 'atom', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'agent', 'agent', t('panels.agent')) },
+  { id: 'explorer', title: t('commandPalette.openExplorer'), icon: 'folder', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'explorer', 'explorer', t('panels.explorer')) },
+  { id: 'search', title: t('commandPalette.openSearch'), icon: 'search', group: t('commandPalette.groupPanel'), keywords: 'find replace grep', run: () => store.openSearch() },
+  { id: 'editor', title: t('commandPalette.openEditor'), icon: 'file', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'editor', 'editor', t('panels.editor')) },
+  { id: 'terminal', title: t('commandPalette.openTerminal'), icon: 'terminal', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'terminal', 'terminal', t('panels.terminal')) },
+  { id: 'ports', title: t('commandPalette.openPorts'), icon: 'ports', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'ports', 'ports', t('panels.ports')) },
+  { id: 'git', title: t('commandPalette.openGit'), icon: 'git', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'git', 'git', t('panels.git')) },
+  { id: 'skills', title: t('commandPalette.openSkills'), icon: 'book', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'skills', 'skills', t('panels.skills')) },
+  { id: 'plugins', title: t('commandPalette.openPlugins'), icon: 'puzzle', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'plugins', 'plugins', t('panels.plugins')) },
+  { id: 'models', title: t('commandPalette.openModels'), icon: 'chip', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'models', 'models', t('panels.models')) },
+  { id: 'settings', title: t('commandPalette.openSettings'), icon: 'sliders', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'settings', 'settings', t('panels.settings')) },
+  { id: 'workspace', title: t('commandPalette.openWorkspace'), icon: 'home', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'workspace', 'workspace', t('panels.workspace')) },
+  { id: 'toggle-sidebar', title: t('commandPalette.toggleSidebar'), icon: 'panel-left', group: t('commandPalette.groupLayout'), run: () => emit('toggleSidebar') },
+  { id: 'toggle-trajectory', title: t('commandPalette.toggleTrajectory'), icon: 'clock', group: t('commandPalette.groupLayout'), run: () => emit('toggleTrajectory') },
+  { id: 'popout-trajectory', title: t('commandPalette.popoutTrajectory'), icon: 'clock', group: t('commandPalette.groupLayout'), keywords: 'dock', run: () => emit('openTrajectoryDock') },
+  { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
 ])
 
 const sessionCommands = computed<PaletteItem[]>(() =>
@@ -67,10 +69,10 @@ const sessionCommands = computed<PaletteItem[]>(() =>
     title: c.title,
     subtitle: formatRelativeTime(c.updated_at || c.created_at),
     icon: 'chat',
-    group: '会话',
+    group: t('commandPalette.groupSession'),
     run: async () => {
       await store.openConversation(c.id)
-      emit('openPanel', 'agent', 'agent', 'Agent')
+      emit('openPanel', 'agent', 'agent', t('panels.agent'))
     },
   })),
 )
@@ -87,7 +89,7 @@ const items = computed(() => {
 })
 
 const grouped = computed(() => {
-  const order = ['会话', '面板', '布局']
+  const order = [t('commandPalette.groupSession'), t('commandPalette.groupPanel'), t('commandPalette.groupLayout')]
   const map = new Map<string, PaletteItem[]>()
   for (const item of items.value) {
     const list = map.get(item.group) || []
@@ -177,21 +179,21 @@ onUnmounted(() => {
   <Teleport to="body">
     <div v-if="open" class="palette-root" @keydown="onKey">
       <div class="palette-backdrop" @click="close" />
-      <div class="palette" role="dialog" aria-modal="true" aria-label="命令面板">
+      <div class="palette" role="dialog" aria-modal="true" :aria-label="t('commandPalette.aria')">
         <div class="palette-search">
           <AppIcon name="search" :size="16" />
           <input
             ref="inputEl"
             v-model="query"
             type="search"
-            placeholder="搜索命令或会话…"
+            :placeholder="t('commandPalette.placeholder')"
             autocomplete="off"
             spellcheck="false"
           />
           <kbd>{{ shortcut }}</kbd>
         </div>
         <div class="palette-list" role="listbox">
-          <p v-if="!flat.length" class="palette-empty">没有匹配的命令</p>
+          <p v-if="!flat.length" class="palette-empty">{{ t('commandPalette.empty') }}</p>
           <section v-for="section in grouped" :key="section.group">
             <h2>{{ section.group }}</h2>
             <button
@@ -214,8 +216,8 @@ onUnmounted(() => {
           </section>
         </div>
         <footer class="palette-foot">
-          <span>↑↓ 选择 · Enter 执行 · Esc 关闭</span>
-          <span>{{ shortcut }} 或 {{ altShortcut }}</span>
+          <span>{{ t('commandPalette.hint') }}</span>
+          <span>{{ shortcut }} {{ t('commandPalette.or') }} {{ altShortcut }}</span>
         </footer>
       </div>
     </div>

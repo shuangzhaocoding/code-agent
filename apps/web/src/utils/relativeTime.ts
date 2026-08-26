@@ -1,13 +1,15 @@
+import { localeMeta, t } from '@/i18n'
+
 export function formatRelativeTime(iso?: string | null): string {
   if (!iso) return ''
-  const t = new Date(iso).getTime()
-  if (Number.isNaN(t)) return ''
-  const sec = Math.round((Date.now() - t) / 1000)
-  if (sec < 45) return '刚刚'
-  if (sec < 3600) return `${Math.max(1, Math.round(sec / 60))} 分钟前`
-  if (sec < 86400) return `${Math.max(1, Math.round(sec / 3600))} 小时前`
-  if (sec < 86400 * 7) return `${Math.max(1, Math.round(sec / 86400))} 天前`
-  return new Date(t).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  const ts = new Date(iso).getTime()
+  if (Number.isNaN(ts)) return ''
+  const sec = Math.round((Date.now() - ts) / 1000)
+  if (sec < 45) return t('time.justNow')
+  if (sec < 3600) return t('time.minutesAgo', { n: Math.max(1, Math.round(sec / 60)) })
+  if (sec < 86400) return t('time.hoursAgo', { n: Math.max(1, Math.round(sec / 3600)) })
+  if (sec < 86400 * 7) return t('time.daysAgo', { n: Math.max(1, Math.round(sec / 86400)) })
+  return new Date(ts).toLocaleDateString(localeMeta().bcp47, { month: 'short', day: 'numeric' })
 }
 
 export function isMacMod() {

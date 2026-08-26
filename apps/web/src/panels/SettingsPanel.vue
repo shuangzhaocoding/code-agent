@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
+import LanguageSelect from '@/components/LanguageSelect.vue'
 
 type SchemaSpec = {
   title?: string
@@ -13,26 +15,29 @@ type SchemaSpec = {
   default?: unknown
 }
 
+const { t, te } = useI18n()
 const store = useAppStore()
 const local = reactive<Record<string, unknown>>({})
 const saved = ref(false)
-const activeGroup = ref('')
+const activeGroup = ref('appearance')
 
 const schema = computed(() => (store.settings?.schema?.properties || {}) as Record<string, SchemaSpec>)
 
 const groups = computed(() => {
   const map = new Map<string, { id: string; title: string; icon: string; keys: string[] }>()
-  const defs: Record<string, { title: string; icon: string }> = {
-    agent: { title: 'Agent', icon: 'atom' },
-    policy: { title: '策略与安全', icon: 'shield' },
-    terminal: { title: '终端', icon: 'terminal' },
-    llm: { title: '模型', icon: 'chip' },
-    ui: { title: '界面', icon: 'sliders' },
+  const defs: Record<string, { titleKey: string; icon: string }> = {
+    agent: { titleKey: 'settings.groups.agent', icon: 'atom' },
+    policy: { titleKey: 'settings.groups.policy', icon: 'shield' },
+    terminal: { titleKey: 'settings.groups.terminal', icon: 'terminal' },
+    llm: { titleKey: 'settings.groups.llm', icon: 'chip' },
+    ui: { titleKey: 'settings.groups.ui', icon: 'sliders' },
   }
   for (const key of Object.keys(schema.value)) {
     const prefix = key.split('.')[0] || 'other'
-    const def = defs[prefix] || { title: prefix, icon: 'gear' }
-    const group = map.get(prefix) || { id: prefix, title: def.title, icon: def.icon, keys: [] }
+    const def = defs[prefix] || { titleKey: '', icon: 'gear' }
+    const title = def.titleKey ? t(def.titleKey) : prefix
+    const group = map.get(prefix) || { id: prefix, title, icon: def.icon, keys: [] }
+    group.title = title
     group.keys.push(key)
     map.set(prefix, group)
   }
@@ -40,8 +45,9 @@ const groups = computed(() => {
 })
 
 watch(groups, (list) => {
+  if (activeGroup.value === 'appearance') return
   if (list.length && !list.some((g) => g.id === activeGroup.value)) {
-    activeGroup.value = list[0].id
+    activeGroup.value = 'appearance'
   }
 }, { immediate: true })
 
@@ -66,13 +72,14 @@ function specFor(key: string) {
   return schema.value[key] || {}
 }
 
+function fieldTitle(key: string) {
+  const i18nKey = `settings.fields.${key}`
+  return te(i18nKey) ? t(i18nKey) : (specFor(key).title || key)
+}
+
 function enumLabel(key: string, value: string) {
-  const labels: Record<string, Record<string, string>> = {
-    'agent.default_mode': { ask: 'Ask · 问答', agent: 'Agent · 代理', plan: 'Plan · 规划' },
-    'policy.auto_run': { manual: '手动确认', sandbox: '沙箱自动', full: '完全自动' },
-    'ui.theme': { dark: '深色', light: '浅色' },
-  }
-  return labels[key]?.[value] || value
+  const i18nKey = `settings.enums.${key}.${value}`
+  return te(i18nKey) ? t(i18nKey) : value
 }
 
 async function save() {
@@ -87,17 +94,25 @@ async function save() {
     <div class="panel-body">
       <header class="page-head">
         <div>
-          <h1 class="page-title">设置</h1>
-          <p class="page-lead">覆盖工作区配置。优先级：default.yaml → 用户配置 → 工作区 .code-agent/config.yaml → 本页。</p>
+          <h1 class="page-title">{{ t('settings.title') }}</h1>
+          <p class="page-lead">{{ t('settings.lead') }}</p>
         </div>
         <button type="button" class="btn btn-primary" :class="{ saved }" @click="save">
           <AppIcon :name="saved ? 'check' : 'save'" :size="14" />
-          {{ saved ? '已保存' : '保存设置' }}
+          {{ saved ? t('common.saved') : t('settings.save') }}
         </button>
       </header>
 
       <div class="settings-layout">
-        <nav v-if="groups.length" class="settings-toc" aria-label="设置分组">
+        <nav class="settings-toc" :aria-label="t('settings.toc')">
+          <button
+            type="button"
+            :class="{ active: activeGroup === 'appearance' }"
+            @click="jump('appearance')"
+          >
+            <AppIcon name="sliders" :size="14" />
+            {{ t('settings.groups.appearance') }}
+          </button>
           <button
             v-for="group in groups"
             :key="group.id"
@@ -110,6 +125,19 @@ async function save() {
           </button>
         </nav>
         <div class="settings-main">
+          <section id="settings-appearance" class="settings-group">
+            <div class="group-head">
+              <span class="group-icon"><AppIcon name="sliders" :size="18" /></span>
+              <h2>{{ t('settings.groups.appearance') }}</h2>
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <label>{{ t('language.label') }}</label>
+                <p class="setting-key">{{ t('settings.languageLead') }}</p>
+              </div>
+              <LanguageSelect />
+            </div>
+          </section>
           <section v-for="group in groups" :id="`settings-${group.id}`" :key="group.id" class="settings-group">
             <div class="group-head">
               <span class="group-icon"><AppIcon :name="group.icon" :size="18" /></span>
@@ -118,7 +146,7 @@ async function save() {
 
           <div v-for="key in group.keys" :key="key" class="setting-row">
             <div class="setting-copy">
-              <label :for="key">{{ specFor(key).title || key }}</label>
+              <label :for="key">{{ fieldTitle(key) }}</label>
               <code v-if="key.includes('.')" class="setting-key">{{ key }}</code>
             </div>
 

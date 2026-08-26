@@ -5,6 +5,7 @@ import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
+import { t } from '@/i18n'
 
 export type Workspace = { id: string; name: string; root_path: string }
 export type Conversation = {
@@ -383,12 +384,21 @@ export const useAppStore = defineStore('app', () => {
     setExpanded(next)
   }
 
+  function gitMarkKey(code: string) {
+    if (code.includes('?')) return 'untracked'
+    if (code.includes('A')) return 'added'
+    if (code.includes('D')) return 'deleted'
+    if (code.includes('M')) return 'modified'
+    return 'changed'
+  }
+
   function gitMarkLabel(code: string) {
-    if (code.includes('?')) return '新增（未跟踪）'
-    if (code.includes('A')) return '新增'
-    if (code.includes('D')) return '已删除'
-    if (code.includes('M')) return '已修改'
-    return '有改动'
+    return t(`tree.${gitMarkKey(code)}`)
+  }
+
+  function treeTitle(key: string) {
+    const i18nKey = `tree.${key}`
+    return t(i18nKey)
   }
 
   async function loadGitChangedPaths() {
@@ -406,7 +416,7 @@ export const useAppStore = defineStore('app', () => {
       }
       const next: Record<string, string> = {}
       for (const file of status.files) {
-        next[file.path] = gitMarkLabel(file.code)
+        next[file.path] = gitMarkKey(file.code)
       }
       const prev = gitChangedPaths.value
       const same =
@@ -491,7 +501,7 @@ export const useAppStore = defineStore('app', () => {
       setExpanded(new Set([...expanded.value, parentPath(relPath)]))
     }
     if (kind === 'file') {
-      sessionTreeMarks.value = { ...sessionTreeMarks.value, [relPath]: '新增' }
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [relPath]: 'added' }
       await openPath(relPath, false)
     }
     void loadGitChangedPaths()
@@ -656,7 +666,7 @@ export const useAppStore = defineStore('app', () => {
         openFiles.value = [...openFiles.value, { path, kind: 'text', content: review.after, dirty: false }]
         activePath.value = path
       } else {
-        fileNotice.value = msg || '打开文件失败'
+        fileNotice.value = msg || t('file.openFailed')
         return
       }
     }
@@ -777,7 +787,7 @@ export const useAppStore = defineStore('app', () => {
     }
     const isNew = !before && after
     if (isNew) {
-      sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: '新增待确认' }
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: 'addedPending' }
     }
     if (ackedTreeMarks.value[path]) {
       const acked = { ...ackedTreeMarks.value }
@@ -1008,7 +1018,7 @@ export const useAppStore = defineStore('app', () => {
       }
       if (type === 'file.diff' && (meta.action === 'create' || meta.action === 'overwrite') && changedPath) {
         if (meta.action === 'create') {
-          sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: '新增' }
+          sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: 'added' }
         }
       }
     }
@@ -1068,10 +1078,10 @@ export const useAppStore = defineStore('app', () => {
   async function deleteConversation(id: string) {
     const target = conversations.value.find((c) => c.id === id)
     const ok = await askConfirm({
-      title: '删除会话',
-      summary: target ? `确定删除「${target.title}」？此操作不可恢复。` : '确定删除该会话？此操作不可恢复。',
-      confirmLabel: '删除',
-      cancelLabel: '取消',
+      title: t('confirm.deleteSessionTitle'),
+      summary: target ? t('confirm.deleteSessionNamed', { title: target.title }) : t('confirm.deleteSession'),
+      confirmLabel: t('common.delete'),
+      cancelLabel: t('common.cancel'),
       danger: true,
     })
     if (!ok) return
@@ -1392,7 +1402,7 @@ export const useAppStore = defineStore('app', () => {
     danger?: boolean
   }): Promise<boolean> {
     confirmResolver?.(false)
-    confirmDialog.value = { danger: true, confirmLabel: '确认', cancelLabel: '取消', ...req }
+    confirmDialog.value = { danger: true, confirmLabel: t('common.confirm'), cancelLabel: t('common.cancel'), ...req }
     return new Promise((resolve) => {
       confirmResolver = resolve
     })
@@ -1479,21 +1489,21 @@ export const useAppStore = defineStore('app', () => {
   function fileTreeMark(path: string, isDir = false) {
     if (isDir) {
       const own = gitChangedPaths.value[path] || sessionTreeMarks.value[path]
-      if (own) return { show: true, title: own }
-      if (markedAncestorPaths.value.has(path)) return { show: true, title: '包含改动' }
+      if (own) return { show: true, title: treeTitle(own) }
+      if (markedAncestorPaths.value.has(path)) return { show: true, title: t('tree.containsChanges') }
       return { show: false, title: '' }
     }
-    if (isFileDirty(path)) return { show: true, title: '未保存' }
+    if (isFileDirty(path)) return { show: true, title: t('tree.unsaved') }
     const review = pendingReview(path)
     if (review) {
       const isNew = review.action === 'create' || !review.before
-      return { show: true, title: isNew ? '新增待确认' : '修改待确认' }
+      return { show: true, title: isNew ? t('tree.addedPending') : t('tree.modifiedPending') }
     }
     if (ackedTreeMarks.value[path]) return { show: false, title: '' }
     const gitTitle = gitChangedPaths.value[path]
-    if (gitTitle) return { show: true, title: gitTitle }
+    if (gitTitle) return { show: true, title: treeTitle(gitTitle) }
     const sessionTitle = sessionTreeMarks.value[path]
-    if (sessionTitle) return { show: true, title: sessionTitle }
+    if (sessionTitle) return { show: true, title: treeTitle(sessionTitle) }
     return { show: false, title: '' }
   }
 

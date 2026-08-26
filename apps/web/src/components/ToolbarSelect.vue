@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import type { AppIconName } from '@/components/AppIcon.vue'
 
@@ -15,6 +16,7 @@ export type ToolbarSelectOption = {
   children?: ToolbarSelectOption[]
 }
 
+const { t } = useI18n()
 const props = withDefaults(
   defineProps<{
     modelValue: string | null
@@ -28,15 +30,18 @@ const props = withDefaults(
     searchPlaceholder?: string
   }>(),
   {
-    placeholder: '请选择',
+    placeholder: '',
     displayLabel: '',
     selectedChildValue: null,
     minWidth: 96,
     grow: false,
     searchable: false,
-    searchPlaceholder: '搜索',
+    searchPlaceholder: '',
   },
 )
+
+const placeholderText = computed(() => props.placeholder || t('common.select'))
+const searchText = computed(() => props.searchPlaceholder || t('common.search'))
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | null]
@@ -265,7 +270,7 @@ onBeforeUnmount(() => {
       </span>
       <span class="trigger-copy">
         <span class="trigger-label">
-          {{ displayLabel || selected?.label || placeholder }}
+          {{ displayLabel || selected?.label || placeholderText }}
           <em v-if="selected?.badge" class="option-badge" :class="selected.badgeKind">{{ selected.badge }}</em>
         </span>
         <span v-if="selected?.description && grow" class="trigger-desc">{{ selected.description }}</span>
@@ -321,7 +326,7 @@ onBeforeUnmount(() => {
           </button>
           </div>
         </section>
-        <p v-if="searchable && !visibleOptions.length" class="menu-empty">没有匹配的模型</p>
+        <p v-if="searchable && !visibleOptions.length" class="menu-empty">{{ t('chat.noMatch') }}</p>
         </div>
         <div v-if="searchable" class="menu-search">
           <AppIcon name="search" :size="13" />
@@ -329,7 +334,7 @@ onBeforeUnmount(() => {
             ref="searchInput"
             v-model="query"
             type="search"
-            :placeholder="searchPlaceholder"
+            :placeholder="searchText"
             @keydown.enter.prevent="pickFirstMatch"
           />
         </div>

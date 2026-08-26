@@ -3,10 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
+import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
+import LanguageSelect from '@/components/LanguageSelect.vue'
 import BrandMark from '@/components/BrandMark.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
+const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
 const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse('~')
@@ -40,23 +43,26 @@ const recents = computed(() => store.workspaces)
         <BrandMark :size="24" />
         <span>Code Agent</span>
       </div>
-      <button type="button" class="launch-theme" title="切换主题" @click="onToggleTheme">
-        <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
-      </button>
+      <div class="launch-actions">
+        <LanguageSelect />
+        <button type="button" class="launch-theme" :title="t('theme.toggle')" @click="onToggleTheme">
+          <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
+        </button>
+      </div>
     </header>
 
     <main class="launch-body">
       <div class="launch-path">
         <AppIcon name="folder" :size="15" />
-        <input v-model="path" placeholder="输入项目路径…" @keydown.enter="open" />
-        <button type="button" class="btn btn-primary" @click="open">打开</button>
+        <input v-model="path" :placeholder="t('workspace.pathPlaceholder')" @keydown.enter="open" />
+        <button type="button" class="btn btn-primary" @click="open">{{ t('common.open') }}</button>
       </div>
       <p v-if="error" class="launch-err">{{ error }}</p>
 
       <div class="launch-split">
         <section class="launch-col">
-          <h2>最近打开</h2>
-          <p v-if="!recents.length" class="launch-empty">还没有工作空间</p>
+          <h2>{{ t('workspace.recent') }}</h2>
+          <p v-if="!recents.length" class="launch-empty">{{ t('workspace.emptyRecent') }}</p>
           <button
             v-for="ws in recents"
             :key="ws.id"
@@ -75,10 +81,10 @@ const recents = computed(() => store.workspaces)
 
         <section class="launch-col">
           <div class="browse-head">
-            <h2>浏览目录</h2>
+            <h2>{{ t('workspace.browse') }}</h2>
             <div class="browse-actions">
-              <button type="button" class="browse-up" @click="startCreate">新建文件夹</button>
-              <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">上级</button>
+              <button type="button" class="browse-up" @click="startCreate">{{ t('workspace.newFolder') }}</button>
+              <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">{{ t('common.parent') }}</button>
             </div>
           </div>
           <p class="browse-path" :title="browsing?.path">{{ browsing?.path }}</p>
@@ -130,6 +136,11 @@ const recents = computed(() => store.workspaces)
   font-size: 14px;
   color: var(--text-h);
   letter-spacing: -0.02em;
+}
+.launch-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 .launch-theme {
   width: 32px;

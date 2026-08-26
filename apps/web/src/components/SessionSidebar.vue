@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import BrandMark from '@/components/BrandMark.vue'
 import AppIcon from '@/components/AppIcon.vue'
@@ -18,27 +19,28 @@ const emit = defineEmits<{
   openTrajectoryDock: []
 }>()
 
+const { t } = useI18n()
 const store = useAppStore()
 
-const navItems = [
-  { id: 'agent', component: 'agent', title: 'Agent', label: '对话', icon: 'atom' },
-  { id: 'trajectory', component: '', title: '', label: '轨迹', icon: 'clock', action: 'trajectory' as const },
-  { id: 'explorer', component: 'explorer', title: '文件目录', label: '文件', icon: 'folder' },
-  { id: 'search', component: 'search', title: '搜索', label: '搜索', icon: 'search' },
-  { id: 'editor', component: 'editor', title: '编辑器', label: '编辑器', icon: 'file' },
-  { id: 'terminal', component: 'terminal', title: '终端', label: '终端', icon: 'terminal' },
-  { id: 'ports', component: 'ports', title: '端口', label: '端口', icon: 'ports' },
-  { id: 'git', component: 'git', title: 'Git', label: 'Git', icon: 'git' },
-]
+const navItems = computed(() => [
+  { id: 'agent', component: 'agent', title: t('panels.agent'), label: t('sidebar.chat'), icon: 'atom' },
+  { id: 'trajectory', component: '', title: '', label: t('sidebar.trajectory'), icon: 'clock', action: 'trajectory' as const },
+  { id: 'explorer', component: 'explorer', title: t('panels.explorer'), label: t('sidebar.files'), icon: 'folder' },
+  { id: 'search', component: 'search', title: t('panels.search'), label: t('panels.search'), icon: 'search' },
+  { id: 'editor', component: 'editor', title: t('panels.editor'), label: t('panels.editor'), icon: 'file' },
+  { id: 'terminal', component: 'terminal', title: t('panels.terminal'), label: t('panels.terminal'), icon: 'terminal' },
+  { id: 'ports', component: 'ports', title: t('panels.ports'), label: t('panels.ports'), icon: 'ports' },
+  { id: 'git', component: 'git', title: t('panels.git'), label: t('panels.git'), icon: 'git' },
+])
 
-const footItems = [
-  { id: 'skills', component: 'skills', title: 'Skill', label: 'Skill', icon: 'book' },
-  { id: 'plugins', component: 'plugins', title: '插件', label: '插件', icon: 'puzzle' },
-  { id: 'models', component: 'models', title: '模型', label: '模型', icon: 'chip' },
-  { id: 'settings', component: 'settings', title: '设置', label: '设置', icon: 'sliders' },
-]
+const footItems = computed(() => [
+  { id: 'skills', component: 'skills', title: t('panels.skills'), label: t('panels.skills'), icon: 'book' },
+  { id: 'plugins', component: 'plugins', title: t('panels.plugins'), label: t('panels.plugins'), icon: 'puzzle' },
+  { id: 'models', component: 'models', title: t('panels.models'), label: t('panels.models'), icon: 'chip' },
+  { id: 'settings', component: 'settings', title: t('panels.settings'), label: t('panels.settings'), icon: 'sliders' },
+])
 
-const workspaceLabel = computed(() => store.workspace?.name || '工作空间')
+const workspaceLabel = computed(() => store.workspace?.name || t('panels.workspace'))
 
 function open(id: string, component: string, title: string, action?: 'trajectory', e?: MouseEvent) {
   if (action === 'trajectory') {
@@ -58,26 +60,26 @@ function open(id: string, component: string, title: string, action?: 'trajectory
 </script>
 
 <template>
-  <aside class="session-sidebar" :class="{ collapsed }" aria-label="会话与工作区">
+  <aside class="session-sidebar" :class="{ collapsed }" :aria-label="t('sidebar.aria')">
     <div class="sidebar-brand">
       <BrandMark :size="collapsed ? 28 : 24" />
       <div v-if="!collapsed" class="brand-copy">
         <span class="brand-title">Code Agent</span>
         <span class="brand-ws" :title="store.workspace?.root_path">{{ workspaceLabel }}</span>
       </div>
-      <button type="button" class="sidebar-icon-btn collapse-btn" :title="collapsed ? '展开侧栏' : '收起侧栏'" @click="emit('toggleCollapse')">
+      <button type="button" class="sidebar-icon-btn collapse-btn" :title="collapsed ? t('sidebar.expand') : t('sidebar.collapse')" @click="emit('toggleCollapse')">
         <AppIcon :name="collapsed ? 'chevron-right' : 'panel-left'" :size="15" />
       </button>
     </div>
 
-    <nav class="sidebar-nav" aria-label="工作区面板">
+    <nav class="sidebar-nav" :aria-label="t('sidebar.nav')">
       <button
         v-for="item in navItems"
         :key="item.id"
         type="button"
         class="sidebar-nav-item"
         :class="{ active: item.action === 'trajectory' ? (trajectoryOpen || store.activity === 'trajectory') : store.activity === item.id }"
-        :title="item.action === 'trajectory' ? `${item.label}（Alt+点击弹出为面板）` : item.label"
+        :title="item.action === 'trajectory' ? t('sidebar.trajectoryPopout', { label: item.label }) : item.label"
         @click="open(item.id, item.component, item.title, item.action, $event)"
       >
         <AppIcon :name="item.icon" :size="16" />
@@ -98,18 +100,18 @@ function open(id: string, component: string, title: string, action?: 'trajectory
         <AppIcon :name="item.icon" :size="16" />
         <span v-if="!collapsed">{{ item.label }}</span>
       </button>
-      <button type="button" class="sidebar-nav-item" title="切换主题" @click="emit('toggleTheme')">
+      <button type="button" class="sidebar-nav-item" :title="t('theme.toggle')" @click="emit('toggleTheme')">
         <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
-        <span v-if="!collapsed">{{ theme === 'dark' ? '浅色' : '深色' }}</span>
+        <span v-if="!collapsed">{{ theme === 'dark' ? t('theme.light') : t('theme.dark') }}</span>
       </button>
       <button
         type="button"
         class="sidebar-nav-item"
-        title="打开工作空间"
-        @click="open('workspace', 'workspace', '工作空间')"
+        :title="t('sidebar.openWorkspace')"
+        @click="open('workspace', 'workspace', t('panels.workspace'))"
       >
         <AppIcon name="home" :size="16" />
-        <span v-if="!collapsed">工作空间</span>
+        <span v-if="!collapsed">{{ t('sidebar.workspace') }}</span>
       </button>
     </div>
   </aside>

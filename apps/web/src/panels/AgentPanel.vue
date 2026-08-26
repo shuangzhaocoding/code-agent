@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { TrAttachments, TrSender, UploadButton, VoiceButton } from '@opentiny/tiny-robot'
 import { useAppStore } from '@/stores/app'
 import { rendererFor } from '@/renderers'
@@ -20,6 +21,7 @@ import {
   UPLOAD_MAX_SIZE_MB,
 } from '@/utils/fileTypes'
 
+const { t } = useI18n()
 const store = useAppStore()
 const commandShortcut = paletteShortcutLabel()
 const scroller = ref<HTMLElement | null>(null)
@@ -125,12 +127,12 @@ const sender = ref<{
 } | null>(null)
 const draft = ref('')
 
-const quickPrompts = [
-  { label: '解释代码结构', text: '请解释一下当前工作区的代码结构和主要模块。' },
-  { label: 'Review 改动', text: '请 review 当前的 git 改动并给出建议。' },
-  { label: '写单元测试', text: '为当前打开的文件补充单元测试。' },
-  { label: '修复 lint', text: '检查并修复项目中的 lint 问题。' },
-]
+const quickPrompts = computed(() => [
+  { label: t('chat.promptExplainLabel'), text: t('chat.promptExplainText') },
+  { label: t('chat.promptReviewLabel'), text: t('chat.promptReviewText') },
+  { label: t('chat.promptTestLabel'), text: t('chat.promptTestText') },
+  { label: t('chat.promptLintLabel'), text: t('chat.promptLintText') },
+])
 
 function useQuickPrompt(text: string) {
   draft.value = text
@@ -341,7 +343,7 @@ const modelSupportsVision = computed(() => {
 const visionAttachHint = computed(() => {
   if (!pendingFiles.value.length) return ''
   if (modelSupportsVision.value) return ''
-  return '当前模型不支持图片；发送后将自动切换到可用的视觉模型。'
+  return t('chat.visionWarn')
 })
 
 const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = useContextUsagePreview({
@@ -595,7 +597,7 @@ function handleUploadError(error: Error) {
 }
 
 function handleSpeechError(error: Error) {
-  uploadError.value = error.message || '语音识别失败'
+  uploadError.value = error.message || t('chat.sttFailed')
 }
 
 function openContextUsageDialog() {
@@ -609,7 +611,7 @@ function openContextUsageDialog() {
     <Transition name="toast-fade">
       <div v-if="copyToast" class="copy-toast">
         <AppIcon name="check" :size="16" />
-        已复制
+        {{ t('chat.copied') }}
       </div>
     </Transition>
     <div ref="scroller" class="timeline" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
@@ -618,8 +620,8 @@ function openContextUsageDialog() {
           <div class="empty-icon" aria-hidden="true">
             <AppIcon name="atom" :size="32" />
           </div>
-          <p class="empty-lead">描述你想改的代码，或用 Skill / 自备模型开始。</p>
-          <p class="empty-hint"><kbd>{{ commandShortcut }}</kbd> 打开命令面板</p>
+          <p class="empty-lead">{{ t('chat.emptyLead') }}</p>
+          <p class="empty-hint"><kbd>{{ commandShortcut }}</kbd> {{ t('chat.emptyHint') }}</p>
           <div class="quick-prompts">
             <button
               v-for="item in quickPrompts"
@@ -644,7 +646,7 @@ function openContextUsageDialog() {
               type="button"
               class="msg-expand-btn"
               @click="toggleExpand(msg.id)"
-            >{{ expandedMsgs.has(msg.id) ? '收起' : '展开全部' }}</button>
+            >{{ expandedMsgs.has(msg.id) ? t('chat.collapse') : t('chat.expandAll') }}</button>
           </template>
           <template v-else>
             <AssistantMessageBody
@@ -656,13 +658,13 @@ function openContextUsageDialog() {
           <div v-if="msg.role === 'user' || !isAssistantStreaming(msg)" class="msg-bar" :class="msg.role">
             <span class="msg-time">
               <template v-if="msg.created_at">{{ fmtTime(msg.created_at) }}</template>
-              <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · 耗时 {{ fmtDuration(msg) }}</template>
+              <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · {{ t('time.duration', { value: fmtDuration(msg) }) }}</template>
             </span>
             <div class="msg-actions">
-              <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" title="编辑" @click="startEdit(msg)">
+              <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(msg)">
                 <AppIcon name="pencil" :size="14" />
               </button>
-              <button type="button" class="msg-icon-btn" title="复制" @click="copyMsg(msg)">
+              <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(msg)">
                 <AppIcon name="copy" :size="14" />
               </button>
             </div>
@@ -670,7 +672,7 @@ function openContextUsageDialog() {
         </article>
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
-          <button type="button" class="stop-inline" @click="store.stop()">停止</button>
+          <button type="button" class="stop-inline" @click="store.stop()">{{ t('common.stop') }}</button>
         </div>
       </div>
     </div>
@@ -681,7 +683,7 @@ function openContextUsageDialog() {
           <div v-if="mentionDir" class="mention-dir-back">
             <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
               <AppIcon name="arrow-left" :size="12" />
-              返回
+              {{ t('common.back') }}
             </button>
             <span class="mention-dir-label">{{ mentionDir }}</span>
           </div>
@@ -706,17 +708,17 @@ function openContextUsageDialog() {
         <div class="send-queue-head">
           <button type="button" class="queue-toggle" :aria-expanded="queueExpanded" @click="toggleQueueExpanded">
             <span class="queue-chevron" :class="{ open: queueExpanded }">›</span>
-            <span>排队中 · {{ queuedMessages.length }}</span>
+            <span>{{ t('chat.queued', { n: queuedMessages.length }) }}</span>
           </button>
-          <button type="button" class="queue-clear" @click="store.clearConversationQueue()">清空队列</button>
+          <button type="button" class="queue-clear" @click="store.clearConversationQueue()">{{ t('chat.clearQueue') }}</button>
         </div>
         <div v-show="queueExpanded" class="send-queue-body">
           <div v-for="(item, index) in queuedMessages" :key="item.id" class="send-queue-item">
             <span class="queue-index">{{ index + 1 }}</span>
             <span class="queue-text" :title="item.text">{{ item.text }}</span>
             <div class="queue-actions">
-              <button type="button" class="queue-send" title="立即发送" @click="onSendQueuedNow(item.id)">发送</button>
-              <button type="button" class="queue-remove" title="移除" @click="store.removeQueuedSend(item.id)">
+              <button type="button" class="queue-send" :title="t('chat.sendNow')" @click="onSendQueuedNow(item.id)">{{ t('common.send') }}</button>
+              <button type="button" class="queue-remove" :title="t('common.remove')" @click="store.removeQueuedSend(item.id)">
                 <AppIcon name="close" :size="12" />
               </button>
             </div>
@@ -729,12 +731,12 @@ function openContextUsageDialog() {
             <AppIcon :name="f.is_dir ? 'folder' : 'file'" :size="12" />
             <span class="mention-chip-path">@{{ f.path }}</span>
           </span>
-          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" title="移除">
+          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" :title="t('common.remove')">
             <AppIcon name="close" :size="10" />
           </button>
         </span>
       </div>
-      <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" title="拖拽调整高度"></div>
+      <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
         class="agent-sender-wrap"
         @pointerdown.capture="onSenderBlankPointerDown"
@@ -749,7 +751,7 @@ function openContextUsageDialog() {
           :style="senderContentHeight ? { '--sender-content-height': senderContentHeight + 'px' } : {}"
           mode="multiple"
           submit-type="enter"
-          :placeholder="running() ? '输出中也可输入；Enter 加入队列，Alt+Enter 立即发送' : '给 Code Agent 下指令…'"
+          :placeholder="running() ? t('chat.promptBusy') : t('chat.prompt')"
           :loading="running()"
           clearable
           @submit="onSubmit"
@@ -780,7 +782,7 @@ function openContextUsageDialog() {
                 @click="openContextUsageDialog"
               />
               <UploadButton
-                tooltip="上传图片"
+                :tooltip="t('chat.uploadImage')"
                 tooltip-placement="top"
                 multiple
                 :max-size="UPLOAD_MAX_SIZE_MB"
@@ -791,7 +793,7 @@ function openContextUsageDialog() {
                 @error="handleUploadError"
               />
               <VoiceButton
-                tooltip="语音输入"
+                :tooltip="t('chat.voiceInput')"
                 tooltip-placement="top"
                 :speech-config="speechConfig"
                 :disabled="inputBlocked"

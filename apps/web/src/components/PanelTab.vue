@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   params?: {
@@ -12,29 +15,31 @@ const props = defineProps<{
   title?: string
 }>()
 
-const meta: Record<string, { icon: string; label: string }> = {
-  workspace: { icon: 'home', label: '工作空间' },
-  explorer: { icon: 'folder', label: '文件' },
-  search: { icon: 'search', label: '搜索' },
-  editor: { icon: 'file', label: '编辑器' },
-  agent: { icon: 'atom', label: 'Agent' },
-  terminal: { icon: 'terminal', label: '终端' },
-  ports: { icon: 'ports', label: '端口' },
-  chats: { icon: 'chat', label: '会话' },
-  git: { icon: 'git', label: 'Git' },
-  skills: { icon: 'book', label: 'Skill' },
-  plugins: { icon: 'puzzle', label: '插件' },
-  models: { icon: 'chip', label: '模型' },
-  settings: { icon: 'sliders', label: '设置' },
-  trajectory: { icon: 'clock', label: '轨迹' },
+const icons: Record<string, string> = {
+  workspace: 'home',
+  explorer: 'folder',
+  search: 'search',
+  editor: 'file',
+  agent: 'atom',
+  terminal: 'terminal',
+  ports: 'ports',
+  chats: 'chat',
+  git: 'git',
+  skills: 'book',
+  plugins: 'puzzle',
+  models: 'chip',
+  settings: 'sliders',
+  trajectory: 'clock',
 }
 
 const panelApi = computed(() => props.api || props.params?.api || props.params?.params?.api)
 const id = computed(() => panelApi.value?.id || '')
 const info = computed(() => {
-  if (meta[id.value]) return meta[id.value]
+  const key = `panels.${id.value}`
+  const label = t(key)
+  if (icons[id.value] && label !== key) return { icon: icons[id.value], label }
   const title = props.title || props.params?.title
-  return { icon: 'file', label: title || id.value || '面板' }
+  return { icon: icons[id.value] || 'file', label: title || id.value || t('common.panel') }
 })
 
 function close(e: MouseEvent) {
@@ -48,7 +53,7 @@ function close(e: MouseEvent) {
   <div class="ptab" :title="info.label">
     <AppIcon class="ptab-ico" :name="info.icon" :size="13" />
     <span class="lbl">{{ info.label }}</span>
-    <button type="button" class="x" title="关闭" @mousedown.stop.prevent @click="close">
+    <button type="button" class="x" :title="t('common.close')" @mousedown.stop.prevent @click="close">
       <AppIcon name="close" :size="11" />
     </button>
   </div>

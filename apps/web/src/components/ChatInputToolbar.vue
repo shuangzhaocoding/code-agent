@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import ToolbarSelect, { type ToolbarSelectOption } from '@/components/ToolbarSelect.vue'
@@ -7,6 +8,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { type ThinkingLevel } from '@/types/thinking'
 import type { LlmModel } from '@/types/llm'
 
+const { t } = useI18n()
 const store = useAppStore()
 const paramsOpen = ref(false)
 const paramsReady = ref(false)
@@ -55,29 +57,11 @@ function snapshotCurrentParams(modelId: string) {
   })
 }
 
-const modeOptions: ToolbarSelectOption[] = [
-  {
-    value: 'ask',
-    label: 'Ask',
-    description: '快速问答，不调用工具',
-    icon: 'chat',
-    accent: '#0891b2',
-  },
-  {
-    value: 'agent',
-    label: 'Agent',
-    description: '自主调用工具完成任务',
-    icon: 'atom',
-    accent: 'var(--primary)',
-  },
-  {
-    value: 'plan',
-    label: 'Plan',
-    description: '先规划步骤，再逐步执行',
-    icon: 'list',
-    accent: '#d97706',
-  },
-]
+const modeOptions = computed<ToolbarSelectOption[]>(() => [
+  { value: 'ask', label: 'Ask', description: t('chat.modeAsk'), icon: 'chat', accent: '#0891b2' },
+  { value: 'agent', label: 'Agent', description: t('chat.modeAgent'), icon: 'atom', accent: 'var(--primary)' },
+  { value: 'plan', label: 'Plan', description: t('chat.modePlan'), icon: 'list', accent: '#d97706' },
+])
 
 function isProbed(model: LlmModel) {
   return model.availability != null && model.availability.ok != null
@@ -112,18 +96,18 @@ const modelOptions = computed(() =>
       description: provider.name,
       icon: 'chip',
       group: provider.name,
-      badge: !probed ? '未检测' : ok ? '可用' : '不可用',
+      badge: !probed ? t('chat.badgeUnknown') : ok ? t('chat.badgeOk') : t('chat.badgeFail'),
       badgeKind: !probed ? 'unknown' : ok ? 'ok' : 'fail',
     } satisfies ToolbarSelectOption
   }),
 )
 
-const thinkingLabels: Record<string, { label: string; description: string }> = {
-  off: { label: '关闭思考', description: '不输出思考过程' },
-  low: { label: '轻量思考', description: '必要时简短推理' },
-  medium: { label: '标准思考', description: '平衡速度与推理深度' },
-  high: { label: '深度思考', description: '充分推理后再行动' },
-}
+const thinkingLabels = computed<Record<string, { label: string; description: string }>>(() => ({
+  off: { label: t('thinking.off.label'), description: t('thinking.off.description') },
+  low: { label: t('thinking.low.label'), description: t('thinking.low.description') },
+  medium: { label: t('thinking.medium.label'), description: t('thinking.medium.description') },
+  high: { label: t('thinking.high.label'), description: t('thinking.high.description') },
+}))
 
 const thinkingOptions = computed(() => {
   const model = selectedModel.value
@@ -132,7 +116,7 @@ const thinkingOptions = computed(() => {
   const raw = spec.levels?.length ? spec.levels : ['off', 'low', 'medium', 'high']
   return raw.map((item) => {
     const value = typeof item === 'string' ? item : item.value
-    const meta = thinkingLabels[value] || { label: value, description: '' }
+    const meta = thinkingLabels.value[value] || { label: value, description: '' }
     return {
       value,
       label: typeof item === 'string' ? meta.label : item.label || meta.label,
@@ -156,10 +140,10 @@ const canTuneParams = computed(() => Boolean(thinkingOptions.value.length || tem
 const thinkingLabel = computed(() => {
   if (!thinkingOptions.value.length) return ''
   const current = thinkingOptions.value.find((item) => item.value === store.thinkingLevel)
-  return current?.label || '深度思考'
+  return current?.label || t('thinking.fallback')
 })
 
-const paramsButtonLabel = computed(() => thinkingLabel.value || '参数调整')
+const paramsButtonLabel = computed(() => thinkingLabel.value || t('chat.params'))
 
 watch(
   visibleModels,
@@ -368,18 +352,18 @@ function openModelsAndProbe() {
     <ToolbarSelect
       :model-value="store.modelId"
       :options="modelOptions"
-      placeholder="选择可用模型"
+      :placeholder="t('chat.selectModel')"
       :min-width="128"
       grow
       searchable
-      search-placeholder="搜索模型"
+      :search-placeholder="t('chat.searchModel')"
       @update:model-value="onModelChange"
     />
     <button
       type="button"
       class="probe-btn"
       :disabled="!store.providers.length"
-      title="打开模型页并检测可用性"
+      :title="t('chat.openModels')"
       @click="openModelsAndProbe"
     >
       <AppIcon name="refresh" :size="14" />
@@ -393,9 +377,9 @@ function openModelsAndProbe() {
         :style="paramsStyle"
         @pointerdown.stop
       >
-        <p class="params-title">模型参数</p>
+        <p class="params-title">{{ t('chat.paramsTitle') }}</p>
         <section v-if="thinkingOptions.length" class="params-block">
-          <span class="params-label">思考强度</span>
+          <span class="params-label">{{ t('chat.thinkingLevel') }}</span>
           <div class="params-chips">
             <button
               v-for="item in thinkingOptions"
@@ -411,7 +395,7 @@ function openModelsAndProbe() {
           </div>
         </section>
         <section v-if="temperatureSpec" class="params-block">
-          <span class="params-label">温度 {{ store.sampling.temperature ?? temperatureSpec.default ?? 0.2 }}</span>
+          <span class="params-label">{{ t('chat.temperature', { value: store.sampling.temperature ?? temperatureSpec.default ?? 0.2 }) }}</span>
           <input
             type="range"
             class="params-range"
@@ -425,7 +409,7 @@ function openModelsAndProbe() {
         <section v-if="topPSpec" class="params-block">
           <label class="params-label params-toggle">
             <input type="checkbox" :checked="topPEnabled" @change="onTopPEnabled(($event.target as HTMLInputElement).checked)" />
-            传递 Top P
+            {{ t('chat.sendTopP') }}
           </label>
           <template v-if="topPEnabled">
             <span class="params-hint">{{ selectedModel?.params?.top_p }}</span>
@@ -439,7 +423,7 @@ function openModelsAndProbe() {
               @input="onTopPInput(($event.target as HTMLInputElement).value)"
             />
           </template>
-          <p v-else class="params-hint">关闭后不传给接口，由模型使用默认采样。</p>
+          <p v-else class="params-hint">{{ t('chat.topPHint') }}</p>
         </section>
       </div>
     </Teleport>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type FsItem } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 
+const { t } = useI18n()
 const store = useAppStore()
 const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
 const creating = ref<{ kind: 'file' | 'dir'; dir: string; value: string; id: number } | null>(null)
@@ -13,7 +15,7 @@ const renamingPath = ref<string | null>(null)
 const selectedItem = ref<FsItem | null>(null)
 let createSeq = 0
 
-const workspaceTitle = computed(() => store.workspace?.name || '工作空间')
+const workspaceTitle = computed(() => store.workspace?.name || t('panels.workspace'))
 
 const menuDir = computed(() => {
   const item = menu.value?.item
@@ -92,8 +94,8 @@ function cancelInlineRename() {
 
 function validName(name: string) {
   const trimmed = name.trim()
-  if (!trimmed) return '名称不能为空'
-  if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') return '名称不合法'
+  if (!trimmed) return t('explorer.emptyName')
+  if (/[\\/]/.test(trimmed) || trimmed === '.' || trimmed === '..') return t('explorer.invalidName')
   return ''
 }
 
@@ -138,9 +140,9 @@ async function onDelete() {
   if (!item) return
   closeMenu()
   const ok = await store.askConfirm({
-    title: '删除确认',
-    summary: `确定删除 ${item.path}？此操作不可撤销。`,
-    confirmLabel: '删除',
+    title: t('explorer.deleteTitle'),
+    summary: t('explorer.deleteSummary', { path: item.path }),
+    confirmLabel: t('common.delete'),
     danger: true,
   })
   if (!ok) return
@@ -191,19 +193,19 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
     <div class="explorer-bar">
       <span class="explorer-title" :title="workspaceTitle">{{ workspaceTitle }}</span>
       <div class="explorer-actions">
-        <button type="button" class="icon-btn icon-btn-ghost" title="新建文件" @click.stop="startCreate('file')">
+        <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newFile')" @click.stop="startCreate('file')">
           <AppIcon name="file-plus" :size="14" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" title="新建目录" @click.stop="startCreate('dir')">
+        <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newDir')" @click.stop="startCreate('dir')">
           <AppIcon name="folder-plus" :size="14" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" title="刷新" @click.stop="store.refreshTree()">
+        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" @click.stop="store.refreshTree()">
           <AppIcon name="refresh" :size="14" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" title="折叠全部" @click.stop="store.collapseAllDirs()">
+        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.collapseAll')" @click.stop="store.collapseAllDirs()">
           <AppIcon name="collapse-all" :size="14" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" title="展开全部" @click.stop="store.expandAllDirs()">
+        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.expandAll')" @click.stop="store.expandAllDirs()">
           <AppIcon name="expand-all" :size="14" />
         </button>
       </div>
@@ -241,44 +243,44 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
     <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
       <button type="button" @click="startCreate('file')">
         <AppIcon class="ctx-ico" name="file-plus" :size="15" />
-        <span>新建文件</span>
+        <span>{{ t('explorer.newFile') }}</span>
       </button>
       <button type="button" @click="startCreate('dir')">
         <AppIcon class="ctx-ico" name="folder-plus" :size="15" />
-        <span>新建目录</span>
+        <span>{{ t('explorer.newDir') }}</span>
       </button>
       <button v-if="menu.item && !menu.item.is_dir" type="button" @click="onDownload">
         <AppIcon class="ctx-ico" name="download" :size="15" />
-        <span>下载</span>
+        <span>{{ t('common.download') }}</span>
       </button>
       <button v-if="menu.item" type="button" @click="startRename">
         <AppIcon class="ctx-ico" name="pencil" :size="15" />
-        <span>重命名</span>
+        <span>{{ t('common.rename') }}</span>
       </button>
       <button v-if="menu.item" type="button" class="danger" @click="onDelete">
         <AppIcon class="ctx-ico" name="trash" :size="15" />
-        <span>删除</span>
+        <span>{{ t('common.delete') }}</span>
       </button>
       <div class="ctx-sep" />
       <button v-if="menuDir" type="button" @click="searchIn(menuDir)">
         <AppIcon class="ctx-ico" name="search" :size="15" />
-        <span>在此目录中搜索</span>
+        <span>{{ t('explorer.searchHere') }}</span>
       </button>
       <button v-if="menuDir" type="button" @click="excludeFromSearch(menuDir)">
         <AppIcon class="ctx-ico" name="close" :size="15" />
-        <span>从搜索中排除此目录</span>
+        <span>{{ t('explorer.excludeDir') }}</span>
       </button>
       <button v-if="menuFile" type="button" @click="searchIn(menuFile)">
         <AppIcon class="ctx-ico" name="search" :size="15" />
-        <span>在此文件中搜索</span>
+        <span>{{ t('explorer.searchFile') }}</span>
       </button>
       <button v-if="menuFile" type="button" @click="excludeFromSearch(menuFile)">
         <AppIcon class="ctx-ico" name="close" :size="15" />
-        <span>从搜索中排除此文件</span>
+        <span>{{ t('explorer.excludeFile') }}</span>
       </button>
       <button type="button" @click="searchIn('')">
         <AppIcon class="ctx-ico" name="folder" :size="15" />
-        <span>在整个工作区中搜索</span>
+        <span>{{ t('explorer.searchWorkspace') }}</span>
       </button>
     </div>
   </div>

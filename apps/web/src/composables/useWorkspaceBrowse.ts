@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { api } from '@/api/http'
+import { t } from '@/i18n'
 
 export type BrowseItem = { name: string; path: string; is_dir: boolean }
 export type BrowseResult = { path: string; parent: string; items: BrowseItem[] }
@@ -50,7 +51,7 @@ export function useWorkspaceBrowse(initial = '~') {
       return
     }
     if (/[\\/]/.test(name) || name === '.' || name === '..') {
-      error.value = '名称不合法'
+      error.value = t('workspace.invalidName')
       return
     }
     const parent = browsing.value?.path || path.value
