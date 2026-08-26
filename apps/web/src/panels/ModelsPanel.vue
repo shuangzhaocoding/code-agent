@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
-import type { LlmModel, LlmPreset, LlmProvider, ModelCapabilities, ModelParams } from '@/types/llm'
+import type { LlmModel, LlmPreset, LlmProvider, ModelCapabilities, ModelParams, ProviderBalance } from '@/types/llm'
 
 const store = useAppStore()
 const error = ref('')
@@ -23,6 +23,78 @@ const syncingId = ref<string | null>(null)
 const editingProviderId = ref<string | null>(null)
 const editingModelId = ref<string | null>(null)
 const presets = ref<LlmPreset[]>([])
+const balances = ref<Record<string, { loading: boolean; data?: ProviderBalance; error?: string }>>({})
+const notices = ref<Record<string, { id: number; kind: 'ok' | 'fail' | 'info'; text: string }>>({})
+const collapsedIds = ref<Record<string, boolean>>(loadCollapsed())
+const modelQuery = ref<Record<string, string>>({})
+const AUTO_COLLAPSE_AT = 8
+const COLLAPSE_KEY = 'ca.models.collapsed'
+let noticeSeq = 0
+const noticeTimers: Record<string, number> = {}
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem('ca.models.collapsed')
+    const parsed = raw ? JSON.parse(raw) : {}
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function clearNotice(providerId: string, id?: number) {
+  if (id != null && notices.value[providerId]?.id !== id) return
+  window.clearTimeout(noticeTimers[providerId])
+  delete noticeTimers[providerId]
+  if (!notices.value[providerId]) return
+  const next = { ...notices.value }
+  delete next[providerId]
+  notices.value = next
+}
+
+function setNotice(providerId: string, kind: 'ok' | 'fail' | 'info', text: string) {
+  const id = ++noticeSeq
+  window.clearTimeout(noticeTimers[providerId])
+  notices.value = { ...notices.value, [providerId]: { id, kind, text } }
+  noticeTimers[providerId] = window.setTimeout(() => clearNotice(providerId, id), 3000)
+}
+
+function isModelsCollapsed(p: LlmProvider) {
+  if (Object.prototype.hasOwnProperty.call(collapsedIds.value, p.id)) return collapsedIds.value[p.id]
+  return (p.models || []).length > AUTO_COLLAPSE_AT
+}
+
+function toggleModelsCollapsed(p: LlmProvider) {
+  const next = { ...collapsedIds.value, [p.id]: !isModelsCollapsed(p) }
+  collapsedIds.value = next
+  localStorage.setItem(COLLAPSE_KEY, JSON.stringify(next))
+}
+
+function setModelQuery(providerId: string, value: string) {
+  modelQuery.value = { ...modelQuery.value, [providerId]: value }
+}
+
+function visibleModels(p: LlmProvider) {
+  const q = (modelQuery.value[p.id] || '').trim().toLowerCase()
+  const models = p.models || []
+  if (!q) return models
+  return models.filter(
+    (m) => m.display_name.toLowerCase().includes(q) || m.model_id.toLowerCase().includes(q),
+  )
+}
+
+function modelStats(p: LlmProvider) {
+  let ok = 0
+  let fail = 0
+  let unknown = 0
+  for (const m of p.models || []) {
+    const kind = availabilityLabel(m, p.id).kind
+    if (kind === 'ok') ok += 1
+    else if (kind === 'fail') fail += 1
+    else unknown += 1
+  }
+  return { total: (p.models || []).length, ok, fail, unknown }
+}
 
 const presetMeta: Record<string, { desc: string; icon: string; accent: string }> = {
   deepseek: { desc: 'DeepSeek 官方 · thinking.budget_tokens', icon: 'think', accent: '#4f6bff' },
@@ -53,7 +125,13 @@ const modelEdit = reactive({
   model_id: '',
   context_window: 128000,
   supports_tools: true,
+  supports_vision: false,
+  supports_thinking: false,
+  supports_audio: false,
+  extraKey: '',
+  extraCaps: [] as { key: string; label: string; supported: boolean }[],
   is_default: false,
+  use_top_p: false,
   params: {} as ModelParams,
   capabilities: {} as ModelCapabilities,
 })
@@ -74,6 +152,17 @@ onMounted(async () => {
   await Promise.all([store.loadProviders(), loadPresets()])
   await runPendingProbe()
 })
+
+onUnmounted(() => {
+  for (const id of Object.keys(noticeTimers)) window.clearTimeout(noticeTimers[id])
+})
+
+watch(
+  () => (store.providers as LlmProvider[]).filter((p) => p.supports_balance).map((p) => p.id).join('|'),
+  (ids) => {
+    if (ids) void loadBalances()
+  },
+)
 
 watch(
   () => store.pendingModelProbe,
@@ -96,6 +185,36 @@ async function loadPresets() {
   } catch {
     presets.value = []
   }
+}
+
+async function loadBalance(id: string, notify = false) {
+  balances.value = { ...balances.value, [id]: { loading: true, data: balances.value[id]?.data, error: undefined } }
+  try {
+    const data = await api<ProviderBalance>(`/api/llm/providers/${id}/balance`)
+    balances.value = { ...balances.value, [id]: { loading: false, data } }
+    if (notify) setNotice(id, 'ok', `余额已刷新：${formatBalance(data)}`)
+  } catch (err) {
+    const text = err instanceof Error ? err.message : String(err)
+    balances.value = {
+      ...balances.value,
+      [id]: { loading: false, error: text },
+    }
+    if (notify) setNotice(id, 'fail', `刷新余额失败：${text}`)
+  }
+}
+
+async function loadBalances() {
+  const ids = (store.providers as LlmProvider[]).filter((p) => p.supports_balance).map((p) => p.id)
+  await Promise.all(ids.map((id) => loadBalance(id)))
+}
+
+function formatBalance(data: ProviderBalance) {
+  const currency = data.currency || data.items?.[0]?.currency || ''
+  const total = data.total || data.items?.[0]?.total || ''
+  if (!total) return '—'
+  if (currency === 'CNY') return `¥${total}`
+  if (currency === 'USD') return `$${total}`
+  return currency ? `${currency} ${total}` : total
 }
 
 function onKindChange() {
@@ -221,10 +340,12 @@ async function syncModels(id: string) {
       method: 'POST',
       body: JSON.stringify({ make_default: false, disable_missing: true }),
     })
-    error.value = `已同步 ${res.count} 个模型`
+    const text = `已同步 ${res.count} 个模型，已保留此前检测的可用性`
+    setNotice(id, 'ok', text)
     await store.loadProviders()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    const text = err instanceof Error ? err.message : String(err)
+    setNotice(id, 'fail', text)
   } finally {
     syncingId.value = null
   }
@@ -274,7 +395,8 @@ async function testProvider(id: string) {
           const fail = Number(ev.fail_count || 0)
           const total = Number(ev.total || state.total)
           probe.value = { ...state, ok, fail, done: total, total }
-          error.value = `已检测：${ok} 个可用 / ${fail} 个不可用`
+          const text = `已检测：${ok} 个可用 / ${fail} 个不可用`
+          setNotice(id, fail ? 'info' : 'ok', text)
         } else if (ev.type === 'error') {
           throw new Error(String(ev.message || '探测失败'))
         }
@@ -282,7 +404,8 @@ async function testProvider(id: string) {
     }
     await store.loadProviders()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    const text = err instanceof Error ? err.message : String(err)
+    setNotice(id, 'fail', text)
   } finally {
     testingId.value = null
     probe.value = null
@@ -320,9 +443,34 @@ function startEditModel(m: LlmModel) {
   modelEdit.model_id = m.model_id
   modelEdit.context_window = m.context_window || 128000
   modelEdit.supports_tools = m.supports_tools !== false
+  modelEdit.supports_vision = Boolean(m.supports_vision || m.capabilities?.vision?.supported)
+  modelEdit.supports_thinking = Boolean(m.capabilities?.thinking?.supported)
+  modelEdit.supports_audio = Boolean(m.capabilities?.audio?.supported)
+  modelEdit.extraKey = ''
+  modelEdit.extraCaps = extraCapsFrom(m.capabilities)
   modelEdit.is_default = !!m.is_default
   modelEdit.capabilities = m.capabilities || {}
   modelEdit.params = { ...(m.params || {}) }
+  modelEdit.use_top_p = m.params?.top_p != null && m.params.top_p < 1
+}
+
+function extraCapsFrom(caps?: ModelCapabilities) {
+  const known = new Set(['temperature', 'max_tokens', 'top_p', 'thinking', 'tools', 'vision', 'audio', 'context_window', 'origin', 'overrides', 'availability', 'modalities', 'levels'])
+  const out: { key: string; label: string; supported: boolean }[] = []
+  for (const [key, value] of Object.entries(caps || {})) {
+    if (known.has(key)) continue
+    if (value && typeof value === 'object' && 'supported' in (value as object)) {
+      out.push({ key, label: key, supported: Boolean((value as { supported?: boolean }).supported) })
+    }
+  }
+  return out
+}
+
+function addExtraCap() {
+  const key = modelEdit.extraKey.trim()
+  if (!key || modelEdit.extraCaps.some((item) => item.key === key)) return
+  modelEdit.extraCaps.push({ key, label: key, supported: true })
+  modelEdit.extraKey = ''
 }
 
 function cancelEditModel() {
@@ -350,8 +498,27 @@ async function saveModel(id: string) {
         model_id: modelEdit.model_id,
         context_window: modelEdit.context_window,
         supports_tools: modelEdit.supports_tools,
+        supports_vision: modelEdit.supports_vision,
         is_default: modelEdit.is_default,
-        params: modelEdit.params,
+        params: (() => {
+          const params = { ...modelEdit.params }
+          if (!modelEdit.use_top_p) delete params.top_p
+          return params
+        })(),
+        capabilities: {
+          ...modelEdit.capabilities,
+          tools: { ...(modelEdit.capabilities.tools || {}), supported: modelEdit.supports_tools },
+          vision: { ...(modelEdit.capabilities.vision || {}), supported: modelEdit.supports_vision },
+          thinking: {
+            ...(modelEdit.capabilities.thinking || {}),
+            supported: modelEdit.supports_thinking,
+            levels: modelEdit.supports_thinking
+              ? modelEdit.capabilities.thinking?.levels || ['off', 'low', 'medium', 'high']
+              : [],
+          },
+          audio: { ...(modelEdit.capabilities.audio || {}), supported: modelEdit.supports_audio },
+          ...Object.fromEntries(modelEdit.extraCaps.map((item) => [item.key, { supported: item.supported }])),
+        },
       }),
     })
     editingModelId.value = null
@@ -416,7 +583,12 @@ function capabilityTags(m: LlmModel) {
   if (caps.thinking?.supported) tags.push('思考')
   if (caps.tools?.supported ?? m.supports_tools) tags.push('工具')
   if (caps.vision?.supported ?? m.supports_vision) tags.push('视觉')
+  if (caps.audio?.supported) tags.push('语音')
   if (caps.temperature?.supported) tags.push('温度')
+  for (const [key, value] of Object.entries(caps)) {
+    if (['temperature', 'max_tokens', 'top_p', 'thinking', 'tools', 'vision', 'audio', 'context_window', 'origin', 'overrides', 'availability', 'modalities'].includes(key)) continue
+    if (value && typeof value === 'object' && (value as { supported?: boolean }).supported) tags.push(key)
+  }
   return tags
 }
 </script>
@@ -567,6 +739,31 @@ function capabilityTags(m: LlmModel) {
               </div>
             </div>
             <p class="provider-meta">{{ p.base_url }} · {{ p.api_key_masked || '无 Key' }} · {{ (p.models || []).length }} 个模型</p>
+            <div v-if="p.supports_balance" class="provider-balance">
+              <span class="balance-label">余额</span>
+              <span v-if="balances[p.id]?.loading && !balances[p.id]?.data" class="balance-muted">查询中…</span>
+              <span v-else-if="balances[p.id]?.error" class="balance-error" :title="balances[p.id]?.error">{{ balances[p.id]?.error }}</span>
+              <template v-else-if="balances[p.id]?.data">
+                <strong>{{ formatBalance(balances[p.id]!.data!) }}</strong>
+                <span v-if="balances[p.id]!.data!.granted" class="balance-muted">赠送 {{ balances[p.id]!.data!.granted }}</span>
+                <span v-if="balances[p.id]!.data!.available === false" class="balance-error">不可用</span>
+              </template>
+              <button
+                type="button"
+                class="icon-btn"
+                title="刷新余额"
+                :disabled="balances[p.id]?.loading"
+                @click="loadBalance(p.id, true)"
+              >
+                <AppIcon name="refresh" :size="14" />
+              </button>
+            </div>
+            <div v-if="notices[p.id]" class="provider-notice" :class="notices[p.id].kind">
+              <span>{{ notices[p.id].text }}</span>
+              <button type="button" class="notice-close" title="关闭" @click="clearNotice(p.id)">
+                <AppIcon name="close" :size="12" />
+              </button>
+            </div>
             <div v-if="probe?.providerId === p.id" class="probe-progress">
               <div class="probe-bar"><i :style="{ width: probePercent(p.id) + '%' }" /></div>
               <p class="probe-label">
@@ -576,9 +773,25 @@ function capabilityTags(m: LlmModel) {
                 · 失败 {{ probe.fail }}
               </p>
             </div>
-
+            <button type="button" class="models-toggle" @click="toggleModelsCollapsed(p)">
+              <AppIcon class="models-twist" name="chevron-right" :size="14" :class="{ open: !isModelsCollapsed(p) }" />
+              <span>模型 {{ modelStats(p).total }}</span>
+              <span class="models-toggle-meta">
+                可用 {{ modelStats(p).ok }}
+                · 不可用 {{ modelStats(p).fail }}
+                · 未检测 {{ modelStats(p).unknown }}
+              </span>
+            </button>
+            <div v-if="!isModelsCollapsed(p)" class="model-list-wrap">
+              <input
+                v-if="(p.models || []).length > 12"
+                class="model-filter"
+                :value="modelQuery[p.id] || ''"
+                placeholder="筛选模型名称或 ID"
+                @input="setModelQuery(p.id, ($event.target as HTMLInputElement).value)"
+              />
             <ul class="model-list">
-              <li v-for="m in p.models || []" :key="m.id" class="model-row">
+              <li v-for="m in visibleModels(p)" :key="m.id" class="model-row">
                 <template v-if="editingModelId === m.id">
                   <div class="model-edit-grid">
                     <input v-model="modelEdit.display_name" class="field-control" placeholder="显示名称" />
@@ -586,11 +799,31 @@ function capabilityTags(m: LlmModel) {
                     <input v-model.number="modelEdit.context_window" class="field-control" type="number" placeholder="上下文" />
                     <label class="check-label">
                       <input v-model="modelEdit.supports_tools" type="checkbox" />
-                      支持工具
+                      工具
+                    </label>
+                    <label class="check-label">
+                      <input v-model="modelEdit.supports_vision" type="checkbox" />
+                      视觉
+                    </label>
+                    <label class="check-label">
+                      <input v-model="modelEdit.supports_thinking" type="checkbox" />
+                      思考
+                    </label>
+                    <label class="check-label">
+                      <input v-model="modelEdit.supports_audio" type="checkbox" />
+                      语音
                     </label>
                     <label class="check-label">
                       <input v-model="modelEdit.is_default" type="checkbox" />
                       设为默认
+                    </label>
+                    <div class="span-2 extra-cap">
+                      <input v-model="modelEdit.extraKey" class="field-control" placeholder="新增能力标识，如 web-search" />
+                      <button type="button" class="btn btn-sm" @click="addExtraCap">添加能力</button>
+                    </div>
+                    <label v-for="item in modelEdit.extraCaps" :key="item.key" class="check-label">
+                      <input v-model="item.supported" type="checkbox" />
+                      {{ item.label }}
                     </label>
                     <template v-if="modelEdit.capabilities.temperature?.supported">
                       <label class="span-2 param-field">
@@ -619,12 +852,16 @@ function capabilityTags(m: LlmModel) {
                       </label>
                     </template>
                     <template v-if="modelEdit.capabilities.top_p?.supported">
-                      <label class="param-field">
+                      <label class="check-label">
+                        <input v-model="modelEdit.use_top_p" type="checkbox" />
+                        传递 Top P
+                      </label>
+                      <label v-if="modelEdit.use_top_p" class="param-field">
                         <span>Top P ({{ paramValue('top_p') }})</span>
                         <input
                           type="range"
-                          :min="modelEdit.capabilities.top_p.min ?? 0"
-                          :max="modelEdit.capabilities.top_p.max ?? 1"
+                          :min="modelEdit.capabilities.top_p.min ?? 0.05"
+                          :max="0.99"
                           :step="modelEdit.capabilities.top_p.step ?? 0.05"
                           :value="paramValue('top_p')"
                           @input="setParamValue('top_p', Number(($event.target as HTMLInputElement).value))"
@@ -667,11 +904,11 @@ function capabilityTags(m: LlmModel) {
                 </template>
             </li>
           </ul>
+              <p v-if="!(visibleModels(p).length)" class="model-empty">没有匹配的模型</p>
+            </div>
           </template>
         </article>
       </section>
-
-      <p v-if="error" class="status-msg" :class="{ ok: error.startsWith('连接成功') || error.startsWith('已同步') || error.startsWith('已检测') }">{{ error }}</p>
     </div>
   </div>
 </template>
@@ -867,6 +1104,36 @@ function capabilityTags(m: LlmModel) {
   font-family: var(--mono);
   color: var(--text-muted);
 }
+.provider-balance {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 10px;
+  min-height: 28px;
+  font-size: 12px;
+  color: var(--text);
+}
+.balance-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.provider-balance strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-h);
+}
+.balance-muted {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.balance-error {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--danger);
+}
 .model-list {
   list-style: none;
   margin: 0;
@@ -978,6 +1245,15 @@ function capabilityTags(m: LlmModel) {
   gap: 8px;
   width: 100%;
 }
+.span-2,
+.extra-cap {
+  grid-column: span 2;
+}
+.extra-cap {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
 .check-label {
   display: inline-flex;
   align-items: center;
@@ -1062,5 +1338,100 @@ function capabilityTags(m: LlmModel) {
   color: var(--primary);
   background: var(--primary-soft);
   border-color: color-mix(in srgb, var(--primary) 25%, var(--border));
+}
+.provider-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 7px 8px 7px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  line-height: 1.4;
+  border: var(--border-width) solid var(--border);
+}
+.provider-notice span {
+  flex: 1;
+  min-width: 0;
+}
+.notice-close {
+  width: 20px;
+  height: 20px;
+  margin-top: -1px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.notice-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.provider-notice.ok {
+  color: #15803d;
+  background: color-mix(in srgb, #22c55e 12%, var(--panel-bg));
+  border-color: color-mix(in srgb, #22c55e 28%, var(--border));
+}
+.provider-notice.fail {
+  color: var(--error-text, #b91c1c);
+  background: color-mix(in srgb, #ef4444 10%, var(--panel-bg));
+  border-color: color-mix(in srgb, #ef4444 22%, var(--border));
+}
+.provider-notice.info {
+  color: var(--text-h);
+  background: var(--primary-soft);
+  border-color: color-mix(in srgb, var(--primary) 22%, var(--border));
+}
+.models-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 8px 0 6px;
+  border: 0;
+  border-top: var(--border-width) solid var(--border);
+  background: transparent;
+  color: var(--text-h);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.models-toggle:hover { color: var(--primary); }
+.models-twist {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.models-twist.open { transform: rotate(90deg); }
+.models-toggle-meta {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.model-list-wrap { padding-top: 4px; }
+.model-filter {
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 6px 9px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 12px;
+}
+.model-empty {
+  margin: 0;
+  padding: 10px 0 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
 }
 </style>

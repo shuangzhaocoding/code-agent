@@ -116,10 +116,11 @@ PLUGIN_ICON_URL = "https://example.com/icon.png"
 | 方法 | 职责 |
 | --- | --- |
 | `create_chat_model(provider, model)` | 构造 LangChain Chat 客户端 |
-| `list_models(provider)` | 拉取远端模型列表 |
+| `list_models(provider)` | 拉取远端模型列表；可附带 `capabilities`（工具/视觉/思考/上下文等），宿主优先使用插件返回值 |
 | `probe_model(provider, model_id)` | 探测连通性 |
 | `apply_thinking(chat, provider, model, level)` | 把思考档位写进请求 |
 | `normalize_base_url(url)` | 规范化 Base URL |
+| `fetch_balance(provider)` | 可选。查询账户余额；需同时设 `supports_balance = True` |
 
 并声明 `kind`、`title`、`description`、`config_schema`、`presets`。
 
@@ -139,8 +140,8 @@ def register(registry) -> None:
 | 插件 id | 厂商 | 思考强度 |
 | --- | --- | --- |
 | `builtin.llm.openai` | OpenAI 官方 | Responses API `reasoning.effort` |
-| `builtin.llm.deepseek` | DeepSeek | `extra_body.thinking.budget_tokens` |
-| `builtin.llm.qwen` | 通义千问（DashScope） | `extra_body.enable_thinking` / `thinking_budget` |
+| `builtin.llm.deepseek` | DeepSeek | `extra_body.thinking.budget_tokens`；模型页可查 `GET /user/balance` |
+| `builtin.llm.qwen` | 通义千问（DashScope） | `extra_body.enable_thinking` / `thinking_budget`；同步时优先走 `GET /api/v1/models` 读取能力 |
 | `builtin.llm.gateway` | 中转（含 AIValux Codex） | Codex 用 `reasoning.effort`；通用中转按模型名推断 |
 | `builtin.llm.ccx` | [CCX](https://github.com/BenedictKing/ccx) 网关 | GPT-5/o 系列走 Responses；DeepSeek/Qwen 等走 Chat 并按模型适配 |
 | `builtin.llm.ollama` | Ollama 本地 | 不支持 |

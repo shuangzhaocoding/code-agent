@@ -243,6 +243,28 @@ async def test_provider(provider_id: str):
     )
 
 
+@router.get("/providers/{provider_id}/balance")
+async def provider_balance(provider_id: str):
+    from code_agent.llm.adapters import get_llm_adapter
+
+    provider = await LlmProvider.get_or_none(id=provider_id)
+    await require_provider_available(provider)
+    adapter = get_llm_adapter(provider)
+    fetch_balance = getattr(adapter, "fetch_balance", None)
+    if not getattr(adapter, "supports_balance", False) or not callable(fetch_balance):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "provider.balance_unsupported", "message": "该提供商不支持查询余额"},
+        )
+    try:
+        return await fetch_balance(provider)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "provider.balance", "message": str(exc)},
+        ) from exc
+
+
 @router.post("/models")
 async def create_model(body: ModelIn):
     provider = await LlmProvider.get_or_none(id=body.provider_id)
@@ -291,6 +313,22 @@ async def update_model(model_id: str, body: dict):
         row.capabilities_json = {**(row.capabilities_json or {}), **caps}
     if "params" in body and isinstance(body["params"], dict):
         row.params_json = body["params"]
+    if "capabilities" in body and isinstance(body["capabilities"], dict):
+        from code_agent.llm.capabilities import apply_capability_overrides
+
+        caps = dict(row.capabilities_json or {})
+        incoming = body["capabilities"]
+        overrides = dict(caps.get("overrides") or {})
+        for key in ("tools", "vision", "thinking"):
+            spec = incoming.get(key)
+            if isinstance(spec, dict) and "supported" in spec:
+                overrides[key] = bool(spec["supported"])
+            elif isinstance(spec, bool):
+                overrides[key] = spec
+        caps.update({k: v for k, v in incoming.items() if k not in {"availability"}})
+        row.capabilities_json = apply_capability_overrides(caps, overrides)
+        row.supports_tools = bool((row.capabilities_json.get("tools") or {}).get("supported"))
+        row.supports_vision = bool((row.capabilities_json.get("vision") or {}).get("supported"))
     await row.save()
     return model_public(row)
 

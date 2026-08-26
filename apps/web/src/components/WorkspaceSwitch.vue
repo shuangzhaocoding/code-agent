@@ -144,7 +144,8 @@ header .page-panel__title { margin: 0; }
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 180px;
+  min-height: 280px;
+  max-height: min(52vh, 480px);
   overflow: auto;
 }
 .recents {

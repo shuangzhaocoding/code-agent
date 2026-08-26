@@ -164,6 +164,14 @@ async def get_chat_model(model_pk: str | None):
 
 
 def provider_public(p: LlmProvider) -> dict:
+    from code_agent.llm.adapters import get_llm_adapter
+
+    supports_balance = False
+    try:
+        adapter = get_llm_adapter(p)
+        supports_balance = bool(getattr(adapter, "supports_balance", False))
+    except Exception:
+        supports_balance = False
     return {
         "id": str(p.id),
         "name": p.name,
@@ -173,6 +181,7 @@ def provider_public(p: LlmProvider) -> dict:
         "has_key": bool(p.api_key_encrypted),
         "extra_headers": p.extra_headers,
         "enabled": p.enabled,
+        "supports_balance": supports_balance,
     }
 
 

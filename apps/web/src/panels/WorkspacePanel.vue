@@ -175,7 +175,8 @@ const recents = computed(() => store.workspaces)
   list-style: none;
   margin: 0;
   padding: 0;
-  max-height: 160px;
+  min-height: 280px;
+  max-height: min(52vh, 480px);
   overflow: auto;
 }
 

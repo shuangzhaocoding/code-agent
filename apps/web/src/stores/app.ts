@@ -90,6 +90,7 @@ export const useAppStore = defineStore('app', () => {
     localStorage.setItem('ca.thinking', level === 'off' ? '0' : '1')
   })
   const thinking = computed(() => thinkingLevel.value !== 'off')
+  const sampling = ref<{ temperature: number | null }>({ temperature: null })
   const fileTree = ref<FsItem[]>([])
   const childrenMap = ref<Record<string, FsItem[]>>({})
   const expanded = ref<Set<string>>(new Set())
@@ -256,6 +257,7 @@ export const useAppStore = defineStore('app', () => {
     } else {
       await newChat()
     }
+    openExplorerPanel()
   }
 
   async function loadTree(path = '') {
@@ -337,6 +339,32 @@ export const useAppStore = defineStore('app', () => {
     setExpanded(new Set())
   }
 
+  const EXPAND_SKIP_DIRS = new Set([
+    'node_modules',
+    'bower_components',
+    'vendor',
+    'venv',
+    '.venv',
+    'dist',
+    'build',
+    'out',
+    'target',
+    '__pycache__',
+    '.git',
+    '.next',
+    '.nuxt',
+    '.output',
+    '.turbo',
+    '.cache',
+    'coverage',
+    'Pods',
+  ])
+
+  function shouldSkipExpand(item: FsItem) {
+    if (EXPAND_SKIP_DIRS.has(item.name)) return true
+    return item.path.split('/').some((part) => EXPAND_SKIP_DIRS.has(part))
+  }
+
   async function expandAllDirs() {
     const next = new Set<string>()
     let layer = ['']
@@ -345,7 +373,7 @@ export const useAppStore = defineStore('app', () => {
       const childDirs: string[] = []
       for (const dir of layer) {
         for (const item of childrenOf(dir)) {
-          if (!item.is_dir) continue
+          if (!item.is_dir || shouldSkipExpand(item)) continue
           next.add(item.path)
           childDirs.push(item.path)
         }
@@ -1482,6 +1510,7 @@ export const useAppStore = defineStore('app', () => {
     modelId,
     thinkingLevel,
     thinking,
+    sampling,
     fileTree,
     childrenMap,
     expanded,

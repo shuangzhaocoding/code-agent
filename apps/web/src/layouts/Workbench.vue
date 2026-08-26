@@ -127,6 +127,7 @@ async function onReady(event: DockviewReadyEvent) {
     restored = false
   }
   if (!restored) seed(event.api)
+  openExplorer()
   event.api.onDidLayoutChange(() => {
     const layout = event.api.toJSON()
     api('/api/layout', {

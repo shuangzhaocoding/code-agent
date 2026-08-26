@@ -29,6 +29,8 @@ class LlmAdapter(Protocol):
 
     def normalize_base_url(self, base_url: str) -> str: ...
 
+    # Optional: set ``supports_balance = True`` and implement ``fetch_balance(provider)``.
+
 
 @dataclass
 class ToolSpec:

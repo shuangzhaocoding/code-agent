@@ -6,13 +6,23 @@ export type ParamSpec = {
   step?: number
 }
 
+export type ThinkingOption = {
+  value: string
+  label?: string
+  description?: string
+}
+
 export type ModelCapabilities = {
   temperature?: ParamSpec
   max_tokens?: ParamSpec
   top_p?: ParamSpec
-  thinking?: { supported?: boolean; levels?: string[] }
+  thinking?: { supported?: boolean; levels?: Array<string | ThinkingOption> }
   tools?: { supported?: boolean }
   vision?: { supported?: boolean }
+  audio?: { supported?: boolean }
+  context_window?: number
+  origin?: string
+  overrides?: Record<string, boolean>
 }
 
 export type ModelParams = {
@@ -48,7 +58,18 @@ export type LlmProvider = {
   base_url: string
   api_key_masked?: string
   enabled?: boolean
+  supports_balance?: boolean
   models?: LlmModel[]
+}
+
+export type ProviderBalance = {
+  ok?: boolean
+  available?: boolean
+  currency?: string
+  total?: string
+  granted?: string
+  topped_up?: string
+  items?: { currency: string; total: string; granted: string; topped_up: string }[]
 }
 
 export type LlmPreset = {

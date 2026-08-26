@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
+import httpx
+
 from code_agent.db.models import LlmModel, LlmProvider
 from code_agent.llm.adapters._shared import (
     BASE_CONFIG_SCHEMA,
@@ -63,6 +65,106 @@ def _qwen_auth_headers(provider: LlmProvider) -> tuple[str, dict[str, str]]:
     return base_url, headers
 
 
+def dashscope_catalog_url(base_url: str) -> str:
+    parsed = urlparse(normalize_qwen_base_url(base_url))
+    host = parsed.netloc or "dashscope.aliyuncs.com"
+    scheme = parsed.scheme or "https"
+    return f"{scheme}://{host}/api/v1/models"
+
+
+def _map_dashscope_capabilities(item: dict[str, Any]) -> dict[str, Any]:
+    kinds = {str(x) for x in (item.get("capabilities") or [])}
+    features = {str(x).replace("_", "-").lower() for x in (item.get("features") or [])}
+    modalities = item.get("inference_metadata") or {}
+    request_mod = {str(x).lower() for x in (modalities.get("request_modality") or [])}
+    info = item.get("model_info") or {}
+    vision = "VU" in kinds or "image" in request_mod or "video" in request_mod
+    tools = bool(features & {"function-calling", "function-call", "tools"})
+    thinking = "Reasoning" in kinds or any(x.lower() == "reasoning" for x in kinds)
+    context_window = info.get("context_window") or info.get("max_input_tokens")
+    max_out = info.get("max_output_tokens") or info.get("max_tokens")
+    caps: dict[str, Any] = {
+        "tools": {"supported": tools},
+        "vision": {"supported": vision},
+        "thinking": {
+            "supported": thinking,
+            "levels": ["off", "low", "medium", "high"] if thinking else [],
+        },
+        "audio": {"supported": "audio" in request_mod or "ASR" in kinds or "TTS" in kinds},
+        "origin": "plugin",
+    }
+    if context_window:
+        caps["context_window"] = int(context_window)
+        caps["max_tokens"] = {
+            "supported": True,
+            "min": 1,
+            "max": int(max_out or context_window),
+            "default": min(int(max_out or 8192), 16384),
+        }
+    caps["modalities"] = {
+        "input": list(modalities.get("request_modality") or []),
+        "output": list(modalities.get("response_modality") or []),
+    }
+    return caps
+
+
+def _dashscope_row(item: dict[str, Any]) -> dict[str, Any] | None:
+    model_id = item.get("model") or item.get("id") or item.get("name")
+    if not model_id:
+        return None
+    caps = _map_dashscope_capabilities(item)
+    return {
+        "model_id": str(model_id),
+        "display_name": str(item.get("name") or model_id),
+        "remote": item,
+        "capabilities": caps,
+        "context_window": caps.get("context_window"),
+    }
+
+
+async def list_dashscope_catalog(provider: LlmProvider, headers: dict[str, str]) -> list[dict[str, Any]]:
+    url = dashscope_catalog_url(provider.base_url or "")
+    auth = {**headers, "Accept": "application/json"}
+    models: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+        page = 1
+        while page <= 20:
+            res = await client.get(
+                url,
+                headers=auth,
+                params={"page_no": page, "page_size": 100, "language": "zh-CN"},
+            )
+            if res.status_code >= 400:
+                raise RuntimeError(res.text[:240] or f"HTTP {res.status_code}")
+            payload = res.json() if res.content else {}
+            output = payload.get("output") if isinstance(payload, dict) else None
+            rows = None
+            if isinstance(output, dict):
+                rows = output.get("models") or output.get("data")
+            if rows is None and isinstance(payload, dict):
+                rows = payload.get("data") or payload.get("models")
+            if not isinstance(rows, list):
+                break
+            for item in rows:
+                if not isinstance(item, dict):
+                    continue
+                mapped = _dashscope_row(item)
+                if not mapped or mapped["model_id"] in seen:
+                    continue
+                seen.add(mapped["model_id"])
+                models.append(mapped)
+            total = 0
+            if isinstance(output, dict):
+                total = int(output.get("total") or 0)
+            if len(rows) < 100 or (total and len(models) >= total):
+                break
+            page += 1
+    if not models:
+        raise RuntimeError("DashScope catalog returned no models")
+    return models
+
+
 def _thinking_extra_body(level: str, model_id: str | None) -> dict[str, Any]:
     normalized = normalize_thinking_level(level)
     if normalized == "off":
@@ -106,7 +208,10 @@ class QwenAdapter:
         if base_url != (provider.base_url or "").rstrip("/"):
             provider.base_url = base_url
             await provider.save()
-        return await list_models_openai_compat(provider, base_url, headers)
+        try:
+            return await list_dashscope_catalog(provider, headers)
+        except Exception:
+            return await list_models_openai_compat(provider, base_url, headers)
 
     async def probe_model(self, provider: LlmProvider, model_id: str) -> dict[str, Any]:
         base_url, headers = _qwen_auth_headers(provider)

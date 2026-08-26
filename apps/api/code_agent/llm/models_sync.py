@@ -7,7 +7,7 @@ import httpx
 
 from code_agent.crypto import decrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
-from code_agent.llm.capabilities import default_params, infer_capabilities
+from code_agent.llm.capabilities import default_params, resolve_capabilities
 from code_agent.llm.codex_gateway import (
     canonicalize_codex_base_url,
     is_codex_chat_model,
@@ -98,20 +98,23 @@ async def sync_provider_models(
     saved: list[LlmModel] = []
     for index, item in enumerate(remote_models):
         model_id = item["model_id"]
-        caps = infer_capabilities(model_id, item.get("remote"))
         row = existing.get(model_id)
+        previous = row.capabilities_json if row and isinstance(row.capabilities_json, dict) else {}
+        caps = resolve_capabilities(model_id, item.get("remote"), item.get("capabilities"), previous)
         chat_ok = is_codex_chat_model(model_id) if is_codex_gateway(provider) else True
         is_default = False
         if is_codex_gateway(provider) and not has_default:
             is_default = model_id == preferred
         elif make_default and index == 0 and not has_default:
             is_default = True
+        context_window = int(item.get("context_window") or caps.get("context_window") or 128000)
 
         if row:
             row.display_name = item["display_name"]
             row.capabilities_json = caps
             row.supports_tools = bool(caps.get("tools", {}).get("supported"))
             row.supports_vision = bool(caps.get("vision", {}).get("supported"))
+            row.context_window = context_window
             row.enabled = chat_ok
             if is_default:
                 row.is_default = True
@@ -123,7 +126,7 @@ async def sync_provider_models(
                 provider_id=provider.id,
                 model_id=model_id,
                 display_name=item["display_name"],
-                context_window=128000,
+                context_window=context_window,
                 supports_tools=bool(caps.get("tools", {}).get("supported")),
                 supports_vision=bool(caps.get("vision", {}).get("supported")),
                 capabilities_json=caps,
