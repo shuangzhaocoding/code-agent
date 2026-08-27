@@ -8,15 +8,12 @@ import AppIcon from '@/components/AppIcon.vue'
 defineProps<{
   collapsed: boolean
   theme: 'light' | 'dark'
-  trajectoryOpen?: boolean
 }>()
 
 const emit = defineEmits<{
   toggleCollapse: []
   openPanel: [id: string, component: string, title: string]
   toggleTheme: []
-  toggleTrajectory: []
-  openTrajectoryDock: []
 }>()
 
 const { t } = useI18n()
@@ -24,7 +21,7 @@ const store = useAppStore()
 
 const navItems = computed(() => [
   { id: 'agent', component: 'agent', title: t('panels.agent'), label: t('sidebar.chat'), icon: 'atom' },
-  { id: 'trajectory', component: '', title: '', label: t('sidebar.trajectory'), icon: 'clock', action: 'trajectory' as const },
+  { id: 'trajectory', component: 'trajectory', title: t('panels.trajectory'), label: t('sidebar.trajectory'), icon: 'clock' },
   { id: 'explorer', component: 'explorer', title: t('panels.explorer'), label: t('sidebar.files'), icon: 'folder' },
   { id: 'search', component: 'search', title: t('panels.search'), label: t('panels.search'), icon: 'search' },
   { id: 'editor', component: 'editor', title: t('panels.editor'), label: t('panels.editor'), icon: 'file' },
@@ -42,15 +39,7 @@ const footItems = computed(() => [
 
 const workspaceLabel = computed(() => store.workspace?.name || t('panels.workspace'))
 
-function open(id: string, component: string, title: string, action?: 'trajectory', e?: MouseEvent) {
-  if (action === 'trajectory') {
-    if (e?.altKey) {
-      emit('openTrajectoryDock')
-      return
-    }
-    emit('toggleTrajectory')
-    return
-  }
+function open(id: string, component: string, title: string) {
   if (id === 'search') {
     store.openSearch()
     return
@@ -78,9 +67,9 @@ function open(id: string, component: string, title: string, action?: 'trajectory
         :key="item.id"
         type="button"
         class="sidebar-nav-item"
-        :class="{ active: item.action === 'trajectory' ? (trajectoryOpen || store.activity === 'trajectory') : store.activity === item.id }"
-        :title="item.action === 'trajectory' ? t('sidebar.trajectoryPopout', { label: item.label }) : item.label"
-        @click="open(item.id, item.component, item.title, item.action, $event)"
+        :class="{ active: store.activity === item.id }"
+        :title="item.label"
+        @click="open(item.id, item.component, item.title)"
       >
         <AppIcon :name="item.icon" :size="16" />
         <span v-if="!collapsed">{{ item.label }}</span>

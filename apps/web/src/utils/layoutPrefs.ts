@@ -1,6 +1,5 @@
 const KEYS = {
   sidebarCollapsed: 'ca.sidebar.collapsed',
-  trajectoryOpen: 'ca.trajectory.open',
 } as const
 
 function readBool(key: string, defaultValue: boolean): boolean {
@@ -20,12 +19,4 @@ export function getSidebarCollapsed(defaultValue = true): boolean {
 
 export function setSidebarCollapsed(value: boolean) {
   writeBool(KEYS.sidebarCollapsed, value)
-}
-
-export function getTrajectoryOpen(defaultValue = true): boolean {
-  return readBool(KEYS.trajectoryOpen, defaultValue)
-}
-
-export function setTrajectoryOpen(value: boolean) {
-  writeBool(KEYS.trajectoryOpen, value)
 }

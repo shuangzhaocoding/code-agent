@@ -11,3 +11,4 @@ apps/web/dist/
 apps/api/*.egg-info/
 *.egg-info/
 .python-version
+uploads/

@@ -11,15 +11,9 @@ from code_agent.config import settings
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
-_UPLOAD_ROOT = Path(settings.get("uploads.dir") or ".code-agent-uploads")
-
 
 def _ensure_root() -> Path:
-    root = _UPLOAD_ROOT
-    if not root.is_absolute():
-        root = Path.cwd() / root
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return settings.uploads_dir
 
 
 @router.post("")

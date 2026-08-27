@@ -25,6 +25,7 @@ class MessageIn(BaseModel):
     thinking_level: str | None = None
     references: list[dict] = Field(default_factory=list)
     files: list[dict] = Field(default_factory=list)
+    skill_name: str | None = None
 
 
 class ContextUsageIn(BaseModel):
@@ -144,6 +145,7 @@ async def send_message(conversation_id: str, body: MessageIn):
         body.references,
         _resolve_thinking_level(body.thinking, body.thinking_level),
         body.files,
+        body.skill_name,
     )
     return {"run_id": str(run.id), "conversation_id": conversation_id}
 

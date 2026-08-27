@@ -5,6 +5,8 @@ import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
 import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
+import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
+
 const store = useAppStore()
 const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
 
@@ -32,7 +34,7 @@ async function openRecent(id: string) {
   }
 }
 
-const recents = computed(() => store.workspaces)
+const recents = computed(() => store.recentWorkspaces)
 </script>
 
 <template>
@@ -85,8 +87,11 @@ const recents = computed(() => store.workspaces)
             :class="{ current: ws.id === store.workspaceId }"
             @click="openRecent(ws.id)"
           >
-            <strong>{{ ws.name }}</strong>
-            <span>{{ ws.root_path }}</span>
+            <div class="recent-head">
+              <strong>{{ ws.name }}</strong>
+              <time v-if="ws.last_opened_at" class="recent-time">{{ formatWorkspaceOpenedAt(ws.last_opened_at) }}</time>
+            </div>
+            <span class="recent-path">{{ ws.root_path }}</span>
             <em v-if="ws.id === store.workspaceId" class="status-pill">当前</em>
           </button>
         </div>
@@ -223,6 +228,33 @@ const recents = computed(() => store.workspaces)
 .recent-card strong {
   font-size: 13px;
   color: var(--text-h);
+}
+
+.recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.recent-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.recent-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  word-break: break-all;
 }
 
 .recent-card span {

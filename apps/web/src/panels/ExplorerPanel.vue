@@ -169,6 +169,16 @@ function onDownload() {
   a.remove()
 }
 
+function addToChat() {
+  const item = menu.value?.item
+  if (!item) return
+  closeMenu()
+  window.dispatchEvent(new CustomEvent('ca-add-chat-mention', {
+    detail: { name: item.name, path: item.path, is_dir: item.is_dir },
+  }))
+  window.dispatchEvent(new Event('ca-focus-agent'))
+}
+
 function searchIn(path: string) {
   closeMenu()
   store.openSearch(path ? { include: path } : { clearInclude: true, include: null })
@@ -252,6 +262,10 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
       <button v-if="menu.item && !menu.item.is_dir" type="button" @click="onDownload">
         <AppIcon class="ctx-ico" name="download" :size="15" />
         <span>{{ t('common.download') }}</span>
+      </button>
+      <button v-if="menu.item" type="button" @click="addToChat">
+        <AppIcon class="ctx-ico" name="chat" :size="15" />
+        <span>{{ t('explorer.addToChat') }}</span>
       </button>
       <button v-if="menu.item" type="button" @click="startRename">
         <AppIcon class="ctx-ico" name="pencil" :size="15" />

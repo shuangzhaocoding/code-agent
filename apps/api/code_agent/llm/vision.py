@@ -48,10 +48,7 @@ def is_image_file_meta(item: dict[str, Any] | None) -> bool:
 
 
 def upload_root() -> Path:
-    root = Path(settings.get("uploads.dir") or ".code-agent-uploads")
-    if not root.is_absolute():
-        root = Path.cwd() / root
-    return root
+    return settings.uploads_dir
 
 
 def resolve_upload_path(url: str) -> Path | None:

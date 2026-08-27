@@ -12,6 +12,19 @@ export function formatRelativeTime(iso?: string | null): string {
   return new Date(ts).toLocaleDateString(localeMeta().bcp47, { month: 'short', day: 'numeric' })
 }
 
+export function formatWorkspaceOpenedAt(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const bcp47 = localeMeta().bcp47
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  if (sameYear) {
+    return d.toLocaleDateString(bcp47, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
+  return d.toLocaleDateString(bcp47, { year: 'numeric', month: '2-digit', day: '2-digit' })
+}
+
 export function isMacMod() {
   return /Mac|iPhone|iPad/.test(navigator.platform) || /Mac/.test(navigator.userAgent)
 }

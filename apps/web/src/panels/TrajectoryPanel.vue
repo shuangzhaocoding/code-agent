@@ -12,15 +12,6 @@ import {
   type TrajectoryKind,
 } from '@/utils/trajectory'
 
-const props = withDefaults(
-  defineProps<{
-    mode?: 'sidebar' | 'dock'
-  }>(),
-  { mode: 'sidebar' },
-)
-
-const emit = defineEmits<{ close: [], popout: [] }>()
-
 const store = useAppStore()
 const filter = ref<'all' | TrajectoryKind>('all')
 const expanded = ref<string | null>(null)
@@ -89,32 +80,12 @@ watch(filter, () => scrollToTail(true))
 </script>
 
 <template>
-  <aside class="trajectory-panel" :class="mode">
+  <div class="trajectory-panel">
     <header class="trajectory-head">
       <div class="trajectory-title">
         <AppIcon name="clock" :size="15" />
         <span>轨迹</span>
         <em v-if="entries.length" class="trajectory-count">{{ entries.length }}</em>
-      </div>
-      <div class="trajectory-actions">
-        <button
-          v-if="mode === 'sidebar'"
-          type="button"
-          class="trajectory-action"
-          title="弹出为可拖拽面板"
-          @click="emit('popout')"
-        >
-          <AppIcon name="panel-right" :size="14" />
-        </button>
-        <button
-          v-if="mode === 'sidebar'"
-          type="button"
-          class="trajectory-action"
-          title="关闭轨迹"
-          @click="emit('close')"
-        >
-          <AppIcon name="close" :size="14" />
-        </button>
       </div>
     </header>
 
@@ -174,7 +145,7 @@ watch(filter, () => scrollToTail(true))
         </article>
       </section>
     </div>
-  </aside>
+  </div>
 </template>
 
 <style scoped>
@@ -184,12 +155,6 @@ watch(filter, () => scrollToTail(true))
   display: flex;
   flex-direction: column;
   background: var(--panel-bg);
-}
-.trajectory-panel.sidebar {
-  border-left: var(--border-width) solid var(--border);
-}
-.trajectory-panel.dock {
-  border-left: 0;
 }
 .trajectory-head {
   display: flex;
@@ -217,25 +182,6 @@ watch(filter, () => scrollToTail(true))
   background: var(--code-bg);
   padding: 1px 6px;
   border-radius: 999px;
-}
-.trajectory-actions {
-  display: inline-flex;
-  gap: 2px;
-}
-.trajectory-action {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.trajectory-action:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
 }
 .trajectory-filters {
   display: flex;

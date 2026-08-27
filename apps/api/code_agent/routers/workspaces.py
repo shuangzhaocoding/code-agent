@@ -26,6 +26,37 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 RAW_FILE_MAX_BYTES = 80 * 1024 * 1024
 
 
+def _normalize_root_path(raw: str) -> str:
+    return str(Path(raw).expanduser().resolve())
+
+
+async def _find_workspace_by_root(root: str) -> Workspace | None:
+    target = _normalize_root_path(root)
+    for row in await Workspace.all():
+        try:
+            if _normalize_root_path(row.root_path) == target:
+                return row
+        except OSError:
+            continue
+    return None
+
+
+def _dedupe_workspaces(rows: list[Workspace]) -> list[Workspace]:
+    """Keep the most recently opened row per resolved root path."""
+    seen: set[str] = set()
+    out: list[Workspace] = []
+    for row in rows:
+        try:
+            key = _normalize_root_path(row.root_path)
+        except OSError:
+            key = row.root_path
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(row)
+    return out
+
+
 class WorkspaceIn(BaseModel):
     name: str | None = None
     root_path: str
@@ -62,7 +93,7 @@ class MkdirIn(BaseModel):
 @router.get("")
 async def list_workspaces():
     rows = await Workspace.all().order_by("-last_opened_at")
-    return [_ws(r) for r in rows]
+    return [_ws(r) for r in _dedupe_workspaces(rows)]
 
 
 @router.post("")
@@ -70,11 +101,22 @@ async def add_workspace(body: WorkspaceIn):
     root = Path(body.root_path).expanduser().resolve()
     if not root.exists() or not root.is_dir():
         raise HTTPException(status_code=400, detail={"code": "workspace.invalid", "message": "Directory does not exist"})
+    existing = await _find_workspace_by_root(str(root))
+    if existing:
+        await existing.save()
+        return _ws(existing)
     row = await Workspace.create(
         name=body.name or root.name,
         root_path=str(root),
         ignore_globs=body.ignore_globs,
     )
+    return _ws(row)
+
+
+@router.post("/{workspace_id}/open")
+async def open_workspace(workspace_id: str):
+    row = await _get_ws(workspace_id)
+    await row.save()
     return _ws(row)
 
 

@@ -279,9 +279,12 @@ onBeforeUnmount(() => {
       </Teleport>
     </div>
 
-    <button type="button" class="switcher-new" title="新会话" @click="startNew">
-      <AppIcon name="plus" :size="15" />
-    </button>
+    <div class="switcher-actions">
+      <slot name="actions" />
+      <button type="button" class="switcher-new" title="新会话" @click="startNew">
+        <AppIcon name="plus" :size="15" />
+      </button>
+    </div>
   </header>
 </template>
 
@@ -367,6 +370,12 @@ onBeforeUnmount(() => {
 }
 .switcher-main.open .switcher-chev {
   transform: rotate(180deg);
+}
+.switcher-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
 }
 .switcher-new {
   width: 30px;

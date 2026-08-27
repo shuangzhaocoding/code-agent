@@ -40,13 +40,20 @@ Ask the user to confirm before implementation.
 """
 
 
-def _system_prompt(workspace: Workspace, mode: str, thinking_level: str = "off") -> str:
+def _system_prompt(
+    workspace: Workspace,
+    mode: str,
+    thinking_level: str = "off",
+    *,
+    skill_name: str | None = None,
+    skill_body: str | None = None,
+) -> str:
     skills = list_skill_catalog(workspace.root_path)
     skill_lines = "\n".join(
         f"- {s['name']}: {s['description']}" for s in skills if not s.get("invalid_reason")
     ) or "(none)"
     extra = settings.get("agent.system_prompt_extra") or ""
-    return f"""You are Code Agent, a coding assistant working on a real workspace.
+    prompt = f"""You are Code Agent, a coding assistant working on a real workspace.
 
 Workspace root: {workspace.root_path}
 Mode: {mode}
@@ -69,6 +76,15 @@ Available skills:
 
 {extra}
 """.strip()
+    if skill_name and skill_body:
+        prompt += f"""
+
+## Active skill: {skill_name}
+The user selected this skill for the current conversation turn. Follow it closely:
+
+{skill_body}
+""".rstrip()
+    return prompt
 
 
 def _history_messages(rows: list[Message], *, vision: bool = False) -> list:
@@ -102,14 +118,18 @@ async def start_run(
     references: list | None,
     thinking_level: str = "off",
     files: list | None = None,
+    skill_name: str | None = None,
 ) -> Run:
     level = normalize_thinking_level(thinking_level)
     conv = await Conversation.get(id=conversation_id)
     last = await Message.filter(conversation_id=conversation_id).order_by("-sort_key").first()
     sort_key = (last.sort_key + 1) if last else 1
-    blocks = [{"id": new_id(), "type": "user.text", "text": user_text, "meta": {}, "status": "ok"}]
+    meta: dict = {}
     if files:
-        blocks[0]["meta"] = {"files": files}
+        meta["files"] = files
+    if skill_name:
+        meta["skill"] = {"name": skill_name}
+    blocks = [{"id": new_id(), "type": "user.text", "text": user_text, "meta": meta, "status": "ok"}]
     if references:
         blocks.append(
             {
@@ -135,7 +155,12 @@ async def start_run(
         conversation_id=conversation_id,
         status="queued",
         mode=mode,
-        model_snapshot={"model_id": model_id, "thinking_level": level, "thinking": thinking_enabled(level)},
+        model_snapshot={
+            "model_id": model_id,
+            "thinking_level": level,
+            "thinking": thinking_enabled(level),
+            **({"skill_name": skill_name} if skill_name else {}),
+        },
     )
     conv.active_run_id = str(run.id)
     conv.mode = mode
@@ -254,7 +279,37 @@ async def _execute(run_id: str) -> None:
         tools = registry.enabled_tools(run.mode)
         from langgraph.prebuilt import create_react_agent
 
-        graph = create_react_agent(model, tools, prompt=_system_prompt(workspace, run.mode, thinking_level))
+        skill_name = (run.model_snapshot or {}).get("skill_name")
+        if not skill_name and latest_user:
+            skill_meta = (latest_user.blocks[0].get("meta") or {}).get("skill") if latest_user.blocks else None
+            if isinstance(skill_meta, dict):
+                skill_name = skill_meta.get("name")
+        skill_body = None
+        if skill_name:
+            from code_agent.skills.registry import load_skill_body
+
+            skill_body = load_skill_body(workspace.root_path, str(skill_name))
+            if skill_body:
+                block_id = new_id()
+                await broker.publish(
+                    run_id,
+                    "block.started",
+                    {"block_id": block_id, "block_type": "skill.activated", "meta": {"name": skill_name}},
+                )
+                await broker.publish(run_id, "block.delta", {"block_id": block_id, "text": skill_body[:500]})
+                await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
+
+        graph = create_react_agent(
+            model,
+            tools,
+            prompt=_system_prompt(
+                workspace,
+                run.mode,
+                thinking_level,
+                skill_name=str(skill_name) if skill_name and skill_body else None,
+                skill_body=skill_body,
+            ),
+        )
         # Only attach image bytes when this turn actually needs vision.
         lc_messages = _history_messages(list(history), vision=vision and need_vision)
 

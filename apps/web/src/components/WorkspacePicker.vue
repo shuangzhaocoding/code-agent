@@ -9,6 +9,8 @@ import LanguageSelect from '@/components/LanguageSelect.vue'
 import BrandMark from '@/components/BrandMark.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
+import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
+
 const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
@@ -33,7 +35,7 @@ function onToggleTheme() {
   theme.value = toggleTheme()
 }
 
-const recents = computed(() => store.workspaces)
+const recents = computed(() => store.recentWorkspaces)
 </script>
 
 <template>
@@ -73,8 +75,11 @@ const recents = computed(() => store.workspaces)
           >
             <AppIcon name="folder" :size="15" />
             <span class="recent-copy">
-              <strong>{{ ws.name }}</strong>
-              <span>{{ ws.root_path }}</span>
+              <span class="recent-head">
+                <strong>{{ ws.name }}</strong>
+                <time v-if="ws.last_opened_at" class="recent-time">{{ formatWorkspaceOpenedAt(ws.last_opened_at) }}</time>
+              </span>
+              <span class="recent-path">{{ ws.root_path }}</span>
             </span>
           </button>
         </section>
@@ -264,12 +269,28 @@ const recents = computed(() => store.workspaces)
   flex-direction: column;
   gap: 2px;
 }
-.recent-copy strong {
+.recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.recent-head strong {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.recent-copy span {
+.recent-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.recent-path {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-muted);

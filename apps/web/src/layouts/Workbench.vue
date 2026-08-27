@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DockviewVue } from 'dockview-vue'
+import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -9,7 +9,6 @@ import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import SessionSidebar from '@/components/SessionSidebar.vue'
 import PanelTab from '@/components/PanelTab.vue'
-import TrajectoryPanel from '@/panels/TrajectoryPanel.vue'
 import TrajectoryDockPanel from '@/panels/TrajectoryDockPanel.vue'
 import WorkspacePanel from '@/panels/WorkspacePanel.vue'
 import ExplorerPanel from '@/panels/ExplorerPanel.vue'
@@ -27,20 +26,17 @@ import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import GitPanel from '@/panels/GitPanel.vue'
 import PortsPanel from '@/panels/PortsPanel.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
-import { getSidebarCollapsed, getTrajectoryOpen, setSidebarCollapsed, setTrajectoryOpen } from '@/utils/layoutPrefs'
+import { getSidebarCollapsed, setSidebarCollapsed } from '@/utils/layoutPrefs'
 
 const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
 const sidebarCollapsed = ref(getSidebarCollapsed())
 const sidebarWidth = ref(260)
-const trajectoryOpen = ref(getTrajectoryOpen())
-const trajectoryWidth = ref(340)
-const resizing = ref<'sidebar' | 'trajectory' | null>(null)
+const resizing = ref<'sidebar' | null>(null)
 const paletteOpen = ref(false)
 
 watch(sidebarCollapsed, (value) => setSidebarCollapsed(value))
-watch(trajectoryOpen, (value) => setTrajectoryOpen(value))
 
 const components = {
   workspace: WorkspacePanel,
@@ -57,7 +53,7 @@ const components = {
   git: GitPanel,
   ports: PortsPanel,
   trajectory: TrajectoryDockPanel,
-}
+} as unknown as Record<string, VueComponent>
 
 const dock = ref<DockviewApi | null>(null)
 
@@ -72,6 +68,7 @@ onMounted(() => {
   window.addEventListener('ca-open-models', openModels)
   window.addEventListener('ca-open-search', openSearch)
   window.addEventListener('ca-open-explorer', openExplorer)
+  window.addEventListener('ca-open-skills', openSkills)
   window.addEventListener('keydown', onWorkbenchKey)
   window.addEventListener('ca-locale', retitlePanels)
 })
@@ -82,6 +79,7 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-models', openModels)
   window.removeEventListener('ca-open-search', openSearch)
   window.removeEventListener('ca-open-explorer', openExplorer)
+  window.removeEventListener('ca-open-skills', openSkills)
   window.removeEventListener('keydown', onWorkbenchKey)
   window.removeEventListener('ca-locale', retitlePanels)
   stopResize()
@@ -105,6 +103,10 @@ function openSearch() {
 
 function openExplorer() {
   openPanel('explorer', 'explorer', panelTitle('explorer'))
+}
+
+function openSkills() {
+  openPanel('skills', 'skills', panelTitle('skills'))
 }
 
 function onWorkbenchKey(e: KeyboardEvent) {
@@ -197,19 +199,6 @@ function onToggleTheme() {
   theme.value = toggleTheme()
 }
 
-function toggleTrajectory() {
-  trajectoryOpen.value = !trajectoryOpen.value
-}
-
-function popoutTrajectory() {
-  openPanel('trajectory', 'trajectory', panelTitle('trajectory'))
-  trajectoryOpen.value = false
-}
-
-function openTrajectoryDock() {
-  openPanel('trajectory', 'trajectory', panelTitle('trajectory'))
-}
-
 function startSidebarResize(e: PointerEvent) {
   if (sidebarCollapsed.value) return
   resizing.value = 'sidebar'
@@ -217,20 +206,6 @@ function startSidebarResize(e: PointerEvent) {
   const startWidth = sidebarWidth.value
   const onMove = (ev: PointerEvent) => {
     sidebarWidth.value = Math.min(420, Math.max(200, startWidth + ev.clientX - startX))
-  }
-  const onUp = () => stopResize(onMove, onUp)
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
-  ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
-}
-
-function startTrajectoryResize(e: PointerEvent) {
-  resizing.value = 'trajectory'
-  const startX = e.clientX
-  const startWidth = trajectoryWidth.value
-  const onMove = (ev: PointerEvent) => {
-    const delta = startX - ev.clientX
-    trajectoryWidth.value = Math.min(560, Math.max(280, startWidth + delta))
   }
   const onUp = () => stopResize(onMove, onUp)
   window.addEventListener('pointermove', onMove)
@@ -260,12 +235,9 @@ const dockThemeClass = computed(() =>
         :style="sidebarStyle"
         :collapsed="sidebarCollapsed"
         :theme="theme"
-        :trajectory-open="trajectoryOpen"
         @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
         @open-panel="openPanel"
         @toggle-theme="onToggleTheme"
-        @toggle-trajectory="toggleTrajectory"
-        @open-trajectory-dock="openTrajectoryDock"
       />
       <div
         v-if="!sidebarCollapsed"
@@ -278,23 +250,10 @@ const dockThemeClass = computed(() =>
           <DockviewVue
             :class="[dockThemeClass, 'dockview-theme-codeagent']"
             :components="components"
-            :default-tab-component="PanelTab"
+            :default-tab-component="(PanelTab as unknown as VueComponent)"
             @ready="onReady"
           />
         </div>
-        <div
-          v-if="trajectoryOpen"
-          class="details-resizer"
-          :title="t('workbench.resizeTrajectory')"
-          @pointerdown="startTrajectoryResize"
-        />
-        <TrajectoryPanel
-          v-if="trajectoryOpen"
-          mode="sidebar"
-          :style="{ width: `${trajectoryWidth}px`, flexShrink: 0 }"
-          @close="trajectoryOpen = false"
-          @popout="popoutTrajectory"
-        />
       </div>
     </div>
     <ConfirmCard
@@ -314,8 +273,6 @@ const dockThemeClass = computed(() =>
       @open-panel="openPanel"
       @toggle-theme="onToggleTheme"
       @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
-      @toggle-trajectory="toggleTrajectory"
-      @open-trajectory-dock="openTrajectoryDock"
     />
   </div>
 </template>
@@ -350,16 +307,14 @@ const dockThemeClass = computed(() =>
 .dock :deep(.dv-tabs-and-actions-container) {
   min-height: 36px;
 }
-.sidebar-resizer,
-.details-resizer {
+.sidebar-resizer {
   width: 5px;
   flex-shrink: 0;
   cursor: col-resize;
   background: transparent;
   position: relative;
 }
-.sidebar-resizer::after,
-.details-resizer::after {
+.sidebar-resizer::after {
   content: '';
   position: absolute;
   top: 0;
@@ -370,9 +325,7 @@ const dockThemeClass = computed(() =>
   transition: background 0.15s ease, width 0.15s ease, left 0.15s ease;
 }
 .sidebar-resizer:hover::after,
-.details-resizer:hover::after,
-.workbench.resizing .sidebar-resizer::after,
-.workbench.resizing .details-resizer::after {
+.workbench.resizing .sidebar-resizer::after {
   left: 1px;
   width: 3px;
   background: color-mix(in srgb, var(--primary) 55%, var(--border));

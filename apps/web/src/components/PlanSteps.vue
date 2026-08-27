@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AppIcon from '@/components/AppIcon.vue'
@@ -34,7 +34,6 @@ function detailHtml(detail: string) {
   return DOMPurify.sanitize(marked.parse(detail, { breaks: true }) as string)
 }
 
-const doneCount = computed(() => 0)
 </script>
 
 <template>

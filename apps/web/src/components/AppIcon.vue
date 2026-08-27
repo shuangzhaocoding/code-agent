@@ -9,6 +9,7 @@ export type AppIconName =
   | 'sun'
   | 'moon'
   | 'plus'
+  | 'minus'
   | 'logout'
   | 'inbox'
   | 'menu'
@@ -38,6 +39,7 @@ export type AppIconName =
   | 'close-saved'
   | 'rocket'
   | 'clock'
+  | 'history'
   | 'download'
   | 'panel-left'
   | 'panel-right'
@@ -103,6 +105,7 @@ const paths: Record<string, string[]> = {
   sun: ['M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z', 'M12 2.5v2', 'M12 19.5v2', 'M4.5 4.5l1.4 1.4', 'M18.1 18.1l1.4 1.4', 'M2.5 12h2', 'M19.5 12h2', 'M4.5 19.5l1.4-1.4', 'M18.1 5.9l1.4-1.4'],
   moon: ['M18 14.5A7 7 0 0 1 9.5 5 7 7 0 1 0 18 14.5Z'],
   plus: ['M12 5.5v13', 'M5.5 12h13'],
+  minus: ['M5.5 12h13'],
   logout: ['M10 7.5V6a1 1 0 0 1 1-1h7.5a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H11a1 1 0 0 1-1-1v-1.5', 'M4.5 12H14', 'M11.5 8.5 15 12l-3.5 3.5'],
   inbox: ['M4 6.5h16v11H4v-11Z', 'M4 11h4.5L10 14h4l1.5-3H20'],
   menu: ['M5 7.5h14', 'M5 12h14', 'M5 16.5h14'],
@@ -195,6 +198,11 @@ const paths: Record<string, string[]> = {
     'M9 12a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z',
   ],
   clock: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M12 6v6l4 2'],
+  history: [
+    'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8',
+    'M3 3v5h5',
+    'M12 7v5l4 2',
+  ],
   download: [
     'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',
     'M7 10l5 5 5-5',

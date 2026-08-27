@@ -1,15 +1,27 @@
 server:
   host: 127.0.0.1
-  port: 8000
+  port: 4060
+  # Vite dev server port (development only); marked protected alongside API port.
+  dev_ui_port: 4061
+  # Production: directory with built frontend (index.html). "auto" = apps/web/dist if present.
+  static_dir: auto
   cors_origins:
-    - http://127.0.0.1:5173
-    - http://localhost:5173
+    - http://127.0.0.1:4061
+    - http://localhost:4061
+    - http://127.0.0.1:4060
+    - http://localhost:4060
+
+ports:
+  protected: []
 
 paths:
   data_dir: ~/.code-agent/data
   user_config: ~/.code-agent/config.yaml
   user_plugins: ~/.code-agent/plugins
   user_skills: ~/.code-agent/skills
+
+uploads:
+  dir: uploads
 
 agent:
   max_steps: 80

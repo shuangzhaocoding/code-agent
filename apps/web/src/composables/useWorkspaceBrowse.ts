@@ -16,7 +16,7 @@ function errMessage(err: unknown) {
   return raw
 }
 
-export function useWorkspaceBrowse(initial = '~') {
+export function useWorkspaceBrowse(_initial = '~') {
   const browsing = ref<BrowseResult | null>(null)
   const path = ref('')
   const error = ref('')

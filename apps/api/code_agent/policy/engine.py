@@ -10,6 +10,10 @@ def is_command_blocked(command: str) -> bool:
     for item in settings.get("policy.command_blacklist") or []:
         if item.lower() in text:
             return True
+    from code_agent.ports.protected import command_targets_protected_port
+
+    if command_targets_protected_port(command) is not None:
+        return True
     return False
 
 

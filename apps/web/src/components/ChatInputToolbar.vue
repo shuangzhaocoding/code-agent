@@ -6,7 +6,7 @@ import { api } from '@/api/http'
 import ToolbarSelect, { type ToolbarSelectOption } from '@/components/ToolbarSelect.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { type ThinkingLevel } from '@/types/thinking'
-import type { LlmModel } from '@/types/llm'
+import type { LlmModel, LlmProvider, ThinkingOption } from '@/types/llm'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -72,8 +72,8 @@ function isAvailable(model: LlmModel) {
 }
 
 const allModels = computed(() =>
-  store.providers.flatMap((provider) =>
-    (provider.models || []).map((model) => ({ provider, model })),
+  store.providers.flatMap((provider: LlmProvider) =>
+    (provider.models || []).map((model: LlmModel) => ({ provider, model })),
   ),
 )
 
@@ -114,7 +114,7 @@ const thinkingOptions = computed(() => {
   const spec = model?.capabilities?.thinking
   if (!spec?.supported) return []
   const raw = spec.levels?.length ? spec.levels : ['off', 'low', 'medium', 'high']
-  return raw.map((item) => {
+  return raw.map((item: string | ThinkingOption) => {
     const value = typeof item === 'string' ? item : item.value
     const meta = thinkingLabels.value[value] || { label: value, description: '' }
     return {
@@ -139,7 +139,7 @@ const canTuneParams = computed(() => Boolean(thinkingOptions.value.length || tem
 
 const thinkingLabel = computed(() => {
   if (!thinkingOptions.value.length) return ''
-  const current = thinkingOptions.value.find((item) => item.value === store.thinkingLevel)
+  const current = thinkingOptions.value.find((item: { value: string; label: string }) => item.value === store.thinkingLevel)
   return current?.label || t('thinking.fallback')
 })
 

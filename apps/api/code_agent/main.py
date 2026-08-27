@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from tortoise.contrib.fastapi import RegisterTortoise
 
 from code_agent.config import settings
@@ -68,6 +70,9 @@ async def lifespan(app: FastAPI):
         await apply_plugin_states()
         await upgrade_llm_schema()
         await _seed_llm_from_env()
+        static_dir = settings.resolve_static_dir()
+        if static_dir:
+            print(f"Serving UI static files from {static_dir}")
         print(f"Code Agent API on {settings.get('server.host')}:{settings.get('server.port')}")
         print("Default bind is localhost. Do not expose an unauthenticated instance to the internet.")
         yield
@@ -75,7 +80,10 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Code Agent", version="0.1.0", lifespan=lifespan)
-    origins = settings.get("server.cors_origins") or ["http://127.0.0.1:5173"]
+    origins = settings.get("server.cors_origins") or [
+        "http://127.0.0.1:4061",
+        "http://localhost:4061",
+    ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -98,7 +106,38 @@ def create_app() -> FastAPI:
     async def health():
         return {"ok": True, "name": "Code Agent"}
 
+    _mount_static_ui(app)
+
     return app
+
+
+def _mount_static_ui(app: FastAPI) -> None:
+    static_dir = settings.resolve_static_dir()
+    if not static_dir:
+        return
+
+    assets_dir = static_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="ui-assets")
+
+    index_file = static_dir / "index.html"
+
+    @app.get("/", include_in_schema=False)
+    async def ui_index():
+        if index_file.is_file():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="UI not built")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def ui_spa(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        target = static_dir / full_path
+        if full_path and target.is_file():
+            return FileResponse(target)
+        if index_file.is_file():
+            return FileResponse(index_file)
+        raise HTTPException(status_code=404, detail="UI not built")
 
 
 app = create_app()

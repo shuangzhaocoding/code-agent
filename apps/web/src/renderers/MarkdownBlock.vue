@@ -6,9 +6,11 @@ import type { Block } from '@/protocol/applyEvent'
 import { useAppStore } from '@/stores/app'
 import { extractPlanSteps } from '@/utils/parsePlan'
 import PlanSteps from '@/components/PlanSteps.vue'
+import { openImageLightbox } from '@/composables/useImageLightbox'
 
 const props = defineProps<{ block: Block }>()
 const store = useAppStore()
+const mdRoot = ref<HTMLElement | null>(null)
 
 const html = ref('')
 const beforeHtml = ref('')
@@ -95,10 +97,26 @@ watch(
 )
 
 onBeforeUnmount(clearSchedulers)
+
+function onMdClick(e: MouseEvent) {
+  const target = e.target
+  if (!(target instanceof HTMLImageElement)) return
+  const root = mdRoot.value
+  if (!root) return
+  e.preventDefault()
+  const imgs = Array.from(root.querySelectorAll('img'))
+  const items = imgs.map((img) => ({
+    src: img.currentSrc || img.src,
+    alt: img.alt || '',
+    title: img.alt || img.title || '',
+  }))
+  const index = imgs.indexOf(target)
+  openImageLightbox(items, index >= 0 ? index : 0)
+}
 </script>
 
 <template>
-  <div class="md">
+  <div ref="mdRoot" class="md" @click="onMdClick">
     <div v-if="beforeHtml" class="markdown-body" v-html="beforeHtml" />
     <PlanSteps v-if="plan?.steps.length" :steps="plan.steps" />
     <div v-if="afterHtml" class="markdown-body" v-html="afterHtml" />
@@ -120,5 +138,10 @@ onBeforeUnmount(clearSchedulers)
 }
 .md :deep(.markdown-body p:last-child) {
   margin-bottom: 0;
+}
+.md :deep(.markdown-body img) {
+  cursor: zoom-in;
+  max-width: 100%;
+  border-radius: 8px;
 }
 </style>

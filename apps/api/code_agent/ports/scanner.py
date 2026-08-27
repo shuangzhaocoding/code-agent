@@ -219,9 +219,14 @@ def kill_port_process(port: int, *, allow_self: bool = False) -> dict:
     import signal
     import time
 
+    from code_agent.ports.protected import protected_ports
+
     entry = get_port_entry(port)
     if not entry:
         raise ValueError("port_not_listening")
+
+    if port in protected_ports() and not allow_self:
+        raise ValueError("port_protected")
 
     pid = entry.get("pid")
     if not isinstance(pid, int) or pid <= 1:

@@ -18,6 +18,10 @@ export const renderers: Record<string, Component> = {
 
 const fallback = defineAsyncComponent(() => import('./GenericBlock.vue'))
 
+const hiddenBlocks = new Set(['user.references'])
+const hidden = defineAsyncComponent(() => import('./HiddenBlock.vue'))
+
 export function rendererFor(type: string): Component {
+  if (hiddenBlocks.has(type)) return hidden
   return renderers[type] || fallback
 }

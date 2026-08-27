@@ -373,7 +373,7 @@ async function testProvider(id: string) {
       for (const line of lines) {
         if (!line.trim()) continue
         const ev = JSON.parse(line) as Record<string, unknown>
-        const state = probe.value
+        const state: NonNullable<typeof probe.value> = probe.value
         if (!state) continue
         if (ev.type === 'start') {
           probe.value = { ...state, total: Number(ev.total || 0) }
@@ -413,8 +413,9 @@ async function testProvider(id: string) {
 }
 
 function availabilityLabel(m: LlmModel, providerId?: string) {
-  const live = probe.value?.providerId === providerId ? probe.value.byId[m.id] : undefined
-  if (probe.value?.providerId === providerId && !live) {
+  const p = probe.value
+  const live = p && p.providerId === providerId ? p.byId[m.id] : undefined
+  if (p && p.providerId === providerId && !live) {
     return { text: '检测中', kind: 'checking', title: '正在探测…' }
   }
   if (live) {

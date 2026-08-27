@@ -11,7 +11,9 @@
 
 ## 启动
 
-两个终端：
+### 开发（两个终端）
+
+默认端口：**API 4060**、**Vite 4061**（均受保护，Agent 无法结束）。
 
 ```bash
 # API
@@ -19,7 +21,7 @@ cd apps/api
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-python -m uvicorn code_agent.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn code_agent.main:app --reload --host 127.0.0.1 --port 4060
 
 # Web
 cd apps/web
@@ -27,7 +29,36 @@ npm install
 npm run dev
 ```
 
-浏览器打开 http://127.0.0.1:5173 ，选择一个本地目录作为工作区。
+或使用 Makefile：`make api` / `make web`。
+
+浏览器打开 http://127.0.0.1:4061 ，选择一个本地目录作为工作区。
+
+端口可通过环境变量或 `config/default.yaml` / `~/.code-agent/config.yaml` 修改：
+
+```yaml
+server:
+  port: 4060
+  dev_ui_port: 4061
+ports:
+  protected: []   # 额外受保护端口
+```
+
+环境变量：`CODE_AGENT_PORT`、`CODE_AGENT_DEV_UI_PORT`。
+
+### 生产（单进程 + 静态前端）
+
+构建前端并由 API 同端口托管（无需 Vite dev server）：
+
+```bash
+cd apps/web && npm run build    # 输出到 apps/web/dist
+cd apps/api && python -m uvicorn code_agent.main:app --host 127.0.0.1 --port 4060
+```
+
+浏览器打开 http://127.0.0.1:4060 即可（API 在 `/api/*`，UI 为静态文件）。
+
+`server.static_dir` 默认为 `auto`：若存在 `apps/web/dist` 则自动挂载。设为 `false` 可仅跑 API；也可指定绝对路径。
+
+或使用：`make build && make prod`
 
 可选环境变量（启动时若库中还没有模型，会自动写入一条 Provider）：
 

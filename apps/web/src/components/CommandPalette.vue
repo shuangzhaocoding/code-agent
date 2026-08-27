@@ -21,8 +21,6 @@ const emit = defineEmits<{
   openPanel: [id: string, component: string, title: string]
   toggleTheme: []
   toggleSidebar: []
-  toggleTrajectory: []
-  openTrajectoryDock: []
 }>()
 
 const { t } = useI18n()
@@ -46,6 +44,7 @@ const staticCommands = computed<PaletteItem[]>(() => [
     },
   },
   { id: 'agent', title: t('commandPalette.openAgent'), icon: 'atom', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'agent', 'agent', t('panels.agent')) },
+  { id: 'trajectory', title: t('commandPalette.openTrajectory'), icon: 'clock', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'trajectory', 'trajectory', t('panels.trajectory')) },
   { id: 'explorer', title: t('commandPalette.openExplorer'), icon: 'folder', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'explorer', 'explorer', t('panels.explorer')) },
   { id: 'search', title: t('commandPalette.openSearch'), icon: 'search', group: t('commandPalette.groupPanel'), keywords: 'find replace grep', run: () => store.openSearch() },
   { id: 'editor', title: t('commandPalette.openEditor'), icon: 'file', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'editor', 'editor', t('panels.editor')) },
@@ -58,8 +57,6 @@ const staticCommands = computed<PaletteItem[]>(() => [
   { id: 'settings', title: t('commandPalette.openSettings'), icon: 'sliders', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'settings', 'settings', t('panels.settings')) },
   { id: 'workspace', title: t('commandPalette.openWorkspace'), icon: 'home', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'workspace', 'workspace', t('panels.workspace')) },
   { id: 'toggle-sidebar', title: t('commandPalette.toggleSidebar'), icon: 'panel-left', group: t('commandPalette.groupLayout'), run: () => emit('toggleSidebar') },
-  { id: 'toggle-trajectory', title: t('commandPalette.toggleTrajectory'), icon: 'clock', group: t('commandPalette.groupLayout'), run: () => emit('toggleTrajectory') },
-  { id: 'popout-trajectory', title: t('commandPalette.popoutTrajectory'), icon: 'clock', group: t('commandPalette.groupLayout'), keywords: 'dock', run: () => emit('openTrajectoryDock') },
   { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
 ])
 

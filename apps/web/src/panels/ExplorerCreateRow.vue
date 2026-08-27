@@ -21,7 +21,8 @@ let done = false
 function finish(ok: boolean) {
   if (done) return
   done = true
-  emit(ok ? 'commit' : 'cancel')
+  if (ok) emit('commit')
+  else emit('cancel')
 }
 
 onMounted(() => {

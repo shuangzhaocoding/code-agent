@@ -4,7 +4,7 @@ import TrajectoryPanel from '@/panels/TrajectoryPanel.vue'
 
 <template>
   <div class="panel-shell trajectory-dock">
-    <TrajectoryPanel mode="dock" />
+    <TrajectoryPanel />
   </div>
 </template>
 

@@ -5,6 +5,8 @@ import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
 import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
+import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
+
 const emit = defineEmits<{ close: [] }>()
 const store = useAppStore()
 const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
@@ -30,7 +32,7 @@ async function openRecent(id: string) {
   emit('close')
 }
 
-const recents = computed(() => store.workspaces)
+const recents = computed(() => store.recentWorkspaces)
 </script>
 
 <template>
@@ -82,8 +84,11 @@ const recents = computed(() => store.workspaces)
             :class="{ current: ws.id === store.workspaceId }"
             @click="openRecent(ws.id)"
           >
-            <strong>{{ ws.name }}</strong>
-            <span>{{ ws.root_path }}</span>
+            <div class="recent-head">
+              <strong>{{ ws.name }}</strong>
+              <time v-if="ws.last_opened_at" class="recent-time">{{ formatWorkspaceOpenedAt(ws.last_opened_at) }}</time>
+            </div>
+            <span class="recent-path">{{ ws.root_path }}</span>
             <em class="status-pill">{{ ws.id === store.workspaceId ? '当前' : '本地' }}</em>
           </button>
         </div>
@@ -153,6 +158,25 @@ header .page-panel__title { margin: 0; }
 }
 .recents .page-panel__title { margin-bottom: 12px; }
 .workspace-card.current { border-color: var(--primary); }
+.recent-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+.recent-head strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.recent-time {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.recent-path,
 .workspace-card span {
   font-family: var(--mono);
   font-size: 12px;

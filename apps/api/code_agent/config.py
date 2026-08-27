@@ -47,7 +47,21 @@ def _apply_env(cfg: dict[str, Any]) -> dict[str, Any]:
     shell = os.environ.get("CODE_AGENT_SHELL")
     if shell:
         cfg.setdefault("terminal", {})["shell"] = shell
+    dev_ui = os.environ.get("CODE_AGENT_DEV_UI_PORT")
+    if dev_ui:
+        cfg.setdefault("server", {})["dev_ui_port"] = int(dev_ui)
+    uploads_dir = os.environ.get("CODE_AGENT_UPLOADS_DIR")
+    if uploads_dir:
+        cfg.setdefault("uploads", {})["dir"] = uploads_dir
     return cfg
+
+
+def _resolve_uploads_dir(cfg: dict[str, Any]) -> Path:
+    raw = cfg.get("uploads", {}).get("dir", "uploads")
+    path = Path(str(raw)).expanduser()
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    return path
 
 
 class Settings:
@@ -65,6 +79,8 @@ class Settings:
         self._cfg = cfg
         self.data_dir = Path(cfg["paths"]["data_dir"]).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.uploads_dir = _resolve_uploads_dir(cfg)
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir.parent / "plugins").mkdir(parents=True, exist_ok=True)
         (self.data_dir.parent / "skills").mkdir(parents=True, exist_ok=True)
 
@@ -86,6 +102,19 @@ class Settings:
     @property
     def repo_root(self) -> Path:
         return REPO_ROOT
+
+    def resolve_static_dir(self) -> Path | None:
+        raw = self.get("server.static_dir", "auto")
+        token = "auto" if raw is None else str(raw).strip().lower()
+        if token in {"false", "off", "none", "0"}:
+            return None
+        if token in {"auto", "true", "on", "1", ""}:
+            dist = REPO_ROOT / "apps" / "web" / "dist"
+            return dist if dist.is_dir() else None
+        path = Path(str(raw)).expanduser()
+        if not path.is_absolute():
+            path = REPO_ROOT / path
+        return path if path.is_dir() else None
 
 
 settings = Settings()

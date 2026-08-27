@@ -163,13 +163,7 @@ _PREVIEW_PATCH = """<script data-ca-preview-ws>
 </script>"""
 
 
-def _own_ports() -> set[int]:
-    ports: set[int] = set()
-    try:
-        ports.add(int(settings.get("server.port") or 8000))
-    except (TypeError, ValueError):
-        ports.add(8000)
-    return ports
+from code_agent.ports.protected import protected_ports as _own_ports
 
 
 @router.get("/api/ports")

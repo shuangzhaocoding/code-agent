@@ -15,7 +15,7 @@ const host = ref<HTMLDivElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
 const mdPreview = ref(false)
 /** HTML: true = iframe preview, false = Monaco source */
-const htmlPreview = ref(true)
+const htmlPreview = ref(false)
 const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
@@ -276,6 +276,7 @@ onMounted(async () => {
     theme: 'ca-editor',
     ...editorOptions,
   })
+  host.value.addEventListener('copy', onEditorCopy)
   showPath(store.activePath)
   window.addEventListener('ca-theme', onTheme as EventListener)
   window.addEventListener('keydown', onKey)
@@ -304,6 +305,21 @@ function onReload(e: Event) {
   }
 }
 
+function onEditorCopy() {
+  if (!editor || !store.activePath) return
+  const sel = editor.getSelection()
+  const model = editor.getModel()
+  if (!sel || !model || sel.isEmpty()) return
+  const text = model.getValueInRange(sel)
+  if (!text) return
+  store.setEditorCopyContext({
+    path: store.activePath,
+    text,
+    startLine: sel.startLineNumber,
+    endLine: sel.endLineNumber,
+  })
+}
+
 watch(
   () => [store.activePath, review.value?.blockId, review.value?.status, htmlPreview.value] as const,
   async () => {
@@ -325,10 +341,10 @@ watch(
   () => store.activePath,
   (path, prev) => {
     if (!path || !prev || !isMarkdownFile(path) || !isMarkdownFile(prev)) mdPreview.value = false
-    // Reset HTML to preview when switching between different HTML files / leaving HTML
+    // Reset HTML to source when switching between different HTML files / leaving HTML
     const nextHtml = path ? /\.(html?|HTML?)$/.test(path) : false
     const prevHtml = prev ? /\.(html?|HTML?)$/.test(prev) : false
-    if (!nextHtml || !prevHtml || path !== prev) htmlPreview.value = true
+    if (!nextHtml || !prevHtml || path !== prev) htmlPreview.value = false
   },
 )
 
@@ -353,6 +369,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  host.value?.removeEventListener('copy', onEditorCopy)
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('keydown', onKey)
   window.removeEventListener('ca-file-reload', onReload as EventListener)

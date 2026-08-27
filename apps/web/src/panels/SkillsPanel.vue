@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
@@ -27,6 +27,8 @@ const expanded = ref<string | null>(null)
 const detail = ref<SkillDetail | null>(null)
 const detailLoading = ref(false)
 const copied = ref<string | null>(null)
+const panelBody = ref<HTMLElement | null>(null)
+let lastHandledFocusSeq = -1
 
 const SOURCE_META: Record<string, { label: string; accent: string }> = {
   bundled: { label: '内置', accent: '#4f6bff' },
@@ -81,13 +83,9 @@ async function refresh() {
   }
 }
 
-async function toggleDetail(skill: SkillItem) {
+async function ensureDetail(skill: SkillItem) {
   const key = sKey(skill)
-  if (expanded.value === key) {
-    expanded.value = null
-    detail.value = null
-    return
-  }
+  if (expanded.value === key && detail.value?.name === skill.name && !detailLoading.value) return
   expanded.value = key
   detail.value = null
   detailLoading.value = true
@@ -99,6 +97,16 @@ async function toggleDetail(skill: SkillItem) {
   } finally {
     detailLoading.value = false
   }
+}
+
+async function toggleDetail(skill: SkillItem) {
+  const key = sKey(skill)
+  if (expanded.value === key) {
+    expanded.value = null
+    detail.value = null
+    return
+  }
+  await ensureDetail(skill)
 }
 
 async function copyPath(path: string) {
@@ -113,14 +121,49 @@ async function copyPath(path: string) {
   }
 }
 
+async function focusSkillByName(name: string) {
+  if (!skills.value.length) await refresh()
+  const skill = skills.value.find((s) => s.name === name)
+  if (!skill) {
+    query.value = name
+    return false
+  }
+  query.value = ''
+  sourceFilter.value = 'all'
+  await nextTick()
+  await ensureDetail(skill)
+  await nextTick()
+  panelBody.value
+    ?.querySelector(`[data-skill-name="${CSS.escape(name)}"]`)
+    ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  return true
+}
+
+async function handleSkillFocusIntent() {
+  const intent = store.skillFocusIntent
+  if (!intent.seq || intent.seq <= lastHandledFocusSeq) return
+  const name = intent.name?.trim()
+  if (!name) return
+  const focused = await focusSkillByName(name)
+  if (focused) lastHandledFocusSeq = intent.seq
+}
+
 onMounted(() => {
   void refresh()
 })
+
+watch(
+  () => store.skillFocusIntent.seq,
+  () => {
+    void handleSkillFocusIntent()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
   <div class="panel-shell skills-panel">
-    <div class="panel-body">
+    <div ref="panelBody" class="panel-body">
       <header class="page-head">
         <div>
           <h1 class="page-title">Skill</h1>
@@ -182,6 +225,7 @@ onMounted(() => {
           :key="sKey(s)"
           class="skill-card"
           :class="{ open: expanded === sKey(s), invalid: !!s.invalid_reason }"
+          :data-skill-name="s.name"
         >
           <button type="button" class="skill-main" @click="toggleDetail(s)">
             <span class="skill-icon" :style="{ '--accent': sourceMeta(s.source).accent }">

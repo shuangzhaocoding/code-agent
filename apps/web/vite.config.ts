@@ -2,6 +2,9 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
+const apiPort = Number(process.env.CODE_AGENT_PORT || 4060)
+const devPort = Number(process.env.CODE_AGENT_DEV_UI_PORT || 4061)
+
 export default defineConfig({
   plugins: [vue()],
   resolve: {
@@ -11,10 +14,11 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 5173,
+    port: devPort,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
         ws: true,
       },

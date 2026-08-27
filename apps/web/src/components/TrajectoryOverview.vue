@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import type { TimelineSpan, TrajectoryKind } from '@/utils/trajectory'
 
 const props = defineProps<{
@@ -8,8 +8,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ select: [entryId: string] }>()
-
-const track = ref<HTMLElement | null>(null)
 
 const turnMarkers = computed(() => {
   const turns = new Map<number, number>()
@@ -34,7 +32,7 @@ function onSelect(span: TimelineSpan) {
       <span class="timeline-label">时间轴</span>
       <span class="timeline-meta">{{ spans.length }} 事件</span>
     </div>
-    <div ref="track" class="timeline-track" role="list" aria-label="运行时间轴">
+    <div class="timeline-track" role="list" aria-label="运行时间轴">
       <div
         v-for="[turn, left] in turnMarkers"
         :key="turn"

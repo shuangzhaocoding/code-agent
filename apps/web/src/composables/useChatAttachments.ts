@@ -10,10 +10,12 @@ function createAttachmentId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export function useChatAttachments() {
-  const attachments = ref<Attachment[]>([])
+type ChatAttachment = Attachment & { mimeType?: string }
 
-  function patchAttachment(id: string, patch: Partial<Attachment>) {
+export function useChatAttachments() {
+  const attachments = ref<ChatAttachment[]>([])
+
+  function patchAttachment(id: string, patch: Partial<ChatAttachment>) {
     attachments.value = attachments.value.map((item) =>
       item.id === id ? { ...item, ...patch } : item,
     )
@@ -75,7 +77,20 @@ export function useChatAttachments() {
     attachments.value = []
   }
 
-  function getReadyAttachments(): Attachment[] {
+  function restoreAttachments(files: PendingFilePayload[]) {
+    attachments.value = files.map((file) => ({
+      id: createAttachmentId(),
+      name: file.name || 'file',
+      url: file.url,
+      size: file.size,
+      mimeType: file.type,
+      fileType: detectAttachmentFileTypeFromMeta(file.name || '', file.type || ''),
+      status: 'success' as const,
+      message: '',
+    }))
+  }
+
+  function getReadyAttachments(): ChatAttachment[] {
     return attachments.value.filter((item) => item.status === 'success')
   }
 
@@ -88,7 +103,7 @@ export function useChatAttachments() {
       name: item.name || 'file',
       url: String(item.url || ''),
       size: Number(item.size || 0),
-      type: String((item as Attachment & { mimeType?: string }).mimeType || 'application/octet-stream'),
+      type: String(item.mimeType || 'application/octet-stream'),
     }))
   }
 
@@ -98,6 +113,7 @@ export function useChatAttachments() {
     removeAttachment,
     retryUpload,
     clearAttachments,
+    restoreAttachments,
     getReadyAttachments,
     hasUploadingAttachments,
     getPendingFiles,

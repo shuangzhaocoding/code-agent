@@ -7,7 +7,12 @@ import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 import { t } from '@/i18n'
 
-export type Workspace = { id: string; name: string; root_path: string }
+export type Workspace = {
+  id: string
+  name: string
+  root_path: string
+  last_opened_at?: string | null
+}
 export type Conversation = {
   id: string
   title: string
@@ -46,6 +51,7 @@ export type QueuedSend = {
   mode: 'ask' | 'agent' | 'plan'
   modelId: string | null
   thinkingLevel: ThinkingLevel
+  skillName?: string | null
 }
 
 const SEND_QUEUE_KEY = 'ca.send_queue'
@@ -99,6 +105,12 @@ export const useAppStore = defineStore('app', () => {
   const openFiles = ref<OpenFile[]>([])
   const activePath = ref<string | null>(null)
   const openFile = computed(() => openFiles.value.find((f) => f.path === activePath.value) || null)
+  const editorCopyContext = ref<{
+    path: string
+    text: string
+    startLine: number
+    endLine: number
+  } | null>(null)
   const fileNotice = ref<string | null>(null)
   const pendingReveal = ref<{
     path: string
@@ -121,6 +133,20 @@ export const useAppStore = defineStore('app', () => {
   function openExplorerPanel() {
     activity.value = 'explorer'
     window.dispatchEvent(new CustomEvent('ca-open-explorer'))
+  }
+
+  const skillFocusIntent = ref<{ seq: number; name?: string }>({ seq: 0 })
+
+  function openSkill(name?: string) {
+    const skillName = name?.trim()
+    activity.value = 'skills'
+    window.dispatchEvent(new CustomEvent('ca-open-skills'))
+    queueMicrotask(() => {
+      skillFocusIntent.value = {
+        seq: skillFocusIntent.value.seq + 1,
+        ...(skillName ? { name: skillName } : {}),
+      }
+    })
   }
 
   const reviews = ref<Record<string, FileReview>>({})
@@ -152,6 +178,7 @@ export const useAppStore = defineStore('app', () => {
   let heldEvents: StreamEnvelope[] = []
   const providers = ref<any[]>([])
   const skills = ref<any[]>([])
+  const conversationSkills = ref<Record<string, string>>({})
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
   const activity = ref('agent')
   const pendingModelProbe = ref(false)
@@ -162,6 +189,14 @@ export const useAppStore = defineStore('app', () => {
   const pendingTreePaths = new Set<string>()
 
   const workspace = computed(() => workspaces.value.find((w) => w.id === workspaceId.value) || null)
+
+  const recentWorkspaces = computed(() =>
+    [...workspaces.value].sort((a, b) => {
+      const ta = a.last_opened_at ? Date.parse(a.last_opened_at) : 0
+      const tb = b.last_opened_at ? Date.parse(b.last_opened_at) : 0
+      return tb - ta
+    }),
+  )
 
   async function loadWorkspaces() {
     workspaces.value = await api('/api/workspaces')
@@ -237,6 +272,7 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function selectWorkspace(id: string) {
+    await api(`/api/workspaces/${id}/open`, { method: 'POST' })
     workspaceId.value = id
     localStorage.setItem('ca.workspace', id)
     const savedExpanded = readExpanded(id)
@@ -259,6 +295,7 @@ export const useAppStore = defineStore('app', () => {
       await newChat()
     }
     openExplorerPanel()
+    await loadWorkspaces()
   }
 
   async function loadTree(path = '') {
@@ -390,10 +427,6 @@ export const useAppStore = defineStore('app', () => {
     if (code.includes('D')) return 'deleted'
     if (code.includes('M')) return 'modified'
     return 'changed'
-  }
-
-  function gitMarkLabel(code: string) {
-    return t(`tree.${gitMarkKey(code)}`)
   }
 
   function treeTitle(key: string) {
@@ -673,21 +706,16 @@ export const useAppStore = defineStore('app', () => {
     window.dispatchEvent(new Event('ca-focus-editor'))
   }
 
-  function parseApiError(raw: string): string {
-    try {
-      const parsed = JSON.parse(raw) as { detail?: { message?: string; code?: string } | string }
-      if (typeof parsed.detail === 'string') return parsed.detail
-      if (parsed.detail && typeof parsed.detail === 'object') {
-        return parsed.detail.message || parsed.detail.code || raw
-      }
-    } catch {
-      /* ignore */
-    }
-    return raw
-  }
-
   function clearFileNotice() {
     fileNotice.value = null
+  }
+
+  function setEditorCopyContext(ctx: { path: string; text: string; startLine: number; endLine: number }) {
+    editorCopyContext.value = ctx
+  }
+
+  function clearEditorCopyContext() {
+    editorCopyContext.value = null
   }
 
   async function openAgentFile(path: string) {
@@ -1219,6 +1247,21 @@ export const useAppStore = defineStore('app', () => {
     return sendQueue.value.filter((item) => item.conversationId === cid)
   }
 
+  function conversationSkillName(cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return null
+    return conversationSkills.value[id] ?? null
+  }
+
+  function setConversationSkill(name: string | null, cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return
+    const next = { ...conversationSkills.value }
+    if (name) next[id] = name
+    else delete next[id]
+    conversationSkills.value = next
+  }
+
   function enqueueSend(
     text: string,
     references: { type: string; path: string }[] = [],
@@ -1236,6 +1279,7 @@ export const useAppStore = defineStore('app', () => {
         mode: mode.value,
         modelId: modelId.value,
         thinkingLevel: thinkingLevel.value,
+        skillName: conversationSkillName(),
       },
     ]
   }
@@ -1265,6 +1309,7 @@ export const useAppStore = defineStore('app', () => {
       mode?: 'ask' | 'agent' | 'plan'
       modelId?: string | null
       thinkingLevel?: ThinkingLevel
+      skillName?: string | null
     },
   ) {
     if (!conversationId.value) await newChat()
@@ -1272,6 +1317,7 @@ export const useAppStore = defineStore('app', () => {
     const sendMode = opts?.mode ?? mode.value
     const sendModel = opts?.modelId ?? modelId.value
     const sendThinking = opts?.thinkingLevel ?? thinkingLevel.value
+    const sendSkill = opts?.skillName !== undefined ? opts.skillName : conversationSkillName()
     messages.value = [
       ...messages.value,
       {
@@ -1284,8 +1330,8 @@ export const useAppStore = defineStore('app', () => {
             type: 'user.text',
             text,
             meta: {
-              ...(references.length ? { references } : {}),
               ...(files.length ? { files } : {}),
+              ...(sendSkill ? { skill: { name: sendSkill } } : {}),
             },
             status: 'ok',
           },
@@ -1302,6 +1348,7 @@ export const useAppStore = defineStore('app', () => {
         thinking: sendThinking !== 'off',
         references,
         files,
+        skill_name: sendSkill || undefined,
       }),
     })
     lastEventId.value = null
@@ -1321,6 +1368,7 @@ export const useAppStore = defineStore('app', () => {
         mode: next.mode,
         modelId: next.modelId,
         thinkingLevel: next.thinkingLevel,
+        skillName: next.skillName ?? null,
       })
     } catch (err) {
       sendQueue.value = [next, ...sendQueue.value]
@@ -1377,6 +1425,7 @@ export const useAppStore = defineStore('app', () => {
         mode: item.mode,
         modelId: item.modelId,
         thinkingLevel: item.thinkingLevel,
+        skillName: item.skillName ?? null,
       })
     } catch (err) {
       sendQueue.value = [item, ...sendQueue.value]
@@ -1509,6 +1558,7 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     workspaces,
+    recentWorkspaces,
     workspaceId,
     workspace,
     conversations,
@@ -1528,12 +1578,17 @@ export const useAppStore = defineStore('app', () => {
     openFiles,
     activePath,
     openFile,
+    editorCopyContext,
+    setEditorCopyContext,
+    clearEditorCopyContext,
     fileNotice,
     clearFileNotice,
     pendingReveal,
     searchIntent,
     openSearch,
     openExplorerPanel,
+    skillFocusIntent,
+    openSkill,
     reviews,
     pendingReview,
     pendingReviews,
@@ -1545,6 +1600,7 @@ export const useAppStore = defineStore('app', () => {
     decideApproval,
     providers,
     skills,
+    conversationSkills,
     settings,
     activity,
     pendingModelProbe,
@@ -1598,6 +1654,8 @@ export const useAppStore = defineStore('app', () => {
     isRunBusy,
     loadProviders,
     loadSkills,
+    conversationSkillName,
+    setConversationSkill,
     loadSettings,
     saveSettings,
   }

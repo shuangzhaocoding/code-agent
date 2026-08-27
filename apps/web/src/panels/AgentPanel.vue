@@ -2,24 +2,48 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { TrAttachments, TrSender, UploadButton, VoiceButton } from '@opentiny/tiny-robot'
+import type { Attachment } from '@opentiny/tiny-robot'
 import { useAppStore } from '@/stores/app'
 import { rendererFor } from '@/renderers'
 import type { Block } from '@/protocol/applyEvent'
 import ChatInputToolbar from '@/components/ChatInputToolbar.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import ConversationSwitcher from '@/components/ConversationSwitcher.vue'
+import UserMessageHistoryMenu from '@/components/UserMessageHistoryMenu.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import { useChatAttachments } from '@/composables/useChatAttachments'
+import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
 import { paletteShortcutLabel } from '@/utils/relativeTime'
 import {
   attachmentFileMatchers,
+  detectAttachmentFileTypeFromMeta,
   UPLOAD_ACCEPT,
   UPLOAD_MAX_COUNT,
   UPLOAD_MAX_SIZE_MB,
 } from '@/utils/fileTypes'
+import type { LlmModel } from '@/types/llm'
+import type { PendingFilePayload } from '@/types/contextUsage'
+import type { Editor } from '@tiptap/core'
+import { fileMentionExtension, type FileMentionAttrs } from '@/editor/fileMentionExtension'
+import { skillMentionExtension } from '@/editor/skillMentionExtension'
+import {
+  fileNameFromPath,
+  hasInlineMentions,
+  mentionToken,
+  messageHasInlineMentions,
+  messageTextToEditorDoc,
+  normalizeClipboardText,
+  parseMentionSegments,
+  serializeParagraphs,
+  segmentsToInlineNodes,
+  type FileMentionItem,
+  type PasteSegment,
+} from '@/utils/fileMention'
+
+const senderExtensions = [fileMentionExtension, skillMentionExtension]
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -27,8 +51,6 @@ const commandShortcut = paletteShortcutLabel()
 const scroller = ref<HTMLElement | null>(null)
 
 /* ---- message actions ---- */
-const editingMsgId = ref<string | null>(null)  // kept for compat, unused
-const editingText = ref('')
 const copyToast = ref(false)
 let copyToastTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -75,26 +97,53 @@ async function copyMsg(msg: (typeof store.messages)[0]) {
   copyToastTimer = setTimeout(() => { copyToast.value = false }, 2000)
 }
 
+function focusSenderEnd() {
+  const editor = getTipTapEditor()
+  if (editor) {
+    editor.chain().focus('end').run()
+    return
+  }
+  const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
+  el?.focus()
+}
+
+function msgAttachmentFiles(msg: (typeof store.messages)[0]): PendingFilePayload[] {
+  const files: PendingFilePayload[] = []
+  for (const block of msg.blocks) {
+    if (block.type !== 'user.text') continue
+    const meta = block.meta as { files?: PendingFilePayload[] }
+    if (!Array.isArray(meta.files)) continue
+    for (const file of meta.files) {
+      if (file?.url) files.push(file)
+    }
+  }
+  return files
+}
+
+function msgSkillName(msg: (typeof store.messages)[0]): string | null {
+  for (const block of msg.blocks) {
+    if (block.type !== 'user.text') continue
+    const skill = (block.meta as { skill?: { name?: string } } | undefined)?.skill
+    if (skill?.name) return skill.name
+  }
+  return null
+}
+
 function startEdit(msg: (typeof store.messages)[0]) {
-  setSenderDraft(msgPlainText(msg))
+  setSenderDraftFromMessage(msgPlainText(msg))
+  restoreAttachments(msgAttachmentFiles(msg))
+  const skill = msgSkillName(msg)
+  store.setConversationSkill(skill)
   nextTick(() => {
-    const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
-    el?.focus()
+    const editor = getTipTapEditor()
+    if (editor && skill) {
+      removeAllSkillMentions(editor)
+      editor.chain().focus('start').insertSkillMention({ name: skill }).insertContent(' ').run()
+      draft.value = editor.getText()
+    }
+    syncMentionFilesFromEditor()
+    focusSenderEnd()
   })
-}
-
-function cancelEdit() {
-  editingMsgId.value = null
-  editingText.value = ''
-}
-
-async function submitEdit() {
-  const text = editingText.value.trim()
-  if (!text) { cancelEdit(); return }
-  cancelEdit()
-  stick.value = true
-  const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
-  store.send(text, refs, [])
 }
 
 function fmtDuration(msg: (typeof store.messages)[0]): string {
@@ -113,6 +162,82 @@ function fmtTime(iso: string | null | undefined): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function userMessagePreview(msg: (typeof store.messages)[0]) {
+  const text = msgPlainText(msg).replace(/\s+/g, ' ').trim()
+  if (text) return text.length > 56 ? `${text.slice(0, 56)}…` : text
+  const files = msgAttachmentFiles(msg)
+  if (files.some((f) => detectAttachmentFileTypeFromMeta(f.name || '', f.type || '') === 'image')) {
+    return t('chat.historyImage')
+  }
+  if (files.length) return t('chat.historyAttachment')
+  return t('chat.historyEmpty')
+}
+
+type UserHistoryEntry = { id: string; preview: string; time: string }
+
+const userHistoryEntries = computed<UserHistoryEntry[]>(() =>
+  store.messages
+    .filter((m) => m.role === 'user')
+    .map((m) => ({
+      id: m.id,
+      preview: userMessagePreview(m),
+      time: fmtTime(m.created_at),
+    })),
+)
+
+const activeHistoryId = ref<string | null>(null)
+let historyObs: IntersectionObserver | null = null
+
+function scrollToMessage(msgId: string) {
+  pauseFollow()
+  activeHistoryId.value = msgId
+  nextTick(() => {
+    const container = scroller.value
+    const el = document.getElementById(`msg-${msgId}`)
+    if (!container || !el) return
+    locking = true
+    const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 12
+    container.scrollTop = Math.max(0, top)
+    requestAnimationFrame(() => {
+      locking = false
+    })
+  })
+}
+
+function userMessageById(id: string) {
+  return store.messages.find((m) => m.id === id && m.role === 'user') ?? null
+}
+
+function editHistoryMessage(id: string) {
+  const msg = userMessageById(id)
+  if (!msg) return
+  startEdit(msg)
+}
+
+function copyHistoryMessage(id: string) {
+  const msg = userMessageById(id)
+  if (!msg) return
+  void copyMsg(msg)
+}
+
+function setupHistoryObserver() {
+  historyObs?.disconnect()
+  historyObs = null
+  const root = scroller.value
+  if (!root || !userHistoryEntries.value.length) return
+  historyObs = new IntersectionObserver(
+    (entries) => {
+      const hit = entries
+        .filter((entry) => entry.isIntersecting)
+        .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0]
+      const id = hit?.target instanceof HTMLElement ? hit.target.id.replace(/^msg-/, '') : ''
+      if (id) activeHistoryId.value = id
+    },
+    { root, threshold: [0.15, 0.4, 0.7], rootMargin: '-12% 0px -58% 0px' },
+  )
+  root.querySelectorAll('article.msg-wrap.user').forEach((node) => historyObs!.observe(node))
 }
 const timelineInner = ref<HTMLElement | null>(null)
 const sender = ref<{
@@ -139,87 +264,315 @@ function useQuickPrompt(text: string) {
 }
 
 /* ---- @ file mention ---- */
+type MentionItem = FileMentionItem
+type SkillMentionItem = {
+  name: string
+  description: string
+  source: string
+  invalid_reason?: string | null
+}
+
 const mentionOpen = ref(false)
+const mentionTab = ref<'files' | 'skills'>('files')
 const mentionQuery = ref('')
 const mentionDir = ref('')
 const mentionActiveIdx = ref(0)
-// chips: files/dirs selected via @ picker, shown as tags above sender
-const mentionFiles = ref<{ name: string; path: string; is_dir: boolean }[]>([])
+const mentionFiles = ref<MentionItem[]>([])
+
+function resolvePinnedMentionItem(): MentionItem | null {
+  const path = store.activePath
+  if (!path) return null
+  const parent = store.parentPath(path)
+  const inParent = store.childrenOf(parent).find((i) => i.path === path)
+  if (inParent) return inParent
+  const name = path.split('/').filter(Boolean).pop() || path
+  const isFile = store.openFiles.some((f) => f.path === path)
+  return { name, path, is_dir: !isFile }
+}
 
 const mentionItems = computed(() => {
   const dir = mentionDir.value
   const q = mentionQuery.value.toLowerCase()
-  const items = store.childrenOf(dir)
-  return q ? items.filter((i) => i.name.toLowerCase().includes(q)) : items
+  let items = store.childrenOf(dir)
+  if (q) items = items.filter((i) => i.name.toLowerCase().includes(q))
+  if (!dir) {
+    const pinned = resolvePinnedMentionItem()
+    if (pinned && (!q || pinned.name.toLowerCase().includes(q))) {
+      items = [pinned, ...items.filter((i) => i.path !== pinned.path)]
+    }
+  }
+  return items
+})
+
+const mentionSkillItems = computed<SkillMentionItem[]>(() => {
+  const q = mentionQuery.value.toLowerCase()
+  return (store.skills as SkillMentionItem[])
+    .filter((s) => !s.invalid_reason)
+    .filter((s) => {
+      if (!q) return true
+      return `${s.name} ${s.description} ${s.source}`.toLowerCase().includes(q)
+    })
+})
+
+const activeSkillName = computed(() => store.conversationSkillName())
+
+watch(mentionOpen, (open) => {
+  if (open && !store.skills.length) void store.loadSkills()
 })
 
 watch(mentionDir, async (d) => {
   if (!store.childrenMap[d]) await store.loadTree(d)
 })
 
-function getAtTrigger(text: string): { atPos: number; query: string } | null {
-  const lastAt = text.lastIndexOf('@')
-  if (lastAt < 0) return null
-  const after = text.slice(lastAt + 1)
-  // only consider as trigger if no whitespace after @
-  if (/\s/.test(after)) return null
-  return { atPos: lastAt, query: after }
+function getTipTapEditor(): Editor | null {
+  const raw = sender.value?.editor
+  if (!raw) return null
+  if (typeof (raw as Editor).chain === 'function') return raw as Editor
+  const inner = (raw as { value?: Editor }).value
+  return inner && typeof inner.chain === 'function' ? inner : null
 }
 
-watch(draft, (text) => {
-  const trigger = getAtTrigger(text)
+function getAtTriggerFromEditor(editor: Editor): { from: number; to: number; query: string } | null {
+  const { $from } = editor.state.selection
+  if (!$from.parent.isTextblock || !editor.state.selection.empty) return null
+  const textBefore = $from.parent.textBetween(0, $from.parentOffset, undefined, '\ufffc')
+  const lastAt = textBefore.lastIndexOf('@')
+  if (lastAt < 0) return null
+  const after = textBefore.slice(lastAt + 1)
+  if (/\s/.test(after)) return null
+  return {
+    from: $from.start() + lastAt,
+    to: $from.pos,
+    query: after,
+  }
+}
+
+function refreshMentionTrigger() {
+  const editor = getTipTapEditor()
+  if (!editor) {
+    mentionOpen.value = false
+    return
+  }
+  const trigger = getAtTriggerFromEditor(editor)
   if (trigger) {
     mentionQuery.value = trigger.query
     if (!mentionOpen.value) {
-      // opening fresh: reset dir browse state
       mentionDir.value = ''
       mentionActiveIdx.value = 0
+      mentionTab.value = 'files'
+      const pinned = resolvePinnedMentionItem()
+      if (pinned) void store.loadTree(store.parentPath(pinned.path) || '')
     }
     mentionOpen.value = true
   } else {
     mentionOpen.value = false
   }
-})
+}
 
-function mentionBrowse(item: { name: string; path: string; is_dir: boolean }) {
-  if (item.is_dir) {
-    mentionDir.value = item.path
-    mentionQuery.value = ''
-    mentionActiveIdx.value = 0
-    store.loadTree(item.path)
-  } else {
-    mentionSelect(item)
+let mentionEditorOff: (() => void) | null = null
+
+function bindMentionEditorEvents() {
+  mentionEditorOff?.()
+  mentionEditorOff = null
+  const editor = getTipTapEditor()
+  if (!editor) return
+  const handler = () => refreshMentionTrigger()
+  editor.on('update', handler)
+  editor.on('selectionUpdate', handler)
+  mentionEditorOff = () => {
+    editor.off('update', handler)
+    editor.off('selectionUpdate', handler)
   }
 }
 
-function mentionSelect(item: { name: string; path: string; is_dir: boolean }) {
-  // Remove the @query from draft, keep text before @
-  const trigger = getAtTrigger(draft.value)
-  if (trigger !== null) {
-    draft.value = draft.value.slice(0, trigger.atPos)
+function mentionItemFromAttrs(attrs: Record<string, unknown>): MentionItem {
+  return {
+    path: String(attrs.path || ''),
+    name: String(attrs.name || ''),
+    is_dir: Boolean(attrs.isDir),
+    lineStart: attrs.lineStart != null ? Number(attrs.lineStart) : undefined,
+    lineEnd: attrs.lineEnd != null ? Number(attrs.lineEnd) : undefined,
   }
-  // Add to chips if not already present
-  if (!mentionFiles.value.find((f) => f.path === item.path)) {
-    mentionFiles.value = [...mentionFiles.value, item]
+}
+
+function fileMentionAttrs(item: MentionItem): FileMentionAttrs {
+  return {
+    path: item.path,
+    name: item.name,
+    isDir: item.is_dir,
+    lineStart: item.lineStart ?? null,
+    lineEnd: item.lineEnd ?? null,
   }
+}
+
+function switchMentionTab(tab: 'files' | 'skills') {
+  mentionTab.value = tab
+  mentionActiveIdx.value = 0
+  if (tab === 'skills' && !store.skills.length) void store.loadSkills()
+}
+
+function removeAllSkillMentions(editor: Editor) {
+  const ranges: { from: number; to: number }[] = []
+  editor.state.doc.descendants((node, pos) => {
+    if (node.type.name === 'skillMention') {
+      ranges.push({ from: pos, to: pos + node.nodeSize })
+    }
+  })
+  if (!ranges.length) return
+  let chain = editor.chain().focus()
+  for (const range of ranges.reverse()) {
+    chain = chain.deleteRange(range)
+  }
+  chain.run()
+}
+
+function editorSkillName(): string | null {
+  const editor = getTipTapEditor()
+  if (!editor) return store.conversationSkillName()
+  let name: string | null = null
+  editor.state.doc.descendants((node) => {
+    if (node.type.name === 'skillMention') {
+      name = String(node.attrs.name || '')
+    }
+  })
+  return name
+}
+
+function syncSkillFromEditor() {
+  store.setConversationSkill(editorSkillName())
+}
+
+function insertInlineSkillMention(skill: SkillMentionItem, replaceTrigger = false) {
+  const editor = getTipTapEditor()
+  if (!editor) {
+    store.setConversationSkill(skill.name)
+    return
+  }
+  removeAllSkillMentions(editor)
+  let chain = editor.chain().focus()
+  if (replaceTrigger) {
+    const trigger = getAtTriggerFromEditor(editor)
+    if (trigger) chain = chain.deleteRange({ from: trigger.from, to: trigger.to })
+  }
+  chain.insertSkillMention({ name: skill.name }).insertContent(' ').run()
+  draft.value = editor.getText()
+  store.setConversationSkill(skill.name)
+}
+
+function mentionSelectSkill(skill: SkillMentionItem) {
   mentionOpen.value = false
   nextTick(() => {
+    insertInlineSkillMention(skill, true)
+    refreshMentionTrigger()
+    focusSenderEnd()
+  })
+}
+
+function insertInlineMention(item: MentionItem, replaceTrigger = false) {
+  const editor = getTipTapEditor()
+  if (!editor) return
+  const attrs = fileMentionAttrs(item)
+  const chain = editor.chain().focus()
+  if (replaceTrigger) {
+    const trigger = getAtTriggerFromEditor(editor)
+    if (trigger) chain.deleteRange({ from: trigger.from, to: trigger.to })
+  }
+  chain.insertFileMention(attrs).insertContent(' ').run()
+  draft.value = editor.getText()
+  syncMentionFilesFromEditor()
+}
+
+function mentionEnterDir(item: MentionItem) {
+  if (!item.is_dir) return
+  mentionDir.value = item.path
+  mentionQuery.value = ''
+  mentionActiveIdx.value = 0
+  store.loadTree(item.path)
+}
+
+function mentionSelect(item: MentionItem, fromAt = true) {
+  mentionOpen.value = false
+  nextTick(() => {
+    insertInlineMention(item, fromAt)
+    refreshMentionTrigger()
     const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
     el?.focus()
   })
 }
 
-function mentionRemove(path: string) {
-  mentionFiles.value = mentionFiles.value.filter((f) => f.path !== path)
+function syncMentionFilesFromEditor() {
+  const editor = getTipTapEditor()
+  if (!editor) return
+  const items: MentionItem[] = []
+  editor.state.doc.descendants((node) => {
+    if (node.type.name !== 'fileMention') return
+    items.push(mentionItemFromAttrs(node.attrs as Record<string, unknown>))
+  })
+  mentionFiles.value = items.filter((item) => item.path)
+}
+
+function serializeMessageFromEditor(): { value: string; mentions: MentionItem[] } {
+  const editor = getTipTapEditor()
+  if (!editor) {
+    return { value: plainTextFromDraft(draft.value), mentions: mentionFiles.value }
+  }
+
+  const mentions: MentionItem[] = []
+  const partsByParagraph: Array<Array<{ kind: 'text'; value: string } | { kind: 'mention'; value: string }>> = []
+
+  editor.state.doc.forEach((block) => {
+    if (block.type.name !== 'paragraph') return
+    const parts: Array<{ kind: 'text'; value: string } | { kind: 'mention'; value: string }> = []
+    block.forEach((child) => {
+      if (child.type.name === 'text') {
+        parts.push({ kind: 'text', value: child.text || '' })
+      } else if (child.type.name === 'fileMention') {
+        const item = mentionItemFromAttrs(child.attrs as Record<string, unknown>)
+        mentions.push(item)
+        parts.push({ kind: 'mention', value: mentionToken(item) })
+      }
+    })
+    partsByParagraph.push(parts)
+  })
+
+  return { value: normalizeSubmitText(serializeParagraphs(partsByParagraph)), mentions }
+}
+
+function insertPasteSegments(segments: PasteSegment[]) {
+  const editor = getTipTapEditor()
+  if (!editor) return
+  const inline = segmentsToInlineNodes(segments)
+  if (!inline.length) return
+  editor.chain().focus().insertContent(inline).run()
+  draft.value = editor.getText()
+  syncMentionFilesFromEditor()
+}
+
+function onAddChatMention(e: Event) {
+  const item = (e as CustomEvent<MentionItem>).detail
+  if (!item?.path) return
+  mentionSelect(item, false)
+  window.dispatchEvent(new Event('ca-focus-agent'))
 }
 
 function mentionKeydown(e: KeyboardEvent) {
   if (!mentionOpen.value) return
-  const items = mentionItems.value
+  const items = mentionTab.value === 'files' ? mentionItems.value : mentionSkillItems.value
+  const active = items[mentionActiveIdx.value]
   if (e.key === 'ArrowDown') { e.preventDefault(); mentionActiveIdx.value = (mentionActiveIdx.value + 1) % Math.max(1, items.length) }
   else if (e.key === 'ArrowUp') { e.preventDefault(); mentionActiveIdx.value = (mentionActiveIdx.value - 1 + Math.max(1, items.length)) % Math.max(1, items.length) }
-  else if (e.key === 'Enter' && items.length) { e.preventDefault(); e.stopPropagation(); mentionBrowse(items[mentionActiveIdx.value]) }
+  else if (e.key === 'ArrowRight' && mentionTab.value === 'files' && active && 'is_dir' in active && active.is_dir) { e.preventDefault(); mentionEnterDir(active as MentionItem) }
+  else if (e.key === 'Enter' && items.length) {
+    e.preventDefault()
+    e.stopPropagation()
+    if (mentionTab.value === 'files') mentionSelect(active as MentionItem)
+    else mentionSelectSkill(active as SkillMentionItem)
+  }
   else if (e.key === 'Escape') { e.preventDefault(); mentionOpen.value = false }
+  else if (e.key === 'Tab') {
+    e.preventDefault()
+    switchMentionTab(mentionTab.value === 'files' ? 'skills' : 'files')
+  }
 }
 
 /* ---- sender resize ---- */
@@ -281,6 +634,25 @@ function setSenderDraft(text: string) {
   sender.value?.setContent?.(normalized)
 }
 
+function resolveMentionIsDir(path: string) {
+  if (store.childrenMap[path]) return true
+  const parent = store.parentPath(path)
+  const item = store.childrenOf(parent).find((i) => i.path === path)
+  return item?.is_dir ?? false
+}
+
+function setSenderDraftFromMessage(text: string) {
+  const normalized = text.replace(/\r\n/g, '\n')
+  const editor = getTipTapEditor()
+  if (editor && messageHasInlineMentions(normalized)) {
+    editor.commands.setContent(messageTextToEditorDoc(normalized, resolveMentionIsDir), { emitUpdate: false })
+    draft.value = editor.getText()
+    syncMentionFilesFromEditor()
+    return
+  }
+  setSenderDraft(normalized)
+}
+
 function readEditorLineHeight(pm: HTMLElement, last: HTMLElement) {
   const style = getComputedStyle(last.tagName === 'P' ? last : pm)
   if (style.lineHeight.endsWith('px')) return parseFloat(style.lineHeight)
@@ -338,11 +710,12 @@ function onResizeHandlePointerDown(e: PointerEvent) {
 }
 
 const stick = ref(true)
+const showScrollToBottom = computed(() => !stick.value && store.messages.length > 0)
 const contextUsageOpen = ref(false)
 const uploadError = ref('')
 let locking = false
-let raf = 0
 let followGen = 0
+let pinRaf = 0
 let resizeObs: ResizeObserver | null = null
 
 const {
@@ -351,15 +724,33 @@ const {
   removeAttachment,
   retryUpload,
   clearAttachments,
+  restoreAttachments,
   getPendingFiles,
   hasUploadingAttachments,
 } = useChatAttachments()
 
 const pendingFiles = computed(() => getPendingFiles())
 
+function attachmentPreviewItems() {
+  return attachments.value
+    .filter((item) => item.status === 'success' && item.url && item.fileType === 'image')
+    .map((item) => ({
+      src: String(item.url),
+      alt: item.name || '',
+      title: item.name || '',
+    }))
+}
+
+function onAttachmentPreview(event: MouseEvent, file: Attachment) {
+  event.preventDefault()
+  const items = attachmentPreviewItems()
+  const index = items.findIndex((item) => item.src === file.url)
+  openImageLightbox(items, index >= 0 ? index : 0)
+}
+
 const selectedModel = computed(() => {
   for (const provider of store.providers) {
-    const model = (provider.models || []).find((m) => m.id === store.modelId)
+    const model = (provider.models || []).find((m: LlmModel) => m.id === store.modelId)
     if (model) return model
   }
   return null
@@ -421,9 +812,9 @@ function distanceToBottom(el: HTMLElement) {
 function pauseFollow() {
   stick.value = false
   followGen += 1
-  if (raf) {
-    cancelAnimationFrame(raf)
-    raf = 0
+  if (pinRaf) {
+    cancelAnimationFrame(pinRaf)
+    pinRaf = 0
   }
 }
 
@@ -453,6 +844,10 @@ function scrollToEnd() {
   jumpToEnd()
 }
 
+function resumeStickScroll() {
+  void pinToBottom()
+}
+
 function onScroll() {
   if (locking) return
   const el = scroller.value
@@ -471,15 +866,13 @@ function onPointerDown(e: PointerEvent) {
   if (e.offsetX >= el.clientWidth - 18) pauseFollow()
 }
 
-function followOutput() {
+function scheduleStickScroll() {
   if (!stick.value) return
-  // Only auto-follow while a run is actively producing output.
-  if (!running()) return
-  if (raf) return
-  raf = requestAnimationFrame(() => {
-    raf = 0
-    if (!stick.value || !running()) return
-    scrollToEnd()
+  if (pinRaf) return
+  pinRaf = requestAnimationFrame(() => {
+    pinRaf = 0
+    if (!stick.value) return
+    jumpToEnd()
   })
 }
 
@@ -488,29 +881,55 @@ async function pinToBottom() {
   stick.value = true
   followGen += 1
   const token = followGen
+
+  const attempt = () => {
+    if (token !== followGen || !stick.value) return
+    jumpToEnd()
+  }
+
   await nextTick()
-  if (token !== followGen) return
-  jumpToEnd()
+  attempt()
   await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  if (token !== followGen || !stick.value) return
-  jumpToEnd()
+  attempt()
+
+  // Async message blocks / images continue growing after first paint.
+  for (let i = 0; i < 10; i++) {
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 60))
+    if (token !== followGen) return
+    attempt()
+  }
 }
 
 onMounted(() => {
   if (timelineInner.value) {
     resizeObs = new ResizeObserver(() => {
-      if (running() && stick.value) followOutput()
+      scheduleStickScroll()
     })
     resizeObs.observe(timelineInner.value)
   }
   if (store.messages.length) void pinToBottom()
+  window.addEventListener('ca-add-chat-mention', onAddChatMention)
+  nextTick(() => {
+    bindMentionEditorEvents()
+    setupHistoryObserver()
+  })
 })
 
 onBeforeUnmount(() => {
+  mentionEditorOff?.()
+  mentionEditorOff = null
   resizeObs?.disconnect()
   resizeObs = null
-  if (raf) cancelAnimationFrame(raf)
+  historyObs?.disconnect()
+  historyObs = null
+  if (pinRaf) cancelAnimationFrame(pinRaf)
+  window.removeEventListener('ca-add-chat-mention', onAddChatMention)
 })
+
+watch(
+  () => sender.value?.editor,
+  () => nextTick(() => bindMentionEditorEvents()),
+)
 
 watch(
   () => store.conversationId,
@@ -522,17 +941,21 @@ watch(
 watch(
   () => [store.conversationId, store.messages.length] as const,
   async ([, len], prev) => {
-    if (!len) return
+    if (!len) {
+      activeHistoryId.value = null
+      return
+    }
     const switched = !prev || prev[0] !== store.conversationId
     const filled = switched || (prev[1] === 0 && len > 0)
     if (switched || filled) await pinToBottom()
+    nextTick(() => setupHistoryObserver())
   },
 )
 
 watch(
   () => store.runStatus,
   () => {
-    if (running() && stick.value) followOutput()
+    if (running() && stick.value) scheduleStickScroll()
   },
 )
 
@@ -551,21 +974,23 @@ function normalizeSubmitText(text: string) {
     .trim()
 }
 
-function buildPayload(text: string) {
-  let value = normalizeSubmitText(text || '')
+function plainTextFromDraft(text: string) {
+  return normalizeSubmitText(text.replace(/\r\n/g, '\n'))
+}
+
+function buildPayload(_text: string) {
+  syncSkillFromEditor()
+  const { value, mentions } = serializeMessageFromEditor()
   if (hasUploadingAttachments()) return null
   const files = getPendingFiles()
-  if (!value && !files.length) return null
-  if (mentionFiles.value.length) {
-    const paths = mentionFiles.value.map((f) => `@${f.path}`).join(' ')
-    value = value ? `${value}\n${paths}` : paths
-  }
-  const refs = store.openFile ? [{ type: 'file', path: store.openFile.path }] : []
-  return { value, refs, files }
+  const skillName = store.conversationSkillName()
+  if (!value && !files.length && !mentions.length && !skillName) return null
+  return { value, refs: [] as { type: 'file'; path: string }[], files }
 }
 
 function afterSubmitClear() {
   mentionFiles.value = []
+  store.setConversationSkill(null)
   clearSender()
   clearAttachments()
   uploadError.value = ''
@@ -594,9 +1019,11 @@ function onSubmitNow() {
 function onSenderCaptureKeydown(e: KeyboardEvent) {
   if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
   if (!running()) return
-  const value = normalizeSubmitText(draft.value || '')
+  syncMentionFilesFromEditor()
+  const value = plainTextFromDraft(draft.value || '')
   const files = getPendingFiles()
-  if ((!value && !files.length) || hasUploadingAttachments()) return
+  const mentions = mentionFiles.value
+  if ((!value && !files.length && !mentions.length && !editorSkillName()) || hasUploadingAttachments()) return
   e.preventDefault()
   e.stopPropagation()
   if (e.altKey) onSubmitNow()
@@ -614,16 +1041,41 @@ function handleFileSelect(files: File[]) {
 
 function onComposerPaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
-  if (!items?.length) return
-  const imageFiles: File[] = []
-  for (const item of items) {
-    if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
-    const file = item.getAsFile()
-    if (file) imageFiles.push(file)
+  if (items?.length) {
+    const imageFiles: File[] = []
+    for (const item of items) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue
+      const file = item.getAsFile()
+      if (file) imageFiles.push(file)
+    }
+    if (imageFiles.length) {
+      e.preventDefault()
+      handleFileSelect(imageFiles)
+      return
+    }
   }
-  if (!imageFiles.length) return
-  e.preventDefault()
-  handleFileSelect(imageFiles)
+
+  const text = e.clipboardData?.getData('text/plain')
+  if (!text) return
+
+  const clip = normalizeClipboardText(text)
+  const copyCtx = store.editorCopyContext
+  if (copyCtx && clip === normalizeClipboardText(copyCtx.text)) {
+    e.preventDefault()
+    insertInlineMention({
+      path: copyCtx.path,
+      name: fileNameFromPath(copyCtx.path),
+      is_dir: false,
+      lineStart: copyCtx.startLine,
+      lineEnd: copyCtx.endLine,
+    })
+    return
+  }
+
+  if (hasInlineMentions(clip)) {
+    e.preventDefault()
+    insertPasteSegments(parseMentionSegments(clip, resolveMentionIsDir))
+  }
 }
 
 function handleUploadError(error: Error) {
@@ -641,15 +1093,28 @@ function openContextUsageDialog() {
 
 <template>
   <div class="panel-shell agent">
-    <ConversationSwitcher />
-    <Transition name="toast-fade">
-      <div v-if="copyToast" class="copy-toast">
-        <AppIcon name="check" :size="16" />
-        {{ t('chat.copied') }}
-      </div>
-    </Transition>
-    <div ref="scroller" class="timeline" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
-      <div ref="timelineInner" class="timeline-inner">
+    <ConversationSwitcher>
+      <template #actions>
+        <UserMessageHistoryMenu
+          :entries="userHistoryEntries"
+          :active-id="activeHistoryId"
+          @select="scrollToMessage"
+          @edit="editHistoryMessage"
+          @copy="copyHistoryMessage"
+        />
+      </template>
+    </ConversationSwitcher>
+    <Teleport to="body">
+      <Transition name="toast-fade">
+        <div v-if="copyToast" class="copy-toast">
+          <AppIcon name="check" :size="16" />
+          {{ t('chat.copied') }}
+        </div>
+      </Transition>
+    </Teleport>
+    <div class="agent-main">
+      <div ref="scroller" class="timeline" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
+        <div ref="timelineInner" class="timeline-inner">
         <div v-if="!store.messages.length" class="empty">
           <div class="empty-icon" aria-hidden="true">
             <AppIcon name="atom" :size="32" />
@@ -668,7 +1133,12 @@ function openContextUsageDialog() {
             </button>
           </div>
         </div>
-        <article v-for="msg in store.messages" :key="msg.id" :class="['msg-wrap', msg.role]">
+        <article
+          v-for="msg in store.messages"
+          :key="msg.id"
+          :id="'msg-' + msg.id"
+          :class="['msg-wrap', msg.role]"
+        >
           <template v-if="msg.role === 'user'">
             <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
               <section v-for="block in msg.blocks" :key="block.id" class="block">
@@ -708,33 +1178,88 @@ function openContextUsageDialog() {
           <span class="dots"><i /><i /><i /></span>
           <button type="button" class="stop-inline" @click="store.stop()">{{ t('common.stop') }}</button>
         </div>
+        </div>
       </div>
     </div>
     <footer class="agent-footer">
       <!-- @ file picker popup -->
       <Transition name="mention-fade">
-        <div v-if="mentionOpen && mentionItems.length" class="mention-popup">
-          <div v-if="mentionDir" class="mention-dir-back">
-            <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
-              <AppIcon name="arrow-left" :size="12" />
-              {{ t('common.back') }}
-            </button>
-            <span class="mention-dir-label">{{ mentionDir }}</span>
-          </div>
-          <ul class="mention-list">
-            <li
-              v-for="(item, i) in mentionItems"
-              :key="item.path"
-              class="mention-item"
-              :class="{ active: i === mentionActiveIdx }"
-              @mouseenter="mentionActiveIdx = i"
-              @mousedown.prevent="mentionBrowse(item)"
+        <div v-if="mentionOpen" class="mention-popup">
+          <div class="mention-tabs" role="tablist" :aria-label="t('chat.mentionTabs')">
+            <button
+              type="button"
+              role="tab"
+              class="mention-tab"
+              :class="{ active: mentionTab === 'files' }"
+              :aria-selected="mentionTab === 'files'"
+              @mousedown.prevent="switchMentionTab('files')"
             >
-              <AppIcon :name="item.is_dir ? 'folder' : 'file'" :size="14" />
-              <span class="mention-name">{{ item.name }}</span>
-              <span v-if="item.is_dir" class="mention-arrow">›</span>
-            </li>
-          </ul>
+              {{ t('chat.mentionTabFiles') }}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              class="mention-tab"
+              :class="{ active: mentionTab === 'skills' }"
+              :aria-selected="mentionTab === 'skills'"
+              @mousedown.prevent="switchMentionTab('skills')"
+            >
+              {{ t('chat.mentionTabSkills') }}
+            </button>
+          </div>
+
+          <template v-if="mentionTab === 'files'">
+            <div v-if="mentionDir" class="mention-dir-back">
+              <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
+                <AppIcon name="arrow-left" :size="12" />
+                {{ t('common.back') }}
+              </button>
+              <span class="mention-dir-label">{{ mentionDir }}</span>
+            </div>
+            <ul v-if="mentionItems.length" class="mention-list">
+              <li
+                v-for="(item, i) in mentionItems"
+                :key="item.path"
+                class="mention-item"
+                :class="{ active: i === mentionActiveIdx, pinned: i === 0 && !mentionDir && resolvePinnedMentionItem()?.path === item.path }"
+                @mouseenter="mentionActiveIdx = i"
+                @mousedown.prevent="mentionSelect(item)"
+              >
+                <AppIcon :name="item.is_dir ? 'folder' : 'file'" :size="14" />
+                <span class="mention-name">{{ item.name }}</span>
+                <button
+                  v-if="item.is_dir"
+                  type="button"
+                  class="mention-arrow"
+                  :title="t('workspace.browse')"
+                  @mousedown.prevent.stop="mentionEnterDir(item)"
+                >
+                  ›
+                </button>
+              </li>
+            </ul>
+            <p v-else class="mention-empty">{{ t('chat.mentionFilesEmpty') }}</p>
+          </template>
+
+          <template v-else>
+            <ul v-if="mentionSkillItems.length" class="mention-list">
+              <li
+                v-for="(skill, i) in mentionSkillItems"
+                :key="`${skill.source}:${skill.name}`"
+                class="mention-item mention-skill-item"
+                :class="{ active: i === mentionActiveIdx, selected: activeSkillName === skill.name }"
+                @mouseenter="mentionActiveIdx = i"
+                @mousedown.prevent="mentionSelectSkill(skill)"
+              >
+                <AppIcon name="book" :size="14" />
+                <span class="mention-skill-copy">
+                  <span class="mention-name">{{ skill.name }}</span>
+                  <span class="mention-skill-desc">{{ skill.description || t('chat.mentionSkillNoDesc') }}</span>
+                </span>
+              </li>
+            </ul>
+            <p v-else class="mention-empty">{{ t('chat.mentionSkillsEmpty') }}</p>
+          </template>
         </div>
       </Transition>
       <!-- @ mention chips -->
@@ -759,17 +1284,19 @@ function openContextUsageDialog() {
           </div>
         </div>
       </div>
-      <div v-if="mentionFiles.length" class="mention-chips">
-        <span v-for="f in mentionFiles" :key="f.path" class="mention-chip">
-          <span class="mention-chip-body" @click="store.openPath(f.path, f.is_dir)">
-            <AppIcon :name="f.is_dir ? 'folder' : 'file'" :size="12" />
-            <span class="mention-chip-path">@{{ f.path }}</span>
-          </span>
-          <button type="button" class="mention-chip-remove" @click="mentionRemove(f.path)" :title="t('common.remove')">
-            <AppIcon name="close" :size="10" />
+      <div class="agent-sender-stack">
+        <Transition name="scroll-jump-fade">
+          <button
+            v-if="showScrollToBottom"
+            type="button"
+            class="scroll-to-bottom-btn"
+            :title="t('chat.scrollToBottom')"
+            :aria-label="t('chat.scrollToBottom')"
+            @click="resumeStickScroll"
+          >
+            <AppIcon name="chevron" :size="18" />
           </button>
-        </span>
-      </div>
+        </Transition>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
         class="agent-sender-wrap"
@@ -783,6 +1310,7 @@ function openContextUsageDialog() {
           v-model="draft"
           class="agent-sender"
           :style="senderStyle"
+          :extensions="senderExtensions"
           mode="multiple"
           submit-type="enter"
           :placeholder="running() ? t('chat.promptBusy') : t('chat.prompt')"
@@ -799,6 +1327,7 @@ function openContextUsageDialog() {
               :file-matchers="attachmentFileMatchers"
               @remove="removeAttachment"
               @retry="retryUpload"
+              @preview="onAttachmentPreview"
             />
           </template>
 
@@ -837,6 +1366,7 @@ function openContextUsageDialog() {
           </template>
         </TrSender>
       </div>
+      </div>
       <p v-if="uploadError" class="agent-upload-error">{{ uploadError }}</p>
       <p v-else-if="visionAttachHint" class="agent-upload-hint">{{ visionAttachHint }}</p>
     </footer>
@@ -856,8 +1386,15 @@ function openContextUsageDialog() {
 
 <style scoped>
 .agent { background: var(--page-bg); position: relative; }
+.agent-main {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+}
 .timeline {
   flex: 1;
+  min-width: 0;
   overflow-x: hidden;
   overflow-y: scroll;
   overflow-anchor: none;
@@ -1123,6 +1660,52 @@ footer.agent-footer {
   background: linear-gradient(to top, var(--page-bg) 72%, transparent);
 }
 
+.agent-sender-stack {
+  position: relative;
+  width: 100%;
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  z-index: 6;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  box-shadow: 0 4px 18px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+html[data-theme='dark'] .scroll-to-bottom-btn {
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.scroll-to-bottom-btn:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  transform: translateX(-50%) translateY(-1px);
+}
+
+.scroll-jump-fade-enter-active,
+.scroll-jump-fade-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.scroll-jump-fade-enter-from,
+.scroll-jump-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+
 .sender-resize-handle {
   width: 100%;
   height: 6px;
@@ -1264,7 +1847,7 @@ html[data-theme='dark'] .agent-sender-wrap {
   min-width: 0;
   --tr-sender-bg-color: transparent;
   --tr-sender-text-color: var(--text-h);
-  --tr-sender-placeholder-color: var(--text);
+  --tr-sender-placeholder-color: color-mix(in srgb, var(--text-muted) 72%, transparent);
 }
 
 .agent-sender :deep(.tr-sender) {
@@ -1324,7 +1907,7 @@ html[data-theme='dark'] .agent-sender-wrap {
 }
 
 .agent-sender :deep(.tr-sender-content .ProseMirror p.is-editor-empty:first-child::before) {
-  color: var(--text);
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
 }
 
 .agent-sender :deep(.tr-sender-submit-button__icon) {
@@ -1377,11 +1960,11 @@ html[data-theme='dark'] .agent-sender-wrap {
 }
 
 .copy-toast {
-  position: absolute;
+  position: fixed;
   top: 48px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 100;
+  z-index: 13000;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1392,8 +1975,12 @@ html[data-theme='dark'] .agent-sender-wrap {
   padding: 8px 16px;
   border-radius: var(--radius-sm);
   border: var(--border-width) solid var(--border);
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
   pointer-events: none;
   white-space: nowrap;
+}
+html[data-theme='dark'] .copy-toast {
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
 }
 .copy-toast :deep(.app-icon) {
   color: var(--ok);
@@ -1407,16 +1994,67 @@ html[data-theme='dark'] .agent-sender-wrap {
   position: absolute;
   bottom: calc(100% + 4px);
   left: 12px;
-  right: 12px;
+  width: 320px;
+  max-width: calc(100% - 24px);
   z-index: 200;
   background: var(--bg-elevated);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
   overflow: hidden;
-  max-height: 260px;
+  max-height: 300px;
   display: flex;
   flex-direction: column;
+}
+.mention-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 6px 0;
+  border-bottom: var(--border-width) solid var(--border);
+  flex-shrink: 0;
+}
+.mention-tab {
+  flex: 1;
+  height: 28px;
+  border: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.mention-tab:hover {
+  color: var(--text-h);
+  background: var(--bg-muted);
+}
+.mention-tab.active {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.mention-empty {
+  margin: 0;
+  padding: 14px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.mention-skill-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mention-skill-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mention-skill-item.selected .mention-name {
+  color: var(--primary);
 }
 .mention-dir-back {
   display: flex;
@@ -1440,6 +2078,8 @@ html[data-theme='dark'] .agent-sender-wrap {
 }
 .mention-back-btn:hover { background: var(--border); color: var(--text-h); }
 .mention-dir-label {
+  flex: 1;
+  min-width: 0;
   font-size: 11px;
   font-family: var(--mono);
   color: var(--text-secondary);
@@ -1464,64 +2104,35 @@ html[data-theme='dark'] .agent-sender-wrap {
   color: var(--text);
   font-size: 13px;
 }
+.mention-skill-item {
+  align-items: flex-start;
+}
 .mention-item.active { background: var(--primary-soft); color: var(--primary); }
+.mention-item.pinned { border-left: 2px solid var(--primary); padding-left: 8px; }
 .mention-item:hover { background: var(--bg-muted); }
 .mention-item.active:hover { background: var(--primary-soft); }
 .mention-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mention-arrow { flex-shrink: 0; color: var(--text-secondary); font-size: 16px; }
-.mention-fade-enter-active, .mention-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
-.mention-fade-enter-from, .mention-fade-leave-to { opacity: 0; transform: translateY(4px); }
-
-/* @ mention chips */
-.mention-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  padding: 4px 2px 6px;
-}
-.mention-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 6px 3px 7px;
-  border-radius: 5px;
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-size: 12px;
-  font-family: var(--mono);
-  max-width: 320px;
-  overflow: hidden;
-}
-.mention-chip-body {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  overflow: hidden;
-}
-.mention-chip-body:hover .mention-chip-path { text-decoration: underline; }
-.mention-chip-path {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.mention-chip-remove {
+.mention-arrow {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: var(--primary);
+  color: var(--text-secondary);
+  font-size: 16px;
   cursor: pointer;
-  border-radius: 3px;
-  font-size: 14px;
-  line-height: 1;
-  opacity: 0.7;
 }
-.mention-chip-remove:hover { opacity: 1; background: var(--border); }
+.mention-arrow:hover {
+  background: var(--border);
+  color: var(--text);
+}
+.mention-fade-enter-active, .mention-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
+.mention-fade-enter-from, .mention-fade-leave-to { opacity: 0; transform: translateY(4px); }
 
 .agent-upload-error {
   margin: 6px 0 0;
