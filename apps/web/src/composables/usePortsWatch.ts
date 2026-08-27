@@ -1,6 +1,9 @@
 import { onMounted, onUnmounted, ref, type Ref } from 'vue'
 import { api } from '@/api/http'
 
+const SYSTEM_PORTS = new Set([22, 25, 53, 111, 123, 135, 139, 445, 631, 5353])
+const HIGHLIGHT_TTL_MS = 60_000
+
 export type PortItem = {
   port: number
   address: string
@@ -18,9 +21,49 @@ export type PortItem = {
 const POLL_MS = 12_000
 
 const ports = ref<PortItem[]>([])
+const highlightedPorts = ref<Set<number>>(new Set())
 const error = ref('')
 const loading = ref(false)
 const updatedAt = ref(0)
+
+const highlightTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
+export function isInterestingPort(item: PortItem): boolean {
+  if (item.self) return false
+  if (SYSTEM_PORTS.has(item.port)) return false
+  return true
+}
+
+export function markPortHighlighted(port: number, ttlMs = HIGHLIGHT_TTL_MS) {
+  const next = new Set(highlightedPorts.value)
+  next.add(port)
+  highlightedPorts.value = next
+
+  const prev = highlightTimers.get(port)
+  if (prev) clearTimeout(prev)
+  highlightTimers.set(
+    port,
+    setTimeout(() => {
+      highlightTimers.delete(port)
+      if (!highlightedPorts.value.has(port)) return
+      const cleared = new Set(highlightedPorts.value)
+      cleared.delete(port)
+      highlightedPorts.value = cleared
+    }, ttlMs),
+  )
+}
+
+export function clearPortHighlighted(port: number) {
+  const timer = highlightTimers.get(port)
+  if (timer) {
+    clearTimeout(timer)
+    highlightTimers.delete(port)
+  }
+  if (!highlightedPorts.value.has(port)) return
+  const next = new Set(highlightedPorts.value)
+  next.delete(port)
+  highlightedPorts.value = next
+}
 
 let timer: ReturnType<typeof setInterval> | null = null
 let subscribers = 0
@@ -73,11 +116,14 @@ function retainPortsWatch() {
 /** Subscribe to the shared port list (one /api/ports poller for the whole app). */
 export function usePortsWatch(): {
   ports: Ref<PortItem[]>
+  highlightedPorts: Ref<Set<number>>
   error: Ref<string>
   loading: Ref<boolean>
   updatedAt: Ref<number>
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
   pollMs: number
+  markPortHighlighted: (port: number, ttlMs?: number) => void
+  clearPortHighlighted: (port: number) => void
 } {
   let release: (() => void) | null = null
   onMounted(() => {
@@ -90,10 +136,13 @@ export function usePortsWatch(): {
 
   return {
     ports,
+    highlightedPorts,
     error,
     loading,
     updatedAt,
     refresh: refreshPorts,
     pollMs: POLL_MS,
+    markPortHighlighted,
+    clearPortHighlighted,
   }
 }

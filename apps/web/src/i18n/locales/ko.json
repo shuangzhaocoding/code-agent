@@ -504,7 +504,10 @@
     "found": "새 포트 {port}",
     "open": "열기",
     "local": "로컬",
-    "copyAddr": "주소 복사"
+    "copyAddr": "주소 복사",
+    "autoClose": "{n}초 후 닫힘",
+    "autoCloseShort": "{n}초",
+    "newBadge": "새"
   },
   "plugins": {
     "title": "플러그인",

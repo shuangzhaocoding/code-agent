@@ -504,7 +504,10 @@
     "found": "Neuer Port {port}",
     "open": "Öffnen",
     "local": "Lokal",
-    "copyAddr": "Adresse kopieren"
+    "copyAddr": "Adresse kopieren",
+    "autoClose": "Schließt in {n} s",
+    "autoCloseShort": "{n}s",
+    "newBadge": "Neu"
   },
   "plugins": {
     "title": "Plugins",

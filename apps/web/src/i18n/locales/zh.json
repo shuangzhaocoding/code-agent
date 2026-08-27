@@ -504,7 +504,10 @@
     "found": "发现新端口 {port}",
     "open": "打开",
     "local": "本机",
-    "copyAddr": "复制地址"
+    "copyAddr": "复制地址",
+    "autoClose": "{n} 秒后关闭",
+    "autoCloseShort": "{n}s",
+    "newBadge": "新"
   },
   "plugins": {
     "title": "插件",

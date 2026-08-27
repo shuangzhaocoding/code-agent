@@ -1,15 +1,25 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import { usePortsWatch, type PortItem } from '@/composables/usePortsWatch'
 
+const { t } = useI18n()
 const store = useAppStore()
-const { ports: livePorts, error, loading, refresh: refreshShared } = usePortsWatch()
+const {
+  ports: livePorts,
+  highlightedPorts,
+  error,
+  loading,
+  refresh: refreshShared,
+  clearPortHighlighted,
+} = usePortsWatch()
 const killing = ref<number | null>(null)
 const query = ref('')
 const previewPort = ref<number | null>(null)
+const listRef = ref<HTMLElement | null>(null)
 /** When off, freeze the list in the panel; shared poller still runs for toast. */
 const autoRefresh = ref(true)
 const frozenPorts = ref<PortItem[] | null>(null)
@@ -27,6 +37,20 @@ const filtered = computed(() => {
 
 const previewUrl = computed(() =>
   previewPort.value != null ? `/api/preview/${previewPort.value}/` : null,
+)
+
+watch(
+  highlightedPorts,
+  (set) => {
+    if (!set.size) return
+    const port = [...set].at(-1)
+    if (port == null) return
+    nextTick(() => {
+      const el = listRef.value?.querySelector(`[data-port="${port}"]`)
+      el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    })
+  },
+  { deep: true },
 )
 
 watch(
@@ -57,12 +81,13 @@ async function copyUrl(item: PortItem) {
   try {
     await navigator.clipboard.writeText(item.url)
   } catch {
-    error.value = '复制失败'
+    error.value = t('ports.copyFail')
   }
 }
 
 function openPreview(item: PortItem) {
   if (item.self) return
+  clearPortHighlighted(item.port)
   previewPort.value = item.port
 }
 
@@ -73,11 +98,11 @@ function closePreview() {
 async function killPort(item: PortItem) {
   if (item.self || !item.pid) return
   const ok = await store.askConfirm({
-    title: '结束端口进程',
-    summary: `结束监听 ${item.port} 的进程？\n${item.process || 'unknown'} (pid ${item.pid})`,
+    title: t('ports.killTitle'),
+    summary: t('ports.killSummary', { port: item.port, process: item.process || 'unknown', pid: item.pid }),
     details: item.cmdline || undefined,
-    confirmLabel: '结束进程',
-    cancelLabel: '取消',
+    confirmLabel: t('ports.kill'),
+    cancelLabel: t('common.cancel'),
     danger: true,
   })
   if (!ok) return
@@ -107,56 +132,65 @@ function onToggleAuto() {
     <div class="ports-bar">
       <span class="title">
         <AppIcon name="ports" :size="14" />
-        端口
+        {{ t('ports.title') }}
         <span class="count">{{ filtered.length }}</span>
+        <span v-if="highlightedPorts.size" class="new-count">{{ highlightedPorts.size }}</span>
       </span>
       <span class="spacer" />
       <label class="auto">
         <input type="checkbox" :checked="autoRefresh" @change="onToggleAuto" />
-        自动刷新
+        {{ t('ports.autoRefresh') }}
       </label>
-      <button type="button" class="icon-btn icon-btn-ghost" title="刷新" :disabled="loading" @click="refresh">
+      <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" :disabled="loading" @click="refresh">
         <AppIcon name="refresh" :size="14" />
       </button>
     </div>
 
     <div class="search">
       <AppIcon name="search" :size="14" />
-      <input v-model="query" type="search" placeholder="搜索端口 / 进程" />
+        <input v-model="query" type="search" :placeholder="t('ports.search')" />
     </div>
 
     <p v-if="error" class="err">{{ error }}</p>
 
     <div class="body" :class="{ split: previewUrl }">
-      <div class="list">
+      <div ref="listRef" class="list">
         <button
           v-for="item in filtered"
           :key="`${item.address}:${item.port}`"
           type="button"
           class="row"
-          :class="{ on: previewPort === item.port, self: item.self }"
+          :class="{
+            on: previewPort === item.port,
+            self: item.self,
+            new: highlightedPorts.has(item.port),
+          }"
+          :data-port="item.port"
           @click="openPreview(item)"
           @dblclick="openExternal(item)"
         >
-          <span class="port">{{ item.port }}</span>
+          <span class="port">
+            {{ item.port }}
+            <span v-if="highlightedPorts.has(item.port)" class="new-badge">{{ t('ports.newBadge') }}</span>
+          </span>
           <span class="meta">
             <span class="process">
               {{ item.process || 'unknown' }}
-              <span v-if="item.self" class="tag">本服务</span>
+              <span v-if="item.self" class="tag">{{ t('ports.self') }}</span>
             </span>
             <span class="addr">{{ item.address }} · {{ item.connect_host || '127.0.0.1' }} · pid {{ item.pid ?? '—' }}</span>
           </span>
           <span class="actions" @click.stop>
-            <button type="button" class="icon-btn icon-btn-ghost" title="通过代理打开（推荐）" @click="openExternal(item)">
+            <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.openProxy')" @click="openExternal(item)">
               <AppIcon name="globe" :size="13" />
             </button>
-            <button type="button" class="icon-btn icon-btn-ghost" :title="`复制本机地址 ${item.url}`" @click="copyUrl(item)">
+            <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.copyLocal', { url: item.url })" @click="copyUrl(item)">
               <AppIcon name="file" :size="13" />
             </button>
             <button
               type="button"
               class="icon-btn icon-btn-ghost"
-              title="面板预览"
+              :title="t('ports.preview')"
               :disabled="item.self"
               @click="openPreview(item)"
             >
@@ -165,7 +199,7 @@ function onToggleAuto() {
             <button
               type="button"
               class="icon-btn icon-btn-ghost danger"
-              title="结束进程"
+              :title="t('ports.kill')"
               :disabled="item.self || !item.pid || killing === item.port"
               @click="killPort(item)"
             >
@@ -173,16 +207,16 @@ function onToggleAuto() {
             </button>
           </span>
         </button>
-        <p v-if="!loading && !filtered.length" class="empty">暂无本机可访问的监听端口</p>
+        <p v-if="!loading && !filtered.length" class="empty">{{ t('ports.empty') }}</p>
       </div>
 
       <div v-if="previewUrl" class="preview">
         <div class="preview-bar">
-          <span>预览 · {{ previewPort }}</span>
-          <span class="hint">前端 + 后端都走代理：/api 或 localhost:后端端口 会自动转发</span>
+          <span>{{ t('ports.previewTitle', { port: previewPort }) }}</span>
+          <span class="hint">{{ t('ports.previewHint') }}</span>
           <span class="spacer" />
-          <a class="link" :href="previewUrl" target="_blank" rel="noopener">新标签打开</a>
-          <button type="button" class="icon-btn icon-btn-ghost" title="关闭预览" @click="closePreview">×</button>
+          <a class="link" :href="previewUrl" target="_blank" rel="noopener">{{ t('ports.openTab') }}</a>
+          <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.closePreview')" @click="closePreview">×</button>
         </div>
         <iframe class="frame" :src="previewUrl" title="Port preview" />
       </div>
@@ -218,6 +252,19 @@ function onToggleAuto() {
   font-weight: 500;
   color: var(--text-secondary);
   font-size: 12px;
+}
+.new-count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--primary);
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .spacer { flex: 1; }
 .auto {
@@ -292,12 +339,38 @@ function onToggleAuto() {
   background: var(--primary-soft);
   border-color: color-mix(in srgb, var(--primary) 28%, transparent);
 }
+.row.new {
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  background: color-mix(in srgb, var(--primary) 14%, var(--panel-bg));
+  animation: port-new-pulse 1.4s ease-in-out 3;
+}
+.row.new.on {
+  background: color-mix(in srgb, var(--primary) 22%, var(--panel-bg));
+}
 .row.self { opacity: 0.72; }
 .port {
   font-family: var(--mono);
   font-size: 13px;
   font-weight: 600;
   color: var(--text-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.new-badge {
+  font-family: var(--sans, system-ui);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: var(--primary);
+  border-radius: 999px;
+  padding: 2px 6px;
+  flex-shrink: 0;
+}
+@keyframes port-new-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 color-mix(in srgb, var(--primary) 0%, transparent); }
+  50% { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent); }
 }
 .meta {
   display: flex;

@@ -76,12 +76,8 @@ async function copyMsg(msg: (typeof store.messages)[0]) {
 }
 
 function startEdit(msg: (typeof store.messages)[0]) {
-  const text = msgPlainText(msg)
-  // Put text into the sender input box
-  draft.value = text
-  sender.value?.setContent?.(text)
+  setSenderDraft(msgPlainText(msg))
   nextTick(() => {
-    // Focus the sender
     const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
     el?.focus()
   })
@@ -135,8 +131,7 @@ const quickPrompts = computed(() => [
 ])
 
 function useQuickPrompt(text: string) {
-  draft.value = text
-  sender.value?.setContent?.(text)
+  setSenderDraft(text)
   nextTick(() => {
     const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
     el?.focus()
@@ -228,12 +223,24 @@ function mentionKeydown(e: KeyboardEvent) {
 }
 
 /* ---- sender resize ---- */
+const SENDER_MIN_HEIGHT = 40
+const SENDER_MAX_HEIGHT = 440
 const senderContentHeight = ref<number | null>(null)
+
+const senderStyle = computed(() => ({
+  '--sender-min-height': `${SENDER_MIN_HEIGHT}px`,
+  '--sender-max-height': `${SENDER_MAX_HEIGHT}px`,
+  ...(senderContentHeight.value ? { '--sender-content-height': `${senderContentHeight.value}px` } : {}),
+}))
 
 type SenderEditor = {
   chain: () => {
     insertContentAt: (pos: number, content: string) => { focus: (pos?: string) => { run: () => boolean } }
   }
+  commands: {
+    setContent: (content: string, options?: { emitUpdate?: boolean }) => boolean
+  }
+  getText: () => string
   state: { doc: { content: { size: number } } }
 }
 
@@ -243,6 +250,35 @@ function getSenderEditor(): SenderEditor | null {
   if (typeof (raw as SenderEditor).chain === 'function') return raw as SenderEditor
   const inner = (raw as { value?: SenderEditor }).value
   return inner && typeof inner.chain === 'function' ? inner : null
+}
+
+function escapeSenderHtml(text: string) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function plainTextToSenderHtml(text: string) {
+  const normalized = text.replace(/\r\n/g, '\n')
+  if (!normalized) return ''
+  return normalized
+    .split('\n')
+    .map((line) => (line ? `<p>${escapeSenderHtml(line)}</p>` : '<p><br></p>'))
+    .join('')
+}
+
+function setSenderDraft(text: string) {
+  const normalized = text.replace(/\r\n/g, '\n')
+  const editor = getSenderEditor()
+  if (editor) {
+    editor.commands.setContent(plainTextToSenderHtml(normalized), { emitUpdate: false })
+    draft.value = editor.getText()
+    return
+  }
+  draft.value = normalized
+  sender.value?.setContent?.(normalized)
 }
 
 function readEditorLineHeight(pm: HTMLElement, last: HTMLElement) {
@@ -260,9 +296,7 @@ function insertBlankEditorLines(count: number) {
     editor.chain().insertContentAt(editor.state.doc.content.size, '<p><br></p>'.repeat(count)).focus('end').run()
     return
   }
-  const next = `${draft.value}${'\n'.repeat(count)}`
-  draft.value = next
-  sender.value?.setContent?.(next)
+  setSenderDraft(`${draft.value}${'\n'.repeat(count)}`)
   nextTick(() => sender.value?.focus?.())
 }
 
@@ -293,7 +327,7 @@ function onResizeHandlePointerDown(e: PointerEvent) {
   const startH = content?.offsetHeight ?? 60
   const onMove = (ev: PointerEvent) => {
     const delta = startY - ev.clientY
-    senderContentHeight.value = Math.max(40, Math.min(440, startH + delta))
+    senderContentHeight.value = Math.max(SENDER_MIN_HEIGHT, Math.min(SENDER_MAX_HEIGHT, startH + delta))
   }
   const onUp = () => {
     window.removeEventListener('pointermove', onMove)
@@ -748,7 +782,7 @@ function openContextUsageDialog() {
           ref="sender"
           v-model="draft"
           class="agent-sender"
-          :style="senderContentHeight ? { '--sender-content-height': senderContentHeight + 'px' } : {}"
+          :style="senderStyle"
           mode="multiple"
           submit-type="enter"
           :placeholder="running() ? t('chat.promptBusy') : t('chat.prompt')"
@@ -1246,23 +1280,23 @@ html[data-theme='dark'] .agent-sender-wrap {
 .agent-sender :deep(.tr-sender-content) {
   flex: 1 1 auto;
   overflow-y: auto;
-  min-height: var(--sender-content-height, var(--tr-sender-line-height, 26px));
-  max-height: var(--sender-content-height, none);
+  min-height: var(--sender-content-height, var(--sender-min-height, 40px));
+  max-height: var(--sender-content-height, var(--sender-max-height, min(440px, 40vh)));
   height: var(--sender-content-height, auto);
   box-sizing: border-box;
 }
 
 .agent-sender :deep(.tr-sender-editor-scroll) {
-  min-height: 100%;
-  height: 100%;
-  max-height: var(--sender-content-height, none) !important;
+  min-height: auto;
+  height: auto;
+  max-height: var(--sender-content-height, var(--sender-max-height, min(440px, 40vh))) !important;
   overflow-y: auto;
 }
 
 .agent-sender :deep(.tr-sender-editor-wrapper),
 .agent-sender :deep(.tr-sender-editor-content),
 .agent-sender :deep(.tr-sender-content .ProseMirror) {
-  min-height: 100%;
+  min-height: auto;
   box-sizing: border-box;
   color: var(--text-h);
 }

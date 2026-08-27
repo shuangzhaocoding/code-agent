@@ -504,7 +504,10 @@
     "found": "新しいポート {port}",
     "open": "開く",
     "local": "ローカル",
-    "copyAddr": "アドレスをコピー"
+    "copyAddr": "アドレスをコピー",
+    "autoClose": "{n} 秒後に閉じます",
+    "autoCloseShort": "{n}秒",
+    "newBadge": "新"
   },
   "plugins": {
     "title": "プラグイン",
