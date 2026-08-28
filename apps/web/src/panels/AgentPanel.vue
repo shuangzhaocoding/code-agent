@@ -13,6 +13,7 @@ import UserMessageHistoryMenu from '@/components/UserMessageHistoryMenu.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
+import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
 import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
@@ -1267,6 +1268,7 @@ function openContextUsageDialog() {
               <template v-if="row.item.role === 'assistant' && row.item.ended_at"> · {{ fmtTime(row.item.ended_at) }} · {{ t('time.duration', { value: fmtDuration(row.item) }) }}</template>
             </span>
             <div class="msg-actions">
+              <MessageRollbackControl v-if="row.item.role === 'user'" :message="row.item" />
               <button v-if="row.item.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(row.item)">
                 <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
               </button>

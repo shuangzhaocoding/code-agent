@@ -142,6 +142,18 @@ async def estimate_context_usage(conversation_id: str, body: ContextUsageIn):
     return data
 
 
+class RollbackIn(BaseModel):
+    message_id: str
+    mode: str = "to"
+
+
+@router.post("/conversations/{conversation_id}/rollback")
+async def rollback_conversation(conversation_id: str, body: RollbackIn):
+    from code_agent.conversation_rollback import rollback_conversation_to_message
+
+    return await rollback_conversation_to_message(conversation_id, body.message_id, mode=body.mode)
+
+
 @router.post("/conversations/{conversation_id}/messages")
 async def send_message(conversation_id: str, body: MessageIn):
     row = await Conversation.get_or_none(id=conversation_id)

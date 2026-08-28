@@ -1345,6 +1345,38 @@ export const useAppStore = defineStore('app', () => {
     return true
   }
 
+  async function rollbackToMessage(messageId: string, mode: 'to' | 'before' = 'to') {
+    const id = conversationId.value
+    if (!id) return null
+    const result = await api<{
+      ok: boolean
+      messages_removed: number
+      files_reverted: number
+      reverted_paths: string[]
+      warnings: string[]
+    }>(`/api/conversations/${id}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ message_id: messageId, mode }),
+    })
+    detachRun()
+    const reverted = new Set(result.reverted_paths || [])
+    for (const file of [...openFiles.value]) {
+      if (!reverted.has(file.path)) continue
+      try {
+        await reloadOpenFile(file.path)
+      } catch {
+        closeFile(file.path)
+      }
+    }
+    reviews.value = {}
+    activeReviewIndex.value = {}
+    await openConversation(id)
+    await loadTree('')
+    await loadConversations()
+    await loadGitChangedPaths()
+    return result
+  }
+
   function eventPath(event: StreamEnvelope): string | null {
     const payload = event.payload || {}
     const meta = (payload.meta || {}) as Record<string, unknown>
@@ -1877,6 +1909,7 @@ export const useAppStore = defineStore('app', () => {
     openConversation,
     deleteConversation,
     renameConversation,
+    rollbackToMessage,
     send,
     sendNow,
     sendQueuedNow,

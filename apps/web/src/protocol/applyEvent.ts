@@ -15,6 +15,7 @@ export type ChatMessage = {
   role: string
   blocks: Block[]
   run_id?: string | null
+  sort_key?: number
   created_at?: string | null
   ended_at?: string | null
 }

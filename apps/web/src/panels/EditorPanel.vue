@@ -13,6 +13,7 @@ import { t } from '@/i18n'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
+const tabsEl = ref<HTMLElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
 const mdPreview = ref(false)
 /** HTML: true = iframe preview, false = Monaco source */
@@ -413,6 +414,21 @@ onMounted(async () => {
 
 function onFocusEditor() {
   showPath(store.activePath)
+  scrollActiveTabIntoView(store.activePath)
+}
+
+function scrollActiveTabIntoView(path: string | null) {
+  if (!path) return
+  void nextTick(() => {
+    const container = tabsEl.value
+    if (!container) return
+    for (const el of container.querySelectorAll<HTMLElement>('.ftab')) {
+      if (el.dataset.path === path) {
+        el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+        break
+      }
+    }
+  })
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -511,6 +527,7 @@ watch(
 watch(
   () => store.activePath,
   (path, prev) => {
+    scrollActiveTabIntoView(path)
     if (!path || !prev || !isMarkdownFile(path) || !isMarkdownFile(prev)) mdPreview.value = false
     // Reset HTML to source when switching between different HTML files / leaving HTML
     const nextHtml = path ? /\.(html?|HTML?)$/.test(path) : false
@@ -617,15 +634,19 @@ async function onTabMenuSelect(id: string) {
 <template>
   <div class="panel-shell editor-shell">
     <header class="file-bar">
-      <div class="tabs" @wheel="onTabWheel">
-        <button
+      <div ref="tabsEl" class="tabs" role="tablist" @wheel="onTabWheel">
+        <div
           v-for="file in store.openFiles"
           :key="file.path"
-          type="button"
+          role="tab"
           class="ftab"
+          :data-path="file.path"
           :class="{ active: store.activePath === file.path }"
           :title="file.path"
+          :aria-selected="store.activePath === file.path"
+          tabindex="0"
           @click="store.activateFile(file.path)"
+          @keydown.enter.prevent="store.activateFile(file.path)"
           @auxclick="onTabAux(file.path, $event)"
           @contextmenu="onTabContext(file.path, $event)"
         >
@@ -635,7 +656,7 @@ async function onTabMenuSelect(id: string) {
           <button type="button" class="ghost-icon-btn ftab-close" title="关闭" @click.stop="store.closeFile(file.path)">
             <AppIcon name="close" :size="12" :stroke-width="1.75" />
           </button>
-        </button>
+        </div>
       </div>
       <div v-if="canMarkdownPreview" class="md-toggle" role="group" aria-label="Markdown 预览">
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': !mdPreview }" @click="mdPreview = false">Markdown</button>

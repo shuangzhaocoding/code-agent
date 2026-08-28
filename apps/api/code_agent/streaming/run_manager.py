@@ -50,7 +50,7 @@ async def start_run(
                 "status": "ok",
             }
         )
-    await Message.create(
+    user_msg = await Message.create(
         conversation_id=conversation_id,
         role="user",
         blocks=blocks,
@@ -72,6 +72,8 @@ async def start_run(
             **({"skill_name": skill_name} if skill_name else {}),
         },
     )
+    user_msg.run_id = str(run.id)
+    await user_msg.save(update_fields=["run_id"])
     conv.active_run_id = str(run.id)
     conv.mode = mode
     conv.model_id = model_id
