@@ -28,4 +28,16 @@ export default defineConfig({
     include: ['monaco-editor', 'dockview-vue'],
     exclude: ['monaco-editor/editor/editor.worker.js'],
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/monaco-editor')) return 'monaco'
+          if (id.includes('node_modules/dockview')) return 'dockview'
+          if (id.includes('node_modules/@opentiny')) return 'opentiny'
+          if (id.includes('node_modules/@xterm')) return 'xterm'
+        },
+      },
+    },
+  },
 })

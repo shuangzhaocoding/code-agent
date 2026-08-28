@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { rendererFor } from '@/renderers'
 import type { Block, ChatMessage } from '@/protocol/applyEvent'
-import { classifyBlock, isConversationBlock } from '@/utils/trajectory'
+import { classifyBlock, isAnswerMarkdown, isConversationBlock } from '@/utils/trajectory'
 import AppIcon from '@/components/AppIcon.vue'
 
 const props = defineProps<{
@@ -21,18 +21,31 @@ const workBlocks = computed(() =>
   props.msg.blocks.filter((b) => !isConversationBlock(b.type) && b.type !== 'error'),
 )
 const answerBlocks = computed(() => {
-  const always = props.msg.blocks.filter((b) => isConversationBlock(b.type) || b.type === 'error')
-  if (!finished.value) return always
-  const mds = always.filter((b) => b.type === 'assistant.markdown')
-  if (mds.length <= 1) return always
-  const lastMd = mds[mds.length - 1]
-  return always.filter((b) => b.type !== 'assistant.markdown' || b === lastMd)
+  const candidates = props.msg.blocks.filter(
+    (b) => (b.type === 'assistant.markdown' && isAnswerMarkdown(b as Block)) || b.type === 'error',
+  )
+  if (!finished.value) {
+    return props.msg.blocks.filter((b) => isConversationBlock(b.type) || b.type === 'error')
+  }
+  if (candidates.length <= 1) {
+    return props.msg.blocks.filter((b) => isConversationBlock(b.type) || b.type === 'error')
+  }
+  const lastMd = candidates[candidates.length - 1]
+  return props.msg.blocks.filter(
+    (b) =>
+      b.type === 'error' ||
+      b.type === 'user.text' ||
+      b.type === 'approval' ||
+      (b.type === 'assistant.markdown' && b === lastMd),
+  )
 })
 
 const collapsedMarkdown = computed(() => {
   if (!finished.value) return [] as Block[]
   const answers = new Set(answerBlocks.value.map((b) => b.id))
-  return props.msg.blocks.filter((b) => b.type === 'assistant.markdown' && !answers.has(b.id))
+  return props.msg.blocks.filter(
+    (b) => b.type === 'assistant.markdown' && !answers.has(b.id),
+  )
 })
 
 const hiddenWorkCount = computed(() => workBlocks.value.length + collapsedMarkdown.value.length)

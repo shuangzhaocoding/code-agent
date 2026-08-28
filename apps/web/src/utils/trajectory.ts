@@ -28,6 +28,17 @@ export type TimelineSpan = {
 
 const CONVERSATION_TYPES = new Set(['user.text', 'assistant.markdown', 'approval'])
 
+/** Markdown blocks that are not user-facing answers (e.g. leaked JSON from internal LLM calls). */
+export function isAnswerMarkdown(block: Block): boolean {
+  if (block.type !== 'assistant.markdown') return false
+  const meta = block.meta || {}
+  if (meta.kind === 'model_switch') return false
+  const text = String(block.text || '').trim()
+  if (!text || text === '[]' || text === '{}') return false
+  if (/^\[\s*\]$/.test(text)) return false
+  return true
+}
+
 const READ_TOOLS = new Set([
   'read_file',
   'list_dir',

@@ -8,7 +8,7 @@ install:
 	cd apps/web && npm install
 
 api:
-	cd apps/api && python3.11 -m uvicorn code_agent.main:app --reload --host 127.0.0.1 --port $(API_PORT)
+	cd apps/api && python3.11 -m uvicorn code_agent.main:app --host 127.0.0.1 --port $(API_PORT)
 
 web:
 	cd apps/web && CODE_AGENT_PORT=$(API_PORT) CODE_AGENT_DEV_UI_PORT=$(DEV_UI_PORT) npm run dev

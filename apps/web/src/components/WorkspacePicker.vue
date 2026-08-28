@@ -46,7 +46,7 @@ const recents = computed(() => store.recentWorkspaces)
         <span>Code Agent</span>
       </div>
       <div class="launch-actions">
-        <LanguageSelect />
+        <LanguageSelect compact />
         <button type="button" class="launch-theme" :title="t('theme.toggle')" @click="onToggleTheme">
           <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
         </button>

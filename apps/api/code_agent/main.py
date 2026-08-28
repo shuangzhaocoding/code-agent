@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from tortoise.contrib.fastapi import RegisterTortoise
 
+from code_agent.agent.checkpointer import checkpointer_lifespan
 from code_agent.config import settings
 from code_agent.crypto import encrypt_secret
 from code_agent.db.models import LlmModel, LlmProvider
@@ -15,7 +16,7 @@ from code_agent.db.schema import upgrade_llm_schema
 from code_agent.llm.hub import apply_preset, register_builtin_providers
 from code_agent.llm.models_sync import sync_provider_models
 from code_agent.plugins.loader import apply_plugin_states, load_plugins
-from code_agent.routers import conversations, git, llm, preview, runs, settings as settings_router, skills, terminals, uploads, workspaces
+from code_agent.routers import conversations, git, llm, memories, preview, runs, settings as settings_router, skills, terminals, uploads, workspaces
 from code_agent.tools.host import register_builtin_tools
 
 async def _seed_llm_from_env() -> None:
@@ -57,25 +58,26 @@ async def _seed_llm_from_env() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    async with RegisterTortoise(
-        app,
-        db_url=settings.db_url,
-        modules={"models": ["code_agent.db.models"]},
-        generate_schemas=True,
-        _enable_global_fallback=True,
-    ):
-        register_builtin_providers()
-        register_builtin_tools()
-        load_plugins()
-        await apply_plugin_states()
-        await upgrade_llm_schema()
-        await _seed_llm_from_env()
-        static_dir = settings.resolve_static_dir()
-        if static_dir:
-            print(f"Serving UI static files from {static_dir}")
-        print(f"Code Agent API on {settings.get('server.host')}:{settings.get('server.port')}")
-        print("Default bind is localhost. Do not expose an unauthenticated instance to the internet.")
-        yield
+    async with checkpointer_lifespan():
+        async with RegisterTortoise(
+            app,
+            db_url=settings.db_url,
+            modules={"models": ["code_agent.db.models"]},
+            generate_schemas=True,
+            _enable_global_fallback=True,
+        ):
+            register_builtin_providers()
+            register_builtin_tools()
+            load_plugins()
+            await apply_plugin_states()
+            await upgrade_llm_schema()
+            await _seed_llm_from_env()
+            static_dir = settings.resolve_static_dir()
+            if static_dir:
+                print(f"Serving UI static files from {static_dir}")
+            print(f"Code Agent API on {settings.get('server.host')}:{settings.get('server.port')}")
+            print("Default bind is localhost. Do not expose an unauthenticated instance to the internet.")
+            yield
 
 
 def create_app() -> FastAPI:
@@ -92,6 +94,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(workspaces.router)
+    app.include_router(memories.router)
     app.include_router(git.router)
     app.include_router(conversations.router)
     app.include_router(runs.router)

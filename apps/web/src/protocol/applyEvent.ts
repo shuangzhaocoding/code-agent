@@ -19,57 +19,78 @@ export type ChatMessage = {
   ended_at?: string | null
 }
 
+function findAssistantIndex(messages: ChatMessage[], runId: string): number {
+  return messages.findIndex((m) => m.role === 'assistant' && (m.run_id === runId || m.id === `run-${runId}`))
+}
+
 export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): ChatMessage[] {
   const payload = event.payload || {}
   if (event.type === 'block.started') {
-    const next = messages.map((m) => ({ ...m, blocks: m.blocks.map((b) => ({ ...b })) }))
-    let assistant = [...next].reverse().find((m) => m.role === 'assistant' && m.run_id === event.run_id)
-    if (!assistant) {
-      assistant = {
+    const idx = findAssistantIndex(messages, event.run_id)
+    if (idx >= 0) {
+      const target = messages[idx]
+      if (target.blocks.some((b) => b.id === payload.block_id)) return messages
+      const next = messages.slice()
+      next[idx] = {
+        ...target,
+        blocks: [
+          ...target.blocks,
+          {
+            id: String(payload.block_id),
+            type: String(payload.block_type || 'assistant.markdown'),
+            text: '',
+            meta: (payload.meta as Record<string, unknown>) || {},
+            status: 'streaming',
+            started_at: Date.now(),
+          },
+        ],
+      }
+      return next
+    }
+    return [
+      ...messages,
+      {
         id: `run-${event.run_id}`,
         role: 'assistant',
         run_id: event.run_id,
-        blocks: [],
-      }
-      next.push(assistant)
-    }
-    if (!assistant.blocks.some((b) => b.id === payload.block_id)) {
-      assistant.blocks.push({
-        id: String(payload.block_id),
-        type: String(payload.block_type || 'assistant.markdown'),
-        text: '',
-        meta: (payload.meta as Record<string, unknown>) || {},
-        status: 'streaming',
-        started_at: Date.now(),
-      })
-      if (!assistant.created_at) {
-        assistant.created_at = new Date().toISOString()
-      }
-    }
-    return next
+        blocks: [
+          {
+            id: String(payload.block_id),
+            type: String(payload.block_type || 'assistant.markdown'),
+            text: '',
+            meta: (payload.meta as Record<string, unknown>) || {},
+            status: 'streaming',
+            started_at: Date.now(),
+          },
+        ],
+        created_at: new Date().toISOString(),
+      },
+    ]
   }
   if (event.type === 'block.delta' || event.type === 'block.completed') {
-    return messages.map((m) => {
-      if (m.run_id !== event.run_id && m.id !== `run-${event.run_id}`) return m
-      return {
-        ...m,
-        blocks: m.blocks.map((b) => {
-          if (b.id !== payload.block_id) return b
-          const copy = { ...b, meta: { ...b.meta } }
-          if (event.type === 'block.delta') {
-            // Don't keep "printing" a thinking/answer card after it completed
-            if (b.status && b.status !== 'streaming') return b
-            copy.text += String(payload.text || '')
-            if (payload.meta) Object.assign(copy.meta, payload.meta)
-          } else {
-            copy.status = String(payload.status || 'ok')
-            copy.ended_at = Date.now()
-            if (payload.meta) Object.assign(copy.meta, payload.meta)
-          }
-          return copy
-        }),
+    const idx = findAssistantIndex(messages, event.run_id)
+    if (idx < 0) return messages
+    const target = messages[idx]
+    let touched = false
+    const blocks = target.blocks.map((b) => {
+      if (b.id !== payload.block_id) return b
+      touched = true
+      const copy = { ...b, meta: { ...b.meta } }
+      if (event.type === 'block.delta') {
+        if (b.status && b.status !== 'streaming') return b
+        copy.text += String(payload.text || '')
+        if (payload.meta) Object.assign(copy.meta, payload.meta)
+      } else {
+        copy.status = String(payload.status || 'ok')
+        copy.ended_at = Date.now()
+        if (payload.meta) Object.assign(copy.meta, payload.meta)
       }
+      return copy
     })
+    if (!touched) return messages
+    const next = messages.slice()
+    next[idx] = { ...target, blocks }
+    return next
   }
   return messages
 }

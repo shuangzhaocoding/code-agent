@@ -154,6 +154,9 @@ const skillName = computed(() => {
   color: var(--text-h);
   font-size: 14px;
   line-height: 1.7;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
 }
 .user-text-inline {
   display: inline;
@@ -174,14 +177,19 @@ const skillName = computed(() => {
   display: inline;
 }
 .user-images {
+  --thumb-size: 120px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
+  width: fit-content;
+  max-width: 100%;
 }
 .user-image {
   display: block;
-  max-width: min(280px, 100%);
+  flex: 0 0 auto;
+  width: var(--thumb-size);
+  height: var(--thumb-size);
   border-radius: 8px;
   overflow: hidden;
   border: 1px solid var(--border);
@@ -195,11 +203,14 @@ const skillName = computed(() => {
 }
 .user-image img {
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+.user-text :deep(.markdown-body) {
+  width: fit-content;
   max-width: 100%;
-  max-height: 220px;
-  width: auto;
-  height: auto;
-  object-fit: contain;
 }
 .user-files {
   margin: 0 0 8px;

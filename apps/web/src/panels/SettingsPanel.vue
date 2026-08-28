@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
+import FormSelect from '@/components/FormSelect.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
 
 type SchemaSpec = {
@@ -82,6 +83,14 @@ function enumLabel(key: string, value: string) {
   return te(i18nKey) ? t(i18nKey) : value
 }
 
+function enumOptions(key: string) {
+  const values = specFor(key).enum || []
+  return values.map((value) => ({
+    value,
+    label: enumLabel(key, value),
+  }))
+}
+
 async function save() {
   await store.saveSettings({ ...local })
   saved.value = true
@@ -135,7 +144,7 @@ async function save() {
                 <label>{{ t('language.label') }}</label>
                 <p class="setting-key">{{ t('settings.languageLead') }}</p>
               </div>
-              <LanguageSelect />
+              <LanguageSelect :show-label="false" />
             </div>
           </section>
           <section v-for="group in groups" :id="`settings-${group.id}`" :key="group.id" class="settings-group">
@@ -150,16 +159,13 @@ async function save() {
               <code v-if="key.includes('.')" class="setting-key">{{ key }}</code>
             </div>
 
-            <select
+            <FormSelect
               v-if="specFor(key).enum"
               :id="key"
-              v-model="local[key]"
-              class="field-control setting-input"
-            >
-              <option v-for="opt in specFor(key).enum" :key="opt" :value="opt">
-                {{ enumLabel(key, opt) }}
-              </option>
-            </select>
+              v-model="local[key] as string"
+              class="setting-select"
+              :options="enumOptions(key)"
+            />
 
             <textarea
               v-else-if="specFor(key).format === 'textarea'"
@@ -347,6 +353,9 @@ async function save() {
   width: 100%;
   font-size: 12px;
   padding: 6px 9px;
+}
+.setting-select {
+  max-width: 360px;
 }
 .setting-input.field-control {
   min-height: 30px;

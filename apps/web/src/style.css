@@ -185,7 +185,21 @@ html, body, #app {
 }
 
 html {
+  scroll-behavior: smooth;
   scrollbar-gutter: stable;
+}
+
+/* Panel / menu scroll regions */
+.timeline,
+.trajectory-ledger,
+.mention-list,
+.menu-body,
+.palette-list,
+.history-list,
+.session-list,
+.settings-panel,
+.think-body {
+  scroll-behavior: smooth;
 }
 
 * {

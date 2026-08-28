@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -14,6 +15,20 @@ from code_agent.tools.context import get_run_id, get_workspace
 from code_agent.tools.paths import read_text_file, resolve_in_workspace, walk_files
 from code_agent.policy.engine import command_needs_confirm, is_command_blocked, is_protected
 from code_agent.tools.approval import request_approval
+
+
+async def _run_sync(fn, *args, **kwargs):
+    return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def _read_text_for_edit(path: Path) -> str:
+    """Read file text for write/replace tools; never raises UnicodeDecodeError."""
+    if not path.is_file():
+        return ""
+    data = path.read_bytes()
+    if b"\x00" in data[:4096]:
+        raise ValueError("binary file")
+    return data.decode("utf-8", errors="replace")
 
 
 async def _emit(block_type: str, meta: dict, text: str = "", complete: bool = True) -> None:
@@ -43,7 +58,7 @@ async def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
     file_path = resolve_in_workspace(_root(), path)
     if not file_path.is_file():
         return f"ERROR: file not found: {path}"
-    text = read_text_file(file_path)
+    text = await _run_sync(read_text_file, file_path)
     lines = text.splitlines()
     start = max(offset - 1, 0)
     end = min(start + max(limit, 1), len(lines))
@@ -57,7 +72,7 @@ async def list_dir(path: str = ".") -> str:
     """List a directory. Path may be workspace-relative or absolute (incl. ~)."""
     from code_agent.tools.paths import list_dir as _list
 
-    items = _list(_root(), path)
+    items = await _run_sync(_list, _root(), path)
     lines = [("📁 " if i["is_dir"] else "📄 ") + i["path"] for i in items]
     return "\n".join(lines) or "(empty)"
 
@@ -68,7 +83,7 @@ async def glob_search(pattern: str) -> str:
     import fnmatch
 
     matches = []
-    for rel, _path in walk_files(_root()):
+    for rel, _path in await _run_sync(lambda: list(walk_files(_root()))):
         if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(Path(rel).name, pattern):
             matches.append(rel)
         if len(matches) >= 200:
@@ -88,7 +103,13 @@ async def grep_search(query: str, glob: str = "", regex: bool = False) -> str:
             cmd.append("-F")
         cmd.extend([query, _root()])
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            proc = await _run_sync(
+                subprocess.run,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
         except subprocess.TimeoutExpired:
             return "ERROR: grep timed out"
         lines = proc.stdout.splitlines()[:max_hits]
@@ -97,14 +118,15 @@ async def grep_search(query: str, glob: str = "", regex: bool = False) -> str:
     flags = re.IGNORECASE
     cre = re.compile(query if regex else re.escape(query), flags)
     hits: list[str] = []
-    for rel, path in walk_files(_root()):
+    files = await _run_sync(lambda: list(walk_files(_root())))
+    for rel, path in files:
         if glob:
             import fnmatch
 
             if not fnmatch.fnmatch(rel, glob) and not fnmatch.fnmatch(path.name, glob):
                 continue
         try:
-            text = read_text_file(path)
+            text = await _run_sync(read_text_file, path)
         except Exception:
             continue
         for i, line in enumerate(text.splitlines(), 1):
@@ -121,21 +143,27 @@ async def write_file(path: str, content: str) -> str:
     if is_protected(path):
         return f"ERROR: protected file, cannot write: {path}"
     file_path = resolve_in_workspace(_root(), path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    old = file_path.read_text(encoding="utf-8") if file_path.exists() else ""
-    file_path.write_text(content, encoding="utf-8")
-    import difflib
+    def _write() -> tuple[str, str, str]:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        old = _read_text_for_edit(file_path) if file_path.exists() else ""
+        file_path.write_text(content, encoding="utf-8")
+        import difflib
 
-    created = not old
-    action = "create" if created else "overwrite"
-    diff = "".join(
-        difflib.unified_diff(
-            old.splitlines(True),
-            content.splitlines(True),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
+        action = "create" if not old else "overwrite"
+        diff = "".join(
+            difflib.unified_diff(
+                old.splitlines(True),
+                content.splitlines(True),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+            )
         )
-    )
+        return old, action, diff
+
+    try:
+        old, action, diff = await _run_sync(_write)
+    except ValueError:
+        return f"ERROR: binary file, cannot write as text: {path}"
     await _emit(
         "file.diff",
         {
@@ -159,21 +187,30 @@ async def search_replace(path: str, old_string: str, new_string: str) -> str:
     file_path = resolve_in_workspace(_root(), path)
     if not file_path.is_file():
         return f"ERROR: file not found: {path}"
-    text = file_path.read_text(encoding="utf-8")
-    if old_string not in text:
-        return "ERROR: old_string not found"
-    updated = text.replace(old_string, new_string, 1)
-    file_path.write_text(updated, encoding="utf-8")
-    import difflib
+    def _replace() -> tuple[str, str, str]:
+        text = _read_text_for_edit(file_path)
+        if old_string not in text:
+            raise ValueError("old_string not found")
+        updated = text.replace(old_string, new_string, 1)
+        file_path.write_text(updated, encoding="utf-8")
+        import difflib
 
-    diff = "".join(
-        difflib.unified_diff(
-            text.splitlines(True),
-            updated.splitlines(True),
-            fromfile=f"a/{path}",
-            tofile=f"b/{path}",
+        diff = "".join(
+            difflib.unified_diff(
+                text.splitlines(True),
+                updated.splitlines(True),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+            )
         )
-    )
+        return text, updated, diff
+
+    try:
+        text, updated, diff = await _run_sync(_replace)
+    except ValueError as exc:
+        if str(exc) == "binary file":
+            return f"ERROR: binary file, cannot edit as text: {path}"
+        return "ERROR: old_string not found"
     await _emit(
         "file.diff",
         {"path": path, "action": "edit", "before": text, "after": updated},
@@ -192,16 +229,20 @@ async def delete_file(path: str) -> str:
         return f"ERROR: not found: {path}"
     if not await request_approval("delete_file", f"删除 {path}", {"path": path}, kind="delete"):
         return "ERROR: user denied this operation"
-    before = ""
-    if file_path.is_file():
-        try:
-            before = file_path.read_text(encoding="utf-8")
-        except Exception:
-            before = ""
-    if file_path.is_dir():
-        shutil.rmtree(file_path)
-    else:
-        file_path.unlink()
+    def _delete() -> str:
+        before = ""
+        if file_path.is_file():
+            try:
+                before = _read_text_for_edit(file_path)
+            except ValueError:
+                before = ""
+        if file_path.is_dir():
+            shutil.rmtree(file_path)
+        else:
+            file_path.unlink()
+        return before
+
+    before = await _run_sync(_delete)
     await _emit("file.delete", {"path": path, "action": "delete", "before": before, "after": ""})
     return f"Deleted {path}"
 
@@ -226,12 +267,15 @@ async def run_command(command: str, cwd: str = ".") -> str:
     timeout = int(settings.get("agent.tool_timeout_sec") or 90)
     max_chars = int(settings.get("agent.max_tool_output_chars") or 12000)
     try:
-        proc = subprocess.run(
+        proc = await _run_sync(
+            subprocess.run,
             command,
             shell=True,
             cwd=str(work),
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )

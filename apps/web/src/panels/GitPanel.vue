@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
+import { gitMarkLabel } from '@/utils/gitStatus'
 import AppIcon from '@/components/AppIcon.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import GitGraphRow from '@/panels/GitGraphRow.vue'
@@ -341,12 +342,7 @@ async function onCtxSelect(id: string) {
 }
 
 function mark(code: string) {
-  if (code.includes('?')) return '未跟踪'
-  if (code.includes('D')) return '删除'
-  if (code.includes('A')) return '新增'
-  if (code.includes('M')) return '修改'
-  if (code.includes('U')) return '冲突'
-  return code.trim() || '改动'
+  return gitMarkLabel(code)
 }
 
 async function run(label: string, fn: () => Promise<void>) {

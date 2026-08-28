@@ -168,7 +168,7 @@ function scrollToSelected() {
   const listRect = list.getBoundingClientRect()
   const itemRect = active.getBoundingClientRect()
   const delta = itemRect.top + itemRect.height / 2 - (listRect.top + listRect.height / 2)
-  list.scrollTop += delta
+  list.scrollTo({ top: list.scrollTop + delta, behavior: 'smooth' })
 }
 
 function openMenu() {

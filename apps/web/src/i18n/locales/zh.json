@@ -75,6 +75,7 @@
     "ports": "端口",
     "git": "Git",
     "skills": "Skill",
+    "memory": "记忆",
     "plugins": "插件",
     "models": "模型",
     "settings": "设置",
@@ -557,6 +558,34 @@
     "originWorkspace": "工作区",
     "all": "全部",
     "fallback": "插件"
+  },
+  "memory": {
+    "title": "工作区记忆",
+    "hint": "跨会话的结构化事实；含称呼、偏好、目标、决策等。Agent 在新对话中会自动引用。",
+    "tipTitle": "会自动记住什么？",
+    "tipBody": "例如你的称呼、协作偏好、项目目标、技术决策、约定与踩坑经验。说「记住我」或在对话中明确决策即可。",
+    "search": "搜索记忆…",
+    "filterAll": "全部",
+    "statsTotal": "共 {n} 条",
+    "statsProfile": "{n} 条身份",
+    "noMatch": "没有匹配的记忆",
+    "empty": "还没有工作区记忆",
+    "emptyHint": "试试发送「我是 Rick，记住我」，或让 Agent 完成一次任务后自动抽取。",
+    "kinds": {
+      "profile": "用户身份",
+      "preference": "偏好",
+      "goal": "目标",
+      "context": "背景",
+      "workflow": "协作方式",
+      "decision": "决策",
+      "architecture": "架构",
+      "convention": "约定",
+      "fact": "事实",
+      "bug_fix": "修复",
+      "lesson": "教训",
+      "dependency": "依赖",
+      "todo": "待办"
+    }
   },
   "skills": {
     "lead": "Agent 可按任务自动加载的指令包。放好目录后刷新即可发现。",

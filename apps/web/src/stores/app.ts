@@ -5,6 +5,7 @@ import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
+import { gitMarkKind, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -19,11 +20,17 @@ export type Conversation = {
   mode: string
   model_id: string | null
   active_run_id: string | null
+  turn_count?: number
   created_at?: string | null
   updated_at?: string | null
 }
 
 export type FsItem = { name: string; path: string; is_dir: boolean }
+export type FileTreeMark = {
+  show: boolean
+  title: string
+  kind: GitMarkKind | ''
+}
 export type OpenFile = {
   path: string
   kind: OpenFileKind
@@ -182,7 +189,8 @@ export const useAppStore = defineStore('app', () => {
   const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
   const activity = ref('agent')
   const pendingModelProbe = ref(false)
-  const gitChangedPaths = ref<Record<string, string>>({})
+  const gitChangedPaths = ref<Record<string, GitPathMark>>({})
+  const gitRepoOk = ref(false)
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
   let treeTimer: ReturnType<typeof setTimeout> | null = null
@@ -230,6 +238,7 @@ export const useAppStore = defineStore('app', () => {
     expanded.value = new Set()
     treePath.value = ''
     gitChangedPaths.value = {}
+    gitRepoOk.value = false
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
   }
@@ -280,6 +289,7 @@ export const useAppStore = defineStore('app', () => {
     childrenMap.value = {}
     expanded.value = new Set()
     gitChangedPaths.value = {}
+    gitRepoOk.value = false
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
     await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
@@ -421,22 +431,10 @@ export const useAppStore = defineStore('app', () => {
     setExpanded(next)
   }
 
-  function gitMarkKey(code: string) {
-    if (code.includes('?')) return 'untracked'
-    if (code.includes('A')) return 'added'
-    if (code.includes('D')) return 'deleted'
-    if (code.includes('M')) return 'modified'
-    return 'changed'
-  }
-
-  function treeTitle(key: string) {
-    const i18nKey = `tree.${key}`
-    return t(i18nKey)
-  }
-
   async function loadGitChangedPaths() {
     if (!workspaceId.value) {
       gitChangedPaths.value = {}
+      gitRepoOk.value = false
       return
     }
     try {
@@ -445,16 +443,21 @@ export const useAppStore = defineStore('app', () => {
       )
       if (!status.ok) {
         gitChangedPaths.value = {}
+        gitRepoOk.value = false
         return
       }
-      const next: Record<string, string> = {}
+      gitRepoOk.value = true
+      const next: Record<string, GitPathMark> = {}
       for (const file of status.files) {
-        next[file.path] = gitMarkKey(file.code)
+        next[file.path] = { kind: gitMarkKind(file.code), code: file.code.trim() }
       }
       const prev = gitChangedPaths.value
       const same =
         Object.keys(next).length === Object.keys(prev).length &&
-        Object.keys(next).every((path) => prev[path] === next[path])
+        Object.keys(next).every((path) => {
+          const mark = prev[path]
+          return mark && mark.kind === next[path].kind && mark.code === next[path].code
+        })
       if (!same) gitChangedPaths.value = next
       if (Object.keys(next).length) {
         const session = { ...sessionTreeMarks.value }
@@ -463,6 +466,7 @@ export const useAppStore = defineStore('app', () => {
       }
     } catch {
       gitChangedPaths.value = {}
+      gitRepoOk.value = false
     }
   }
 
@@ -1104,16 +1108,6 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function deleteConversation(id: string) {
-    const target = conversations.value.find((c) => c.id === id)
-    const ok = await askConfirm({
-      title: t('confirm.deleteSessionTitle'),
-      summary: target ? t('confirm.deleteSessionNamed', { title: target.title }) : t('confirm.deleteSession'),
-      confirmLabel: t('common.delete'),
-      cancelLabel: t('common.cancel'),
-      danger: true,
-    })
-    if (!ok) return
-
     await api(`/api/conversations/${id}`, { method: 'DELETE' })
     conversations.value = conversations.value.filter((c) => c.id !== id)
 
@@ -1128,6 +1122,22 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     await newChat()
+  }
+
+  async function renameConversation(id: string, title: string) {
+    const trimmed = title.trim()
+    if (!trimmed) return false
+    const row = conversations.value.find((c) => c.id === id)
+    if (!row || row.title === trimmed) return true
+
+    await api(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: trimmed }),
+    })
+    conversations.value = conversations.value.map((c) =>
+      c.id === id ? { ...c, title: trimmed } : c,
+    )
+    return true
   }
 
   function eventPath(event: StreamEnvelope): string | null {
@@ -1510,8 +1520,9 @@ export const useAppStore = defineStore('app', () => {
     return openFiles.value.some((f) => f.path === path && f.dirty)
   }
 
-  const markedAncestorPaths = computed(() => {
+  const gitMarkedAncestorPaths = computed(() => {
     const out = new Set<string>()
+    if (!gitRepoOk.value) return out
     const addAncestors = (path: string) => {
       const parts = path.split('/').filter(Boolean)
       let acc = ''
@@ -1520,40 +1531,28 @@ export const useAppStore = defineStore('app', () => {
         out.add(acc)
       }
     }
-    for (const file of openFiles.value) {
-      if (file.dirty) addAncestors(file.path)
-    }
-    for (const [path, review] of Object.entries(reviews.value)) {
-      if (review.status === 'pending') addAncestors(path)
-    }
     for (const path of Object.keys(gitChangedPaths.value)) {
-      if (!ackedTreeMarks.value[path]) addAncestors(path)
-    }
-    for (const path of Object.keys(sessionTreeMarks.value)) {
-      if (!ackedTreeMarks.value[path]) addAncestors(path)
+      addAncestors(path)
     }
     return out
   })
 
-  function fileTreeMark(path: string, isDir = false) {
+  function fileTreeMark(path: string, isDir = false): FileTreeMark {
+    const empty: FileTreeMark = { show: false, title: '', kind: '' }
+    if (!gitRepoOk.value) return empty
+
     if (isDir) {
-      const own = gitChangedPaths.value[path] || sessionTreeMarks.value[path]
-      if (own) return { show: true, title: treeTitle(own) }
-      if (markedAncestorPaths.value.has(path)) return { show: true, title: t('tree.containsChanges') }
-      return { show: false, title: '' }
+      const own = gitChangedPaths.value[path]
+      if (own) return { show: true, title: gitMarkTitle(own, path), kind: own.kind }
+      if (gitMarkedAncestorPaths.value.has(path)) {
+        return { show: true, title: t('tree.containsChanges'), kind: 'changed' }
+      }
+      return empty
     }
-    if (isFileDirty(path)) return { show: true, title: t('tree.unsaved') }
-    const review = pendingReview(path)
-    if (review) {
-      const isNew = review.action === 'create' || !review.before
-      return { show: true, title: isNew ? t('tree.addedPending') : t('tree.modifiedPending') }
-    }
-    if (ackedTreeMarks.value[path]) return { show: false, title: '' }
-    const gitTitle = gitChangedPaths.value[path]
-    if (gitTitle) return { show: true, title: treeTitle(gitTitle) }
-    const sessionTitle = sessionTreeMarks.value[path]
-    if (sessionTitle) return { show: true, title: treeTitle(sessionTitle) }
-    return { show: false, title: '' }
+
+    const git = gitChangedPaths.value[path]
+    if (git) return { show: true, title: gitMarkTitle(git, path), kind: git.kind }
+    return empty
   }
 
   return {
@@ -1638,12 +1637,14 @@ export const useAppStore = defineStore('app', () => {
     reloadOpenFile,
     isFileDirty,
     fileTreeMark,
+    gitRepoOk,
     loadGitChangedPaths,
     gitChangedPaths,
     loadConversations,
     newChat,
     openConversation,
     deleteConversation,
+    renameConversation,
     send,
     sendNow,
     sendQueuedNow,

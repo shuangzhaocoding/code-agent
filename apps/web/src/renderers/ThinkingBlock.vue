@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { scrollToBottom } from '@/utils/smoothScroll'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { Block } from '@/protocol/applyEvent'
@@ -40,7 +41,7 @@ function renderNow(text: string) {
   scrollRaf = requestAnimationFrame(() => {
     scrollRaf = 0
     const el = bodyEl.value
-    if (el) el.scrollTop = el.scrollHeight
+    if (el) scrollToBottom(el, 'auto')
   })
 }
 

@@ -32,6 +32,7 @@ const navItems = computed(() => [
 
 const footItems = computed(() => [
   { id: 'skills', component: 'skills', title: t('panels.skills'), label: t('panels.skills'), icon: 'book' },
+  { id: 'memory', component: 'memory', title: t('panels.memory'), label: t('panels.memory'), icon: 'memory' },
   { id: 'plugins', component: 'plugins', title: t('panels.plugins'), label: t('panels.plugins'), icon: 'puzzle' },
   { id: 'models', component: 'models', title: t('panels.models'), label: t('panels.models'), icon: 'chip' },
   { id: 'settings', component: 'settings', title: t('panels.settings'), label: t('panels.settings'), icon: 'sliders' },

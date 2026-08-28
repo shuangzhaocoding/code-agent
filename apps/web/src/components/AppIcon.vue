@@ -40,6 +40,7 @@ export type AppIconName =
   | 'rocket'
   | 'clock'
   | 'history'
+  | 'memory'
   | 'download'
   | 'panel-left'
   | 'panel-right'
@@ -202,6 +203,12 @@ const paths: Record<string, string[]> = {
     'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8',
     'M3 3v5h5',
     'M12 7v5l4 2',
+  ],
+  memory: [
+    'M8 4.5h10a1.5 1.5 0 0 1 1.5 1.5V17',
+    'M5.5 8.5h10a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5h-10a1.5 1.5 0 0 1-1.5-1.5v-8a1.5 1.5 0 0 1 1.5-1.5Z',
+    'M8.5 12.5h5',
+    'M8.5 15h3.5',
   ],
   download: [
     'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',

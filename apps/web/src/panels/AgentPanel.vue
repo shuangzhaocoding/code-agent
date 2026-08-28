@@ -13,6 +13,8 @@ import UserMessageHistoryMenu from '@/components/UserMessageHistoryMenu.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
+import { scrollToBottom, scrollToTop } from '@/utils/smoothScroll'
+import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
@@ -49,6 +51,12 @@ const { t } = useI18n()
 const store = useAppStore()
 const commandShortcut = paletteShortcutLabel()
 const scroller = ref<HTMLElement | null>(null)
+const virtualList = useVirtualList(toRef(store, 'messages'), scroller, { threshold: 40 })
+const messageRows = computed(() =>
+  virtualList.enabled.value
+    ? virtualList.visibleItems.value
+    : store.messages.map((item, index) => ({ item, index })),
+)
 
 /* ---- message actions ---- */
 const copyToast = ref(false)
@@ -193,13 +201,20 @@ let historyObs: IntersectionObserver | null = null
 function scrollToMessage(msgId: string) {
   pauseFollow()
   activeHistoryId.value = msgId
+  const idx = store.messages.findIndex((m) => m.id === msgId)
+  if (idx >= 0 && virtualList.enabled.value) {
+    nextTick(() => {
+      virtualList.scrollToIndex(idx, 'smooth')
+    })
+    return
+  }
   nextTick(() => {
     const container = scroller.value
     const el = document.getElementById(`msg-${msgId}`)
     if (!container || !el) return
     locking = true
     const top = el.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop - 12
-    container.scrollTop = Math.max(0, top)
+    scrollToTop(container, top, 'smooth')
     requestAnimationFrame(() => {
       locking = false
     })
@@ -818,21 +833,21 @@ function pauseFollow() {
   }
 }
 
-function jumpToEnd() {
+function jumpToEnd(behavior: ScrollBehavior = 'smooth') {
   if (!stick.value) return
   const el = scroller.value
   if (!el) return
   const token = followGen
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
-  if (Math.abs(el.scrollTop - top) < 2) return
+  if (behavior === 'auto' && Math.abs(el.scrollTop - top) < 2) return
   locking = true
-  el.scrollTop = top
+  scrollToTop(el, top, behavior)
   requestAnimationFrame(() => {
     if (token !== followGen || !stick.value) {
       locking = false
       return
     }
-    el.scrollTop = el.scrollHeight
+    scrollToBottom(el, behavior)
     requestAnimationFrame(() => {
       locking = false
     })
@@ -841,7 +856,7 @@ function jumpToEnd() {
 
 function scrollToEnd() {
   if (!stick.value) return
-  jumpToEnd()
+  jumpToEnd('smooth')
 }
 
 function resumeStickScroll() {
@@ -849,6 +864,7 @@ function resumeStickScroll() {
 }
 
 function onScroll() {
+  virtualList.onScroll()
   if (locking) return
   const el = scroller.value
   if (!el) return
@@ -872,7 +888,7 @@ function scheduleStickScroll() {
   pinRaf = requestAnimationFrame(() => {
     pinRaf = 0
     if (!stick.value) return
-    jumpToEnd()
+    jumpToEnd('auto')
   })
 }
 
@@ -884,7 +900,7 @@ async function pinToBottom() {
 
   const attempt = () => {
     if (token !== followGen || !stick.value) return
-    jumpToEnd()
+    jumpToEnd('smooth')
   }
 
   await nextTick()
@@ -1133,47 +1149,50 @@ function openContextUsageDialog() {
             </button>
           </div>
         </div>
+        <div v-if="virtualList.enabled.value" class="virtual-spacer" :style="{ height: `${virtualList.paddingTop.value}px` }" />
         <article
-          v-for="msg in store.messages"
-          :key="msg.id"
-          :id="'msg-' + msg.id"
-          :class="['msg-wrap', msg.role]"
+          v-for="row in messageRows"
+          :key="row.item.id"
+          :id="'msg-' + row.item.id"
+          :ref="virtualList.enabled.value ? (el) => virtualList.setItemEl(row.item.id, el as Element | null) : undefined"
+          :class="['msg-wrap', row.item.role]"
         >
-          <template v-if="msg.role === 'user'">
-            <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
-              <section v-for="block in msg.blocks" :key="block.id" class="block">
+          <template v-if="row.item.role === 'user'">
+            <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(row.item.id) && isLongMsg(row.item) }">
+              <section v-for="block in row.item.blocks" :key="block.id" class="block">
                 <component :is="rendererFor(block.type)" :block="block as Block" />
               </section>
             </div>
             <button
-              v-if="isLongMsg(msg)"
+              v-if="isLongMsg(row.item)"
               type="button"
               class="msg-expand-btn"
-              @click="toggleExpand(msg.id)"
-            >{{ expandedMsgs.has(msg.id) ? t('chat.collapse') : t('chat.expandAll') }}</button>
+              @click="toggleExpand(row.item.id)"
+            >{{ expandedMsgs.has(row.item.id) ? t('chat.collapse') : t('chat.expandAll') }}</button>
           </template>
           <template v-else>
             <AssistantMessageBody
-              :msg="msg"
-              :streaming="isAssistantStreaming(msg)"
+              :msg="row.item"
+              :streaming="isAssistantStreaming(row.item)"
               @toggle="onWorkToggle"
             />
           </template>
-          <div v-if="msg.role === 'user' || !isAssistantStreaming(msg)" class="msg-bar" :class="msg.role">
+          <div v-if="row.item.role === 'user' || !isAssistantStreaming(row.item)" class="msg-bar" :class="row.item.role">
             <span class="msg-time">
-              <template v-if="msg.created_at">{{ fmtTime(msg.created_at) }}</template>
-              <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · {{ t('time.duration', { value: fmtDuration(msg) }) }}</template>
+              <template v-if="row.item.created_at">{{ fmtTime(row.item.created_at) }}</template>
+              <template v-if="row.item.role === 'assistant' && row.item.ended_at"> · {{ fmtTime(row.item.ended_at) }} · {{ t('time.duration', { value: fmtDuration(row.item) }) }}</template>
             </span>
             <div class="msg-actions">
-              <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(msg)">
+              <button v-if="row.item.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(row.item)">
                 <AppIcon name="pencil" :size="14" />
               </button>
-              <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(msg)">
+              <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(row.item)">
                 <AppIcon name="copy" :size="14" />
               </button>
             </div>
           </div>
         </article>
+        <div v-if="virtualList.enabled.value" class="virtual-spacer" :style="{ height: `${virtualList.paddingBottom.value}px` }" />
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
           <button type="button" class="stop-inline" @click="store.stop()">{{ t('common.stop') }}</button>
@@ -1396,9 +1415,16 @@ function openContextUsageDialog() {
   flex: 1;
   min-width: 0;
   overflow-x: hidden;
-  overflow-y: scroll;
+  overflow-y: auto;
   overflow-anchor: none;
+  scroll-behavior: smooth;
+  scrollbar-gutter: auto;
   padding: 12px 20px 8px;
+}
+.timeline::-webkit-scrollbar-button {
+  display: none;
+  height: 0;
+  width: 0;
 }
 .timeline-inner {
   display: flex;
@@ -1406,6 +1432,10 @@ function openContextUsageDialog() {
   align-items: stretch;
   width: 100%;
   min-height: min-content;
+}
+.virtual-spacer {
+  flex: none;
+  width: 100%;
 }
 .empty {
   align-self: center;
@@ -1487,7 +1517,12 @@ article.msg-wrap.user {
   border-radius: 10px 10px 4px 10px;
   width: fit-content;
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
+}
+.msg-bubble :deep(.block) {
+  width: fit-content;
+  max-width: 100%;
 }
 .msg-wrap.user .msg-bubble {
   margin-left: auto;

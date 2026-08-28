@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, toRef, watch } from 'vue'
+import { scrollToBottom } from '@/utils/smoothScroll'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import TrajectoryOverview from '@/components/TrajectoryOverview.vue'
@@ -68,7 +69,7 @@ async function scrollToTail(force = false) {
   if (!force && !followTail.value) return
   await nextTick()
   const el = scroller.value
-  if (el) el.scrollTop = el.scrollHeight
+  if (el) scrollToBottom(el, force ? 'smooth' : 'auto')
 }
 
 watch(
@@ -227,6 +228,7 @@ watch(filter, () => scrollToTail(true))
   flex: 1;
   min-height: 0;
   overflow: auto;
+  scroll-behavior: smooth;
   padding: 8px 10px 16px;
 }
 .trajectory-empty {

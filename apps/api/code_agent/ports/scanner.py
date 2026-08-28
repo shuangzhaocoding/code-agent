@@ -1,7 +1,30 @@
 from __future__ import annotations
 
 import socket
+import time
 from pathlib import Path
+
+_PORT_CACHE: dict | None = None
+_PORT_CACHE_AT = 0.0
+_PORT_CACHE_TTL = 5.0
+
+
+def _cached_ports(exclude_ports: set[int] | None) -> list[dict]:
+    global _PORT_CACHE, _PORT_CACHE_AT
+    key = tuple(sorted(exclude_ports or []))
+    now = time.time()
+    if _PORT_CACHE and _PORT_CACHE.get("key") == key and now - _PORT_CACHE_AT < _PORT_CACHE_TTL:
+        return list(_PORT_CACHE["items"])
+    items = _scan_listening_ports(exclude_ports=exclude_ports)
+    _PORT_CACHE = {"key": key, "items": items}
+    _PORT_CACHE_AT = now
+    return list(items)
+
+
+def invalidate_port_cache() -> None:
+    global _PORT_CACHE, _PORT_CACHE_AT
+    _PORT_CACHE = None
+    _PORT_CACHE_AT = 0.0
 
 
 _LISTEN = "0A"
@@ -151,6 +174,11 @@ def format_open_url(connect_host: str, port: int) -> str:
 
 def list_listening_ports(*, exclude_ports: set[int] | None = None) -> list[dict]:
     """Return localhost-reachable TCP listeners on this host."""
+    return _cached_ports(exclude_ports)
+
+
+def _scan_listening_ports(*, exclude_ports: set[int] | None = None) -> list[dict]:
+    """Uncached port scan."""
     exclude = exclude_ports or set()
     owners = _inode_owners()
     by_port: dict[int, dict] = {}

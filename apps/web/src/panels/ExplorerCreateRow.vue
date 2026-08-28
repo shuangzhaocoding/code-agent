@@ -29,7 +29,7 @@ onMounted(() => {
   nextTick(() => {
     input.value?.focus()
     input.value?.select()
-    input.value?.scrollIntoView({ block: 'nearest' })
+    input.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   })
 })
 </script>

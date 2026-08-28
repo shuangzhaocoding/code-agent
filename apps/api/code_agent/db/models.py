@@ -26,11 +26,15 @@ class Conversation(Model):
     model_id = fields.CharField(max_length=64, null=True)
     active_run_id = fields.CharField(max_length=64, null=True)
     archived = fields.BooleanField(default=False)
+    summary = fields.TextField(null=True)
+    summary_covers_sort_key = fields.IntField(default=0)
+    summary_updated_at = fields.DatetimeField(null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     updated_at = fields.DatetimeField(auto_now=True)
 
     class Meta:
         table = "conversations"
+        indexes = (("workspace_id", "updated_at"),)
 
 
 class Message(Model):
@@ -44,6 +48,7 @@ class Message(Model):
 
     class Meta:
         table = "messages"
+        indexes = (("conversation_id", "sort_key"),)
 
 
 class Run(Model):
@@ -57,11 +62,13 @@ class Run(Model):
     usage_json = fields.JSONField(default=dict)
     last_event_id = fields.CharField(max_length=64, null=True)
     last_seq = fields.IntField(default=0)
+    graph_thread_id = fields.CharField(max_length=128, null=True)
     started_at = fields.DatetimeField(auto_now_add=True)
     ended_at = fields.DatetimeField(null=True)
 
     class Meta:
         table = "runs"
+        indexes = (("status",),)
 
 
 class RunEvent(Model):
@@ -154,6 +161,24 @@ class PluginState(Model):
 
     class Meta:
         table = "plugin_states"
+
+
+class WorkspaceMemory(Model):
+    id = fields.UUIDField(pk=True)
+    workspace = fields.ForeignKeyField("models.Workspace", related_name="memories")
+    kind = fields.CharField(max_length=40)
+    subject = fields.CharField(max_length=200)
+    content = fields.JSONField(default=dict)
+    tags = fields.JSONField(default=list)
+    source = fields.JSONField(default=dict)
+    confidence = fields.FloatField(default=1.0)
+    superseded_by = fields.UUIDField(null=True)
+    created_at = fields.DatetimeField(auto_now_add=True)
+    updated_at = fields.DatetimeField(auto_now=True)
+
+    class Meta:
+        table = "workspace_memories"
+        indexes = (("workspace_id", "kind"), ("workspace_id", "subject"))
 
 
 TORTOISE_ORM = {

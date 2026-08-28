@@ -19,6 +19,7 @@ paths:
   user_config: ~/.code-agent/config.yaml
   user_plugins: ~/.code-agent/plugins
   user_skills: ~/.code-agent/skills
+  checkpoint_db: auto
 
 uploads:
   dir: uploads
@@ -30,6 +31,34 @@ agent:
   max_tool_output_chars: 12000
   default_mode: agent
   system_prompt_extra: ""
+  sliding_window_size: 12
+  compress_threshold_tokens: 90000
+  use_legacy_react: false
+  memory:
+    enabled: true
+    max_inject: 10
+    always_inject_max: 5
+    extract_per_run: 5
+    always_inject_kinds:
+      - profile
+      - preference
+      - convention
+      - goal
+      - workflow
+    auto_kinds:
+      - profile
+      - preference
+      - goal
+      - context
+      - workflow
+      - decision
+      - architecture
+      - convention
+      - fact
+      - bug_fix
+      - lesson
+      - dependency
+      - todo
 
 workspace:
   max_file_bytes: 1048576

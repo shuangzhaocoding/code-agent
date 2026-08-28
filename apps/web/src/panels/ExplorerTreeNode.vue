@@ -86,6 +86,7 @@ function onRowClick() {
       <span
         v-if="mark.show"
         class="tree-dot"
+        :class="mark.kind ? `tree-dot--${mark.kind}` : undefined"
         :title="mark.title"
         :aria-label="mark.title"
       />
@@ -175,8 +176,26 @@ function onRowClick() {
   height: 6px;
   margin-left: auto;
   border-radius: 99px;
-  background: var(--primary);
+  background: var(--text-muted);
   flex-shrink: 0;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 18%, transparent);
+}
+.tree-dot--untracked,
+.tree-dot--added {
+  background: var(--traj-context);
+  color: var(--traj-context);
+}
+.tree-dot--modified {
+  background: var(--traj-tool);
+  color: var(--traj-tool);
+}
+.tree-dot--deleted,
+.tree-dot--conflict {
+  background: var(--danger);
+  color: var(--danger);
+}
+.tree-dot--changed {
+  background: var(--text-muted);
+  color: var(--text-muted);
 }
 </style>

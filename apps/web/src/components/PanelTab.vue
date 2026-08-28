@@ -30,6 +30,7 @@ const icons: Record<string, string> = {
   models: 'chip',
   settings: 'sliders',
   trajectory: 'clock',
+  memory: 'memory',
 }
 
 const panelApi = computed(() => props.api || props.params?.api || props.params?.params?.api)

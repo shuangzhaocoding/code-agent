@@ -1,32 +1,34 @@
 <script setup lang="ts">
 import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
+import AgentPanel from '@/panels/AgentPanel.vue'
 import SessionSidebar from '@/components/SessionSidebar.vue'
 import PanelTab from '@/components/PanelTab.vue'
-import TrajectoryDockPanel from '@/panels/TrajectoryDockPanel.vue'
-import WorkspacePanel from '@/panels/WorkspacePanel.vue'
-import ExplorerPanel from '@/panels/ExplorerPanel.vue'
-import SearchPanel from '@/panels/SearchPanel.vue'
-import EditorPanel from '@/panels/EditorPanel.vue'
-import AgentPanel from '@/panels/AgentPanel.vue'
-import TerminalPanel from '@/panels/TerminalPanel.vue'
-import ChatListPanel from '@/panels/ChatListPanel.vue'
-import SkillsPanel from '@/panels/SkillsPanel.vue'
-import PluginsPanel from '@/panels/PluginsPanel.vue'
-import ModelsPanel from '@/panels/ModelsPanel.vue'
-import SettingsPanel from '@/panels/SettingsPanel.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
-import GitPanel from '@/panels/GitPanel.vue'
-import PortsPanel from '@/panels/PortsPanel.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { getSidebarCollapsed, setSidebarCollapsed } from '@/utils/layoutPrefs'
+
+const TrajectoryDockPanel = defineAsyncComponent(() => import('@/panels/TrajectoryDockPanel.vue'))
+const WorkspacePanel = defineAsyncComponent(() => import('@/panels/WorkspacePanel.vue'))
+const ExplorerPanel = defineAsyncComponent(() => import('@/panels/ExplorerPanel.vue'))
+const SearchPanel = defineAsyncComponent(() => import('@/panels/SearchPanel.vue'))
+const EditorPanel = defineAsyncComponent(() => import('@/panels/EditorPanel.vue'))
+const TerminalPanel = defineAsyncComponent(() => import('@/panels/TerminalPanel.vue'))
+const ChatListPanel = defineAsyncComponent(() => import('@/panels/ChatListPanel.vue'))
+const SkillsPanel = defineAsyncComponent(() => import('@/panels/SkillsPanel.vue'))
+const PluginsPanel = defineAsyncComponent(() => import('@/panels/PluginsPanel.vue'))
+const ModelsPanel = defineAsyncComponent(() => import('@/panels/ModelsPanel.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('@/panels/SettingsPanel.vue'))
+const GitPanel = defineAsyncComponent(() => import('@/panels/GitPanel.vue'))
+const PortsPanel = defineAsyncComponent(() => import('@/panels/PortsPanel.vue'))
+const MemoryPanel = defineAsyncComponent(() => import('@/panels/MemoryPanel.vue'))
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -52,6 +54,7 @@ const components = {
   settings: SettingsPanel,
   git: GitPanel,
   ports: PortsPanel,
+  memory: MemoryPanel,
   trajectory: TrajectoryDockPanel,
 } as unknown as Record<string, VueComponent>
 

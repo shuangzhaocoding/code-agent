@@ -162,7 +162,7 @@ watch(
 watch(active, async () => {
   if (!open.value) return
   await nextTick()
-  menuRef.value?.querySelector<HTMLElement>('.history-item.active')?.scrollIntoView({ block: 'nearest' })
+  menuRef.value?.querySelector<HTMLElement>('.history-item.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
 onMounted(() => {

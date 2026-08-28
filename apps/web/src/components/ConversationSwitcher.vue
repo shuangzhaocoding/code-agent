@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
@@ -7,10 +8,13 @@ import { formatRelativeTime } from '@/utils/relativeTime'
 
 const store = useAppStore()
 const pins = useSessionPins()
+const { t } = useI18n()
 const open = ref(false)
 const ready = ref(false)
 const query = ref('')
 const active = ref(0)
+const editingId = ref<string | null>(null)
+const editingTitle = ref('')
 const root = ref<HTMLElement | null>(null)
 const trigger = ref<HTMLElement | null>(null)
 const menuRef = ref<HTMLElement | null>(null)
@@ -111,6 +115,7 @@ function closeMenu() {
   open.value = false
   ready.value = false
   query.value = ''
+  cancelRename()
   layoutCleanup?.()
 }
 
@@ -120,9 +125,15 @@ function toggleMenu() {
 }
 
 async function pick(id: string) {
+  if (editingId.value) return
   closeMenu()
   if (id === store.conversationId) return
   await store.openConversation(id)
+}
+
+function onRowClick(id: string) {
+  if (editingId.value === id) return
+  void pick(id)
 }
 
 async function startNew() {
@@ -136,6 +147,61 @@ function onTogglePin(id: string, e: MouseEvent) {
   pins.toggle(id)
 }
 
+async function onDelete(id: string, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (editingId.value === id) cancelRename()
+  if (pins.isPinned(id)) pins.toggle(id)
+  await store.deleteConversation(id)
+  if (!store.conversations.length) closeMenu()
+}
+
+function startRename(item: (typeof filtered.value)[number], e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  editingId.value = item.id
+  editingTitle.value = item.title
+  void nextTick(() => {
+    const el = menuRef.value?.querySelector<HTMLInputElement>('.row-rename-input')
+    el?.focus()
+    el?.select()
+  })
+}
+
+async function commitRename(id: string) {
+  if (editingId.value !== id) return
+  const title = editingTitle.value.trim()
+  editingId.value = null
+  editingTitle.value = ''
+  if (!title) return
+  await store.renameConversation(id, title)
+}
+
+function cancelRename() {
+  editingId.value = null
+  editingTitle.value = ''
+}
+
+function onRenameKeydown(id: string, e: KeyboardEvent) {
+  e.stopPropagation()
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    void commitRename(id)
+    return
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    cancelRename()
+  }
+}
+
+function turnCount(item: (typeof filtered.value)[number]) {
+  if (item.id === store.conversationId) {
+    return store.messages.filter((m) => m.role === 'user').length
+  }
+  return item.turn_count ?? 0
+}
+
 function onDocPointer(e: PointerEvent) {
   const target = e.target as Node
   if (root.value?.contains(target) || menuRef.value?.contains(target)) return
@@ -144,6 +210,7 @@ function onDocPointer(e: PointerEvent) {
 
 function onKey(e: KeyboardEvent) {
   if (!open.value) return
+  if (editingId.value) return
   if (e.key === 'Escape') {
     e.preventDefault()
     closeMenu()
@@ -176,7 +243,7 @@ watch(filtered, (list) => {
 watch(active, async () => {
   if (!open.value) return
   await nextTick()
-  menuRef.value?.querySelector<HTMLElement>('.session-row.active')?.scrollIntoView({ block: 'nearest' })
+  menuRef.value?.querySelector<HTMLElement>('.session-row.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
 onMounted(() => {
@@ -251,27 +318,59 @@ onBeforeUnmount(() => {
                 role="option"
                 :aria-selected="item.id === store.conversationId"
                 @mouseenter="active = filtered.findIndex((row) => row.id === item.id)"
-                @click="pick(item.id)"
+                @click="onRowClick(item.id)"
               >
                 <span class="row-icon">
                   <AppIcon name="chat" :size="13" />
                 </span>
                 <span class="row-copy">
-                  <span class="row-title">{{ item.title }}</span>
-                  <span v-if="item.updated_at || item.created_at" class="row-time">
+                  <input
+                    v-if="editingId === item.id"
+                    v-model="editingTitle"
+                    class="row-rename-input"
+                    type="text"
+                    maxlength="300"
+                    :aria-label="t('common.rename')"
+                    @click.stop
+                    @keydown="onRenameKeydown(item.id, $event)"
+                    @blur="commitRename(item.id)"
+                  />
+                  <span v-else class="row-title">{{ item.title }}</span>
+                  <span v-if="!editingId && (item.updated_at || item.created_at)" class="row-time">
                     {{ formatRelativeTime(item.updated_at || item.created_at) }}
                   </span>
                 </span>
-                <button
-                  type="button"
-                  class="row-pin"
-                  :class="{ on: pins.isPinned(item.id) }"
-                  :title="pins.isPinned(item.id) ? '取消置顶' : '置顶'"
-                  @click="onTogglePin(item.id, $event)"
-                >
-                  <AppIcon name="pin" :size="12" />
-                </button>
-                <AppIcon v-if="item.id === store.conversationId" class="row-check" name="check" :size="14" />
+                <span class="row-actions">
+                  <button
+                    type="button"
+                    class="row-action"
+                    :title="t('common.rename')"
+                    @click="startRename(item, $event)"
+                  >
+                    <AppIcon name="pencil" :size="12" />
+                  </button>
+                  <button
+                    type="button"
+                    class="row-action row-action-danger"
+                    :title="t('sidebar.deleteSession')"
+                    @click="onDelete(item.id, $event)"
+                  >
+                    <AppIcon name="trash" :size="12" />
+                  </button>
+                  <button
+                    type="button"
+                    class="row-action row-pin"
+                    :class="{ on: pins.isPinned(item.id) }"
+                    :title="pins.isPinned(item.id) ? '取消置顶' : '置顶'"
+                    @click="onTogglePin(item.id, $event)"
+                  >
+                    <AppIcon name="pin" :size="12" />
+                  </button>
+                  <span class="row-check-slot" aria-hidden="true">
+                    <AppIcon v-if="item.id === store.conversationId" class="row-check" name="check" :size="14" />
+                  </span>
+                  <span class="row-turns">{{ turnCount(item) }}轮</span>
+                </span>
               </div>
             </section>
           </div>
@@ -358,10 +457,50 @@ onBeforeUnmount(() => {
   font-size: 13px;
   font-weight: 600;
 }
+.row-rename-input {
+  width: 100%;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  border: var(--border-width) solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-radius: 4px;
+  background: var(--panel-bg);
+  color: var(--text-h);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  outline: none;
+}
+.row-rename-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
 .row-time {
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
+}
+.row-turns {
+  flex-shrink: 0;
+  min-width: 2.75rem;
+  text-align: right;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.row-check-slot {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
 }
 .switcher-chev {
   flex-shrink: 0;
@@ -484,7 +623,7 @@ html[data-theme='dark'] .switcher-menu {
 .session-row.current .row-title {
   color: var(--primary);
 }
-.row-pin {
+.row-action {
   width: 22px;
   height: 22px;
   flex-shrink: 0;
@@ -497,15 +636,20 @@ html[data-theme='dark'] .switcher-menu {
   opacity: 0;
   cursor: pointer;
 }
-.session-row:hover .row-pin,
-.session-row.active .row-pin,
-.row-pin.on {
+.session-row:hover .row-action,
+.session-row.active .row-action,
+.row-action.on,
+.row-action.row-pin.on {
   opacity: 1;
 }
-.row-pin:hover,
-.row-pin.on {
+.row-action:hover,
+.row-action.on {
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+.row-action-danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 .row-check {
   flex-shrink: 0;

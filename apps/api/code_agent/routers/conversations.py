@@ -44,10 +44,24 @@ def _resolve_thinking_level(thinking: bool, thinking_level: str | None) -> str:
     return normalize_thinking_level(thinking)
 
 
+async def _user_turn_counts(conv_ids: list) -> dict[str, int]:
+    if not conv_ids:
+        return {}
+    rows = await Message.filter(conversation_id__in=conv_ids, role="user").values_list(
+        "conversation_id", flat=True
+    )
+    out: dict[str, int] = {}
+    for cid in rows:
+        key = str(cid)
+        out[key] = out.get(key, 0) + 1
+    return out
+
+
 @router.get("/workspaces/{workspace_id}/conversations")
 async def list_conversations(workspace_id: str):
     rows = await Conversation.filter(workspace_id=workspace_id, archived=False).order_by("-updated_at")
-    return [_conv(r) for r in rows]
+    counts = await _user_turn_counts([r.id for r in rows])
+    return [_conv(r, turn_count=counts.get(str(r.id), 0)) for r in rows]
 
 
 @router.post("/conversations")
@@ -150,7 +164,7 @@ async def send_message(conversation_id: str, body: MessageIn):
     return {"run_id": str(run.id), "conversation_id": conversation_id}
 
 
-def _conv(row: Conversation) -> dict:
+def _conv(row: Conversation, *, turn_count: int = 0) -> dict:
     return {
         "id": str(row.id),
         "workspace_id": str(row.workspace_id),
@@ -158,6 +172,7 @@ def _conv(row: Conversation) -> dict:
         "mode": row.mode,
         "model_id": row.model_id,
         "active_run_id": row.active_run_id,
+        "turn_count": turn_count,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }

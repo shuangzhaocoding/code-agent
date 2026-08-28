@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from code_agent.async_io import run_sync
 from code_agent.db.models import Workspace
 from code_agent.policy.engine import is_protected
 from code_agent.tools.paths import (
@@ -132,7 +133,8 @@ async def remove_workspace(workspace_id: str):
 @router.get("/{workspace_id}/tree")
 async def tree(workspace_id: str, path: str = ""):
     ws = await _get_ws(workspace_id)
-    return {"items": list_dir(ws.root_path, path, ws.ignore_globs)}
+    items = await run_sync(list_dir, ws.root_path, path, ws.ignore_globs)
+    return {"items": items}
 
 
 @router.get("/{workspace_id}/search")
@@ -149,7 +151,8 @@ async def search_workspace(
     if not query:
         return {"query": query, "hits": []}
     cap = max(1, min(int(limit or 80), 200))
-    hits = search_file_contents(
+    hits = await run_sync(
+        search_file_contents,
         ws.root_path,
         query,
         extra_ignores=ws.ignore_globs,
@@ -168,7 +171,8 @@ async def replace_workspace(workspace_id: str, body: SearchReplaceIn):
     query = (body.q or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail={"code": "search.empty", "message": "替换关键词不能为空"})
-    result = replace_file_contents(
+    result = await run_sync(
+        replace_file_contents,
         ws.root_path,
         query,
         body.replacement,
@@ -186,7 +190,8 @@ async def get_file(workspace_id: str, path: str):
     file_path = resolve_in_workspace(ws.root_path, path)
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
-    return {"path": path, "content": read_text_file(file_path)}
+    content = await run_sync(read_text_file, file_path)
+    return {"path": path, "content": content}
 
 
 @router.get("/{workspace_id}/file/raw")
@@ -218,8 +223,7 @@ async def get_file_raw(workspace_id: str, path: str, download: bool = False):
 async def put_file(workspace_id: str, path: str, body: FilePut):
     ws = await _get_ws(workspace_id)
     file_path = resolve_in_workspace(ws.root_path, path)
-    file_path.parent.mkdir(parents=True, exist_ok=True)
-    file_path.write_text(body.content, encoding="utf-8")
+    await run_sync(_write_text_file, file_path, body.content)
     return {"ok": True, "path": path}
 
 
@@ -231,11 +235,7 @@ async def create_entry(workspace_id: str, body: EntryCreate):
     target = resolve_in_workspace(ws.root_path, body.path)
     if target.exists():
         raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
-    if body.kind == "dir":
-        target.mkdir(parents=True, exist_ok=False)
-    else:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("", encoding="utf-8")
+    await run_sync(_create_entry_fs, target, body.kind)
     return {"ok": True, "path": body.path, "kind": body.kind}
 
 
@@ -248,8 +248,7 @@ async def rename_entry(workspace_id: str, body: EntryRename):
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
     if dest.exists():
         raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    src.rename(dest)
+    await run_sync(_rename_entry_fs, src, dest)
     return {"ok": True, "path": body.new_path}
 
 
@@ -264,10 +263,7 @@ async def delete_entry(workspace_id: str, path: str):
         raise HTTPException(status_code=403, detail={"code": "path.protected"})
     if not target.exists():
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
+    await run_sync(_delete_entry_fs, target)
     return {"ok": True}
 
 
@@ -278,11 +274,7 @@ async def browse(path: str = "~"):
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
     if p.is_file():
         p = p.parent
-    items = []
-    for child in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
-        items.append({"name": child.name, "path": str(child), "is_dir": child.is_dir()})
-        if len(items) >= 400:
-            break
+    items = await run_sync(_browse_dir, p)
     return {"path": str(p), "parent": str(p.parent), "items": items}
 
 
@@ -302,7 +294,7 @@ async def mkdir(body: MkdirIn):
     if dest.exists():
         raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "已存在同名文件或目录"})
     try:
-        dest.mkdir()
+        await run_sync(dest.mkdir)
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail={"code": "path.denied", "message": "没有权限创建目录"}) from exc
     return {"name": dest.name, "path": str(dest), "parent": str(parent)}
@@ -313,6 +305,40 @@ async def _get_ws(workspace_id: str) -> Workspace:
     if not ws:
         raise HTTPException(status_code=404, detail={"code": "workspace.not_found"})
     return ws
+
+
+def _write_text_file(file_path: Path, content: str) -> None:
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    file_path.write_text(content, encoding="utf-8")
+
+
+def _create_entry_fs(target: Path, kind: str) -> None:
+    if kind == "dir":
+        target.mkdir(parents=True, exist_ok=False)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("", encoding="utf-8")
+
+
+def _rename_entry_fs(src: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dest)
+
+
+def _delete_entry_fs(target: Path) -> None:
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+
+def _browse_dir(p: Path) -> list[dict]:
+    items: list[dict] = []
+    for child in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+        items.append({"name": child.name, "path": str(child), "is_dir": child.is_dir()})
+        if len(items) >= 400:
+            break
+    return items
 
 
 def _ws(row: Workspace) -> dict:

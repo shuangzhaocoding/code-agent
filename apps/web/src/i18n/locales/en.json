@@ -75,6 +75,7 @@
     "ports": "Ports",
     "git": "Git",
     "skills": "Skills",
+    "memory": "Memory",
     "plugins": "Plugins",
     "models": "Models",
     "settings": "Settings",
@@ -557,6 +558,34 @@
     "originWorkspace": "Workspace",
     "all": "All",
     "fallback": "Plugin"
+  },
+  "memory": {
+    "title": "Workspace memory",
+    "hint": "Structured facts across chats: name, preferences, goals, decisions, etc.",
+    "tipTitle": "What gets remembered?",
+    "tipBody": "Your name, collaboration preferences, project goals, technical decisions, conventions, and lessons learned. Say “remember me” or state a decision explicitly.",
+    "search": "Search memories…",
+    "filterAll": "All",
+    "statsTotal": "{n} total",
+    "statsProfile": "{n} profile",
+    "noMatch": "No matching memories",
+    "empty": "No workspace memories yet",
+    "emptyHint": "Try “I'm Rick, remember me”, or finish an agent run to extract memories automatically.",
+    "kinds": {
+      "profile": "Profile",
+      "preference": "Preference",
+      "goal": "Goal",
+      "context": "Context",
+      "workflow": "Workflow",
+      "decision": "Decision",
+      "architecture": "Architecture",
+      "convention": "Convention",
+      "fact": "Fact",
+      "bug_fix": "Bug fix",
+      "lesson": "Lesson",
+      "dependency": "Dependency",
+      "todo": "Todo"
+    }
   },
   "skills": {
     "lead": "Instruction packs the agent can load by task. Refresh after adding folders.",

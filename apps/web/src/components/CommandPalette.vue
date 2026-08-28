@@ -113,7 +113,7 @@ watch(items, () => {
 
 watch(active, async () => {
   await nextTick()
-  document.querySelector('.palette-item.active')?.scrollIntoView({ block: 'nearest' })
+  document.querySelector('.palette-item.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 })
 
 function close() {
