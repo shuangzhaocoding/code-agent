@@ -6,6 +6,7 @@ import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
+import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -1256,6 +1257,12 @@ export const useAppStore = defineStore('app', () => {
       }
     }
     if (event.type === 'run.started') runStatus.value = 'running'
+    if (event.type === 'block.started' && type === 'approval') {
+      notifyApprovalRequired(String(meta.approval_id || blockId || ''))
+    }
+    if (event.type === 'run.completed') {
+      playTaskCompleteSound()
+    }
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
       runStatus.value = event.type.replace('run.', '')
       const now = new Date().toISOString()

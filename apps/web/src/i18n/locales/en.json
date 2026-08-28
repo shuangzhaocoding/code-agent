@@ -490,6 +490,8 @@
     "acceptAll": "Accept all",
     "rejectAll": "Reject all",
     "reviewNav": "Review navigation",
+    "diffLabel": "Diff",
+    "fileLabel": "File",
     "reviewActionsCurrent": "Current change",
     "reviewActionsAll": "All changes",
     "diffNav": "{i} of {n}",

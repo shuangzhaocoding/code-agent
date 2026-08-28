@@ -63,9 +63,9 @@ const lightTheme = {
   brightCyan: '#06b6d4', brightWhite: '#111827',
 }
 const darkTheme = {
-  background: '#0f1115', foreground: '#e5e7eb', cursor: '#60a5fa',
-  cursorAccent: '#0f1115', selectionBackground: '#1e3a5f',
-  black: '#0f1115', red: '#f87171', green: '#34d399', yellow: '#fbbf24',
+  background: '#121218', foreground: '#e5e7eb', cursor: '#60a5fa',
+  cursorAccent: '#121218', selectionBackground: '#1e3a5f',
+  black: '#121218', red: '#f87171', green: '#34d399', yellow: '#fbbf24',
   blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#d1d5db',
   brightBlack: '#6b7280', brightRed: '#fca5a5', brightGreen: '#6ee7b7',
   brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#e9d5ff',
@@ -73,7 +73,11 @@ const darkTheme = {
 }
 
 function termTheme(t: Theme) {
-  return t === 'dark' ? darkTheme : lightTheme
+  const base = t === 'dark' ? darkTheme : lightTheme
+  if (typeof document === 'undefined') return base
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim()
+  if (!bg) return base
+  return { ...base, background: bg, cursorAccent: bg }
 }
 
 /**

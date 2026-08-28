@@ -14,6 +14,7 @@ import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
 import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
+import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
 import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
@@ -1196,6 +1197,7 @@ function openContextUsageDialog() {
   <div class="panel-shell agent">
     <ConversationSwitcher>
       <template #actions>
+        <ReviewBulkActions class="header-review-actions" />
         <UserMessageHistoryMenu
           :entries="userHistoryEntries"
           :active-id="activeHistoryId"
@@ -1784,6 +1786,19 @@ footer.agent-footer {
   width: 100%;
 }
 
+:deep(.header-review-actions.review-bulk) {
+  box-shadow: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  gap: 2px;
+}
+
+:deep(.header-review-actions .bulk-sep) {
+  height: 18px;
+  margin: 0 2px;
+}
+
 .scroll-to-bottom-btn {
   position: absolute;
   left: 50%;
@@ -1855,12 +1870,12 @@ html[data-theme='dark'] .scroll-to-bottom-btn {
   min-width: 0;
   border: var(--border-width) solid var(--border);
   border-radius: 14px;
-  background: var(--panel-bg);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.08);
+  background: var(--surface);
+  box-shadow: none;
   overflow: hidden;
 }
 html[data-theme='dark'] .agent-sender-wrap {
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
 }
 
 .send-queue {

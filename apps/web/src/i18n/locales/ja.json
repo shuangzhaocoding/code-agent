@@ -489,6 +489,8 @@
     "acceptAll": "すべて承認",
     "rejectAll": "すべて拒否",
     "reviewNav": "変更ナビ",
+    "diffLabel": "差分",
+    "fileLabel": "ファイル",
     "reviewActionsCurrent": "現在の変更",
     "reviewActionsAll": "すべての変更",
     "diffNav": "{i} / {n}",

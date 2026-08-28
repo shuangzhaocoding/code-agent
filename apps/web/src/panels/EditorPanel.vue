@@ -51,39 +51,6 @@ async function cycleFile(delta: number) {
   await store.cycleReviewPath(delta)
 }
 
-const bulkConfirm = ref<'accept' | 'reject' | null>(null)
-const bulkActionRef = ref<HTMLElement | null>(null)
-
-function openBulkConfirm(kind: 'accept' | 'reject') {
-  bulkConfirm.value = bulkConfirm.value === kind ? null : kind
-}
-
-function closeBulkConfirm() {
-  bulkConfirm.value = null
-}
-
-async function confirmBulk() {
-  const kind = bulkConfirm.value
-  if (!kind) return
-  bulkConfirm.value = null
-  if (kind === 'accept') await store.acceptAllReviews()
-  else await store.rejectAllReviews()
-}
-
-function onBulkDocClick(e: MouseEvent) {
-  if (!bulkConfirm.value) return
-  const root = bulkActionRef.value
-  if (root && !root.contains(e.target as Node)) closeBulkConfirm()
-}
-
-function onBulkKey(e: KeyboardEvent) {
-  if (e.key === 'Escape') closeBulkConfirm()
-}
-
-watch(pendingCount, (n) => {
-  if (!n) closeBulkConfirm()
-})
-
 const isHtmlFile = computed(() => store.openFile?.kind === 'html')
 const canHtmlPreview = computed(() => Boolean(isHtmlFile.value && !review.value))
 const showHtmlPreview = computed(() => htmlPreview.value && canHtmlPreview.value)
@@ -109,7 +76,7 @@ function cssColor(name: string, fallback: string) {
 function applyEditorTheme() {
   if (!monacoMod) return
   const dark = currentTheme() === 'dark'
-  const bg = cssColor('--editor-bg', dark ? '#161a22' : '#ffffff')
+  const bg = cssColor('--editor-bg', dark ? '#121218' : '#ffffff')
   monacoMod.editor.defineTheme('ca-editor', {
     base: dark ? 'vs-dark' : 'vs',
     inherit: true,
@@ -408,8 +375,6 @@ onMounted(async () => {
   window.addEventListener('ca-file-reload', onReload as EventListener)
   window.addEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.addEventListener('keydown', onReviewKey)
-  document.addEventListener('mousedown', onBulkDocClick)
-  document.addEventListener('keydown', onBulkKey)
 })
 
 function onFocusEditor() {
@@ -562,8 +527,6 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-file-reload', onReload as EventListener)
   window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.removeEventListener('keydown', onReviewKey)
-  document.removeEventListener('mousedown', onBulkDocClick)
-  document.removeEventListener('keydown', onBulkKey)
   for (const model of models.values()) model.dispose()
   for (const model of origModels.values()) model.dispose()
   models.clear()
@@ -673,9 +636,14 @@ async function onTabMenuSelect(id: string) {
         <AppIcon name="close" :size="14" :stroke-width="1.75" />
       </button>
     </div>
-    <div v-if="pendingCount" class="review-bar">
-      <div class="review-nav" role="navigation" :aria-label="t('editor.reviewNav')">
+    <div class="review-bar">
+      <span class="review-path" :title="store.activePath || ''">
+        {{ store.activePath || t('editor.openFromSidebar') }}
+      </span>
+      <div v-if="pendingCount" class="review-bar-controls">
+        <div class="review-nav" role="navigation" :aria-label="t('editor.reviewNav')">
         <div class="review-nav-group">
+          <span class="group-label">{{ t('editor.diffLabel') }}</span>
           <button
             type="button"
             class="nav-btn"
@@ -683,7 +651,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.prevDiff')"
             @click="cycleDiff(-1)"
           >
-            <AppIcon name="chevron-up" :size="16" :stroke-width="1.75" />
+            <AppIcon name="chevron-up" :size="14" :stroke-width="1.75" />
           </button>
           <span class="nav-label">{{ t('editor.diffNav', { i: fileReviewIndex, n: Math.max(fileReviewCount, 1) }) }}</span>
           <button
@@ -693,11 +661,12 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.nextDiff')"
             @click="cycleDiff(1)"
           >
-            <AppIcon name="chevron-down" :size="16" :stroke-width="1.75" />
+            <AppIcon name="chevron-down" :size="14" :stroke-width="1.75" />
           </button>
         </div>
         <span class="review-nav-sep" aria-hidden="true" />
         <div class="review-nav-group">
+          <span class="group-label">{{ t('editor.fileLabel') }}</span>
           <button
             type="button"
             class="nav-btn"
@@ -705,10 +674,9 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.prevFile')"
             @click="cycleFile(-1)"
           >
-            <AppIcon name="chevron-left" :size="16" :stroke-width="1.75" />
+            <AppIcon name="chevron-left" :size="14" :stroke-width="1.75" />
           </button>
-          <span class="nav-label nav-label-long">{{ t('editor.fileNav', { i: filePathIndex || 1, n: filePendingPathCount }) }}</span>
-          <span class="nav-label nav-label-short">{{ filePathIndex || 1 }}/{{ filePendingPathCount }}</span>
+          <span class="nav-label">{{ t('editor.fileNav', { i: filePathIndex || 1, n: filePendingPathCount }) }}</span>
           <button
             type="button"
             class="nav-btn"
@@ -716,82 +684,30 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.nextFile')"
             @click="cycleFile(1)"
           >
-            <AppIcon name="chevron-right" :size="16" :stroke-width="1.75" />
+            <AppIcon name="chevron-right" :size="14" :stroke-width="1.75" />
           </button>
         </div>
       </div>
-      <div class="review-actions">
-        <div v-if="review" class="action-group" role="group" :aria-label="t('editor.reviewActionsCurrent')">
-          <button
-            type="button"
-            class="action-btn is-reject"
-            :title="t('editor.reject')"
-            @click="store.rejectReview(review.path)"
-          >
-            <AppIcon name="close" :size="16" :stroke-width="1.75" />
-            <span class="action-label">{{ t('editor.reject') }}</span>
-          </button>
-          <button
-            type="button"
-            class="action-btn is-accept"
-            :title="t('editor.accept')"
-            @click="store.acceptReview(review.path)"
-          >
-            <AppIcon name="check" :size="16" :stroke-width="1.75" />
-            <span class="action-label">{{ t('editor.accept') }}</span>
-          </button>
-        </div>
-        <div ref="bulkActionRef" class="action-group bulk-group" role="group" :aria-label="t('editor.reviewActionsAll')">
-          <button
-            type="button"
-            class="action-btn is-reject"
-            :class="{ 'is-active': bulkConfirm === 'reject' }"
-            :title="t('editor.rejectAll')"
-            @click="openBulkConfirm('reject')"
-          >
-            <AppIcon name="close-all" :size="16" :stroke-width="1.75" />
-            <span class="action-label">{{ t('editor.rejectAll') }}</span>
-          </button>
-          <button
-            type="button"
-            class="action-btn is-accept"
-            :class="{ 'is-active': bulkConfirm === 'accept' }"
-            :title="t('editor.acceptAll')"
-            @click="openBulkConfirm('accept')"
-          >
-            <AppIcon name="check" :size="16" :stroke-width="1.75" />
-            <span class="action-label">{{ t('editor.acceptAll') }}</span>
-          </button>
-          <div
-            v-if="bulkConfirm"
-            class="bulk-confirm"
-            :class="{ 'is-danger': bulkConfirm === 'reject' }"
-            role="dialog"
-            :aria-label="bulkConfirm === 'accept' ? t('confirm.acceptAllReviewsTitle') : t('confirm.rejectAllReviewsTitle')"
-            @mousedown.stop
-          >
-            <span class="bulk-confirm-count">{{ pendingCount }}</span>
-            <button
-              type="button"
-              class="ghost-icon-btn bulk-btn"
-              :title="t('common.cancel')"
-              :aria-label="t('common.cancel')"
-              @click="closeBulkConfirm"
-            >
-              <AppIcon name="close" :size="16" :stroke-width="1.75" />
-            </button>
-            <button
-              type="button"
-              class="ghost-icon-btn bulk-btn"
-              :class="bulkConfirm === 'reject' ? 'is-danger' : 'is-primary'"
-              :title="t('confirm.confirm')"
-              :aria-label="t('confirm.confirm')"
-              @click="confirmBulk"
-            >
-              <AppIcon name="check" :size="16" :stroke-width="1.75" />
-            </button>
-          </div>
-        </div>
+      <div v-if="review" class="review-actions" role="group" :aria-label="t('editor.reviewActionsCurrent')">
+        <button
+          type="button"
+          class="action-btn is-reject"
+          :title="t('editor.reject')"
+          @click="store.rejectReview(review.path)"
+        >
+          <AppIcon name="close" :size="14" :stroke-width="1.75" />
+          <span>{{ t('editor.reject') }}</span>
+        </button>
+        <button
+          type="button"
+          class="action-btn is-accept"
+          :title="t('editor.accept')"
+          @click="store.acceptReview(review.path)"
+        >
+          <AppIcon name="check" :size="14" :stroke-width="1.75" />
+          <span>{{ t('editor.accept') }}</span>
+        </button>
+      </div>
       </div>
     </div>
     <div class="host-wrap">
@@ -944,235 +860,124 @@ async function onTabMenuSelect(id: string) {
   opacity: 1;
 }
 .review-bar {
-  container-type: inline-size;
-  container-name: review-bar;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
-  min-height: 36px;
-  padding: 6px 8px;
+  min-height: 28px;
+  padding: 2px 8px;
   border-bottom: var(--border-width) solid var(--border);
-  background: color-mix(in srgb, var(--primary) 8%, var(--bg));
+  background: var(--bg);
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 11px;
+  overflow: hidden;
+}
+.review-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.review-bar-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
   overflow: visible;
 }
 .review-nav {
   display: inline-flex;
-  align-items: stretch;
+  align-items: center;
   flex-shrink: 1;
   min-width: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  overflow: visible;
-  box-shadow: none;
 }
 .review-nav-group {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px 4px;
+  padding: 0 1px;
+}
+.group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  user-select: none;
 }
 .review-nav-sep {
   width: 1px;
-  align-self: stretch;
+  height: 16px;
+  margin: 0 4px;
   background: var(--border);
   flex-shrink: 0;
 }
-.nav-btn {
+.review-bar .nav-btn,
+.review-bar .action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: auto;
-  min-width: var(--ghost-btn-height);
-  height: var(--ghost-btn-height);
-  padding: var(--ghost-btn-padding);
+  gap: 4px;
+  height: 22px;
+  padding: 0 6px;
   border: 0;
-  border-radius: var(--ghost-btn-radius);
+  border-radius: calc(var(--radius-md) - 2px);
   background: transparent;
   color: var(--text-h);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
   flex-shrink: 0;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, background-color 0.12s ease, color 0.12s ease;
 }
-.nav-btn:hover:not(:disabled) {
-  background: transparent;
-  opacity: var(--ghost-hover-opacity);
+.review-bar .nav-btn {
+  width: auto;
+  min-width: 22px;
+  padding: 0 2px;
 }
-.nav-btn:disabled {
+.review-bar .nav-btn:hover:not(:disabled),
+.review-bar .action-btn:hover {
+  background: color-mix(in srgb, var(--text-h) 8%, transparent);
+  opacity: 1;
+}
+.review-bar .nav-btn:disabled {
   opacity: 0.28;
   cursor: default;
 }
-.nav-label {
+.review-bar .nav-label {
   min-width: 0;
   padding: 0 2px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-h);
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--mono);
+  color: var(--text-secondary);
   text-align: center;
   white-space: nowrap;
   user-select: none;
 }
-.nav-label-short {
-  display: none;
-  min-width: 36px;
-}
-.nav-label-long {
-  min-width: 72px;
-}
 .review-actions {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  margin-left: auto;
+  gap: 0;
+  padding-left: 6px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
   flex-shrink: 0;
-  overflow: visible;
 }
-.action-group {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.bulk-group {
-  position: relative;
-  overflow: visible;
-}
-.action-btn.is-active {
-  opacity: var(--ghost-hover-opacity);
-}
-.action-btn.is-active.is-accept {
-  color: var(--primary);
-  opacity: 1;
-}
-.bulk-confirm {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px;
-  border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
-  box-shadow: var(--dropdown-shadow);
-}
-.bulk-confirm::before {
-  display: none;
-}
-.bulk-confirm.is-danger {
-  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
-}
-.bulk-confirm-count {
-  min-width: 14px;
-  padding: 0 4px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--text-secondary);
-  text-align: center;
-}
-.bulk-btn.is-primary {
-  color: var(--primary);
-}
-.bulk-btn.is-danger {
+.review-bar .action-btn.is-reject:hover {
   color: var(--danger);
 }
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  height: var(--ghost-btn-height);
-  padding: 0 6px;
-  border: 0;
-  border-radius: var(--ghost-btn-radius);
-  background: transparent;
-  color: var(--text-h);
-  font: inherit;
-  font-size: var(--ghost-btn-font-size);
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: opacity 0.15s ease, color 0.12s ease;
-}
-.action-btn:hover {
-  background: transparent;
-  opacity: var(--ghost-hover-opacity);
-}
-.action-btn.is-reject:hover {
-  background: transparent;
-  color: var(--danger);
-  opacity: 1;
-}
-.action-btn.is-accept {
+.review-bar .action-btn.is-accept {
   color: var(--primary);
 }
-.action-btn.is-accept:hover {
-  background: transparent;
+.review-bar .action-btn.is-accept:hover {
   color: var(--primary);
-  opacity: var(--ghost-hover-opacity);
-}
-.action-btn.is-strong {
-  color: var(--primary);
-  opacity: 1;
-}
-.action-btn.is-strong:hover {
-  background: transparent;
-  opacity: var(--ghost-hover-opacity);
-}
-@container review-bar (max-width: 640px) {
-  .action-label {
-    display: none;
-  }
-  .action-btn {
-    width: 28px;
-    padding: 0;
-  }
-  .nav-label-long {
-    display: none;
-  }
-  .nav-label-short {
-    display: inline;
-  }
-}
-@container review-bar (max-width: 480px) {
-  .review-bar {
-    align-items: stretch;
-  }
-  .review-nav {
-    flex: 1 1 auto;
-    justify-content: center;
-  }
-  .review-actions {
-    width: 100%;
-    margin-left: 0;
-    justify-content: flex-end;
-  }
-}
-@container review-bar (max-width: 360px) {
-  .review-nav-group {
-    padding: 2px;
-  }
-  .nav-label {
-    font-size: 11px;
-  }
-  .nav-label-short {
-    min-width: 28px;
-  }
-  .action-group {
-    flex: 1;
-    justify-content: center;
-  }
 }
 .spacer { flex: 1; }
 .btn {

@@ -490,6 +490,8 @@
     "acceptAll": "全部接受",
     "rejectAll": "全部拒绝",
     "reviewNav": "改动导航",
+    "diffLabel": "改动",
+    "fileLabel": "文件",
     "reviewActionsCurrent": "当前改动",
     "reviewActionsAll": "全部改动",
     "diffNav": "{i} / {n}",
