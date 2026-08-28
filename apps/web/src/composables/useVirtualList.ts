@@ -129,6 +129,18 @@ export function useVirtualList<T extends { id: string }>(
     const top = layout.value.offsets[index] ?? 0
     el.scrollTo({ top, behavior })
     scrollTop.value = top
+    viewportHeight.value = el.clientHeight
+  }
+
+  function scrollToEnd(behavior: ScrollBehavior = 'auto') {
+    const el = scrollElement.value
+    if (!el) return
+    const top = enabled.value
+      ? Math.max(0, layout.value.total - el.clientHeight)
+      : Math.max(0, el.scrollHeight - el.clientHeight)
+    el.scrollTo({ top, behavior })
+    scrollTop.value = top
+    viewportHeight.value = el.clientHeight
   }
 
   watch(
@@ -175,5 +187,6 @@ export function useVirtualList<T extends { id: string }>(
     setItemEl,
     onScroll,
     scrollToIndex,
+    scrollToEnd,
   }
 }

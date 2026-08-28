@@ -110,6 +110,7 @@ export const useAppStore = defineStore('app', () => {
   const expanded = ref<Set<string>>(new Set())
   const treePath = ref('')
   const openFiles = ref<OpenFile[]>([])
+  const suppressEditorPersist = ref(false)
   const activePath = ref<string | null>(null)
   const openFile = computed(() => openFiles.value.find((f) => f.path === activePath.value) || null)
   const editorCopyContext = ref<{
@@ -156,7 +157,8 @@ export const useAppStore = defineStore('app', () => {
     })
   }
 
-  const reviews = ref<Record<string, FileReview>>({})
+  const reviews = ref<Record<string, FileReview[]>>({})
+  const activeReviewIndex = ref<Record<string, number>>({})
   const confirmDialog = ref<{
     title: string
     summary: string
@@ -232,6 +234,7 @@ export const useAppStore = defineStore('app', () => {
     openFiles.value = []
     activePath.value = null
     reviews.value = {}
+    activeReviewIndex.value = {}
     confirmDialog.value = null
     fileTree.value = []
     childrenMap.value = {}
@@ -280,10 +283,63 @@ export const useAppStore = defineStore('app', () => {
     else localStorage.removeItem(key)
   }
 
+  function editorTabsStorageKey(wsId: string) {
+    return `ca.editor.tabs.${wsId}`
+  }
+
+  function editorActiveStorageKey(wsId: string) {
+    return `ca.editor.active.${wsId}`
+  }
+
+  function readEditorTabs(wsId: string) {
+    try {
+      const raw = localStorage.getItem(editorTabsStorageKey(wsId))
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+    } catch {
+      return []
+    }
+  }
+
+  function persistEditorState() {
+    if (suppressEditorPersist.value) return
+    const ws = workspaceId.value
+    if (!ws) return
+    const paths = openFiles.value.map((f) => f.path)
+    localStorage.setItem(editorTabsStorageKey(ws), JSON.stringify(paths.slice(0, 40)))
+    if (activePath.value) localStorage.setItem(editorActiveStorageKey(ws), activePath.value)
+    else localStorage.removeItem(editorActiveStorageKey(ws))
+  }
+
+  async function restoreEditorState() {
+    const ws = workspaceId.value
+    if (!ws) return
+    const tabs = readEditorTabs(ws)
+    if (!tabs.length) return
+    const savedActive = localStorage.getItem(editorActiveStorageKey(ws))
+    for (const path of tabs) {
+      if (openFiles.value.some((f) => f.path === path)) continue
+      try {
+        await openPath(path, false)
+      } catch {
+        /* file removed */
+      }
+    }
+    if (savedActive && openFiles.value.some((f) => f.path === savedActive)) {
+      activePath.value = savedActive
+    } else if (openFiles.value.length) {
+      activePath.value = openFiles.value[openFiles.value.length - 1].path
+    }
+    if (activePath.value) window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
   async function selectWorkspace(id: string) {
     await api(`/api/workspaces/${id}/open`, { method: 'POST' })
     workspaceId.value = id
     localStorage.setItem('ca.workspace', id)
+    suppressEditorPersist.value = true
+    openFiles.value = []
+    activePath.value = null
     const savedExpanded = readExpanded(id)
     treePath.value = ''
     childrenMap.value = {}
@@ -304,6 +360,9 @@ export const useAppStore = defineStore('app', () => {
     } else {
       await newChat()
     }
+    await restoreEditorState()
+    suppressEditorPersist.value = false
+    persistEditorState()
     openExplorerPanel()
     await loadWorkspaces()
   }
@@ -602,7 +661,7 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     const existing = openFiles.value.find((f) => f.path === path)
-    const review = reviews.value[path]
+    const activeReview = pendingReview(path)
     const kind = classifyOpenKind(path)
 
     if (existing) {
@@ -628,9 +687,9 @@ export const useAppStore = defineStore('app', () => {
             existing.content = data.content
             window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
           } catch {
-            if (review) {
-              existing.content = review.after
-              window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: review.after } }))
+            if (activeReview) {
+              existing.content = activeReview.after
+              window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: activeReview.after } }))
             }
           }
         }
@@ -699,8 +758,8 @@ export const useAppStore = defineStore('app', () => {
           fileNotice.value = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
           return
         }
-      } else if (review) {
-        openFiles.value = [...openFiles.value, { path, kind: 'text', content: review.after, dirty: false }]
+      } else if (activeReview) {
+        openFiles.value = [...openFiles.value, { path, kind: 'text', content: activeReview.after, dirty: false }]
         activePath.value = path
       } else {
         fileNotice.value = msg || t('file.openFailed')
@@ -777,26 +836,140 @@ export const useAppStore = defineStore('app', () => {
     await openPath(path, false)
   }
 
+  function reviewsForPath(path: string) {
+    return reviews.value[path] || []
+  }
+
+  function pendingReviewsForPath(path: string) {
+    return reviewsForPath(path).filter((r) => r.status === 'pending')
+  }
+
+  function pendingReviewCount(path: string | null | undefined) {
+    if (!path) return 0
+    return pendingReviewsForPath(path).length
+  }
+
+  function activeReviewIndexFor(path: string | null | undefined) {
+    if (!path) return 0
+    const list = pendingReviewsForPath(path)
+    if (!list.length) return 0
+    return Math.min(activeReviewIndex.value[path] ?? 0, list.length - 1)
+  }
+
+  function clampReviewIndex(path: string) {
+    const list = pendingReviewsForPath(path)
+    if (!list.length) {
+      if (path in activeReviewIndex.value) {
+        const next = { ...activeReviewIndex.value }
+        delete next[path]
+        activeReviewIndex.value = next
+      }
+      return
+    }
+    const cur = activeReviewIndex.value[path] ?? 0
+    activeReviewIndex.value = { ...activeReviewIndex.value, [path]: Math.min(cur, list.length - 1) }
+  }
+
   function pendingReview(path: string | null | undefined) {
     if (!path) return null
-    const review = reviews.value[path]
-    return review?.status === 'pending' ? review : null
+    const list = pendingReviewsForPath(path)
+    if (!list.length) return null
+    return list[activeReviewIndexFor(path)] ?? null
   }
 
-  const pendingReviews = computed(() => Object.values(reviews.value).filter((r) => r.status === 'pending'))
+  const pendingReviews = computed(() => {
+    const out: FileReview[] = []
+    for (const list of Object.values(reviews.value)) {
+      for (const review of list) {
+        if (review.status === 'pending') out.push(review)
+      }
+    }
+    return out
+  })
+
+  const pendingReviewPaths = computed(() => [...new Set(pendingReviews.value.map((r) => r.path))])
+
+  function cycleFileReview(path: string, delta: number) {
+    const list = pendingReviewsForPath(path)
+    if (list.length < 2) return
+    const cur = activeReviewIndexFor(path)
+    const next = (cur + delta + list.length) % list.length
+    activeReviewIndex.value = { ...activeReviewIndex.value, [path]: next }
+  }
 
   async function acceptAllReviews() {
-    const paths = pendingReviews.value.map((r) => r.path)
-    for (const path of paths) await acceptReview(path)
+    const items = pendingReviews.value
+    if (!items.length) return
+    for (const item of [...pendingReviews.value]) await acceptReview(item.path, item.blockId)
   }
 
-  async function cycleReview(delta: number) {
-    const list = pendingReviews.value.map((r) => r.path)
-    if (!list.length) return
-    const i = list.indexOf(activePath.value || '')
+  async function rejectAllReviews() {
+    const items = pendingReviews.value
+    if (!items.length) return
+    for (const item of [...pendingReviews.value]) await rejectReview(item.path, item.blockId)
+  }
+
+  async function cycleReviewPath(delta: number) {
+    const path = activePath.value
+    const paths = pendingReviewPaths.value
+    if (paths.length < 2) return
+    const i = paths.indexOf(path || '')
     const start = i < 0 ? (delta > 0 ? -1 : 0) : i
-    const next = list[(start + delta + list.length) % list.length]
+    const next = paths[(start + delta + paths.length) % paths.length]
     await openAgentFile(next)
+  }
+
+  function ackedReviewStorageKey() {
+    const ws = workspaceId.value
+    return ws ? `ca.review.acked.${ws}` : ''
+  }
+
+  function readAckedReviewIds() {
+    const key = ackedReviewStorageKey()
+    if (!key) return new Set<string>()
+    try {
+      const raw = localStorage.getItem(key)
+      const parsed = raw ? JSON.parse(raw) : []
+      return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+    } catch {
+      return new Set<string>()
+    }
+  }
+
+  function markReviewAcked(blockId: string) {
+    const key = ackedReviewStorageKey()
+    if (!key || !blockId) return
+    const set = readAckedReviewIds()
+    set.add(blockId)
+    localStorage.setItem(key, JSON.stringify([...set].slice(-2000)))
+  }
+
+  function rebuildReviewsFromMessages(msgs: ChatMessage[]) {
+    const acked = readAckedReviewIds()
+    const next: Record<string, FileReview[]> = {}
+    for (const msg of msgs) {
+      for (const block of msg.blocks || []) {
+        if (block.type !== 'file.diff' && block.type !== 'file.delete') continue
+        const path = String(block.meta?.path || '')
+        if (!path || acked.has(block.id)) continue
+        const before = typeof block.meta.before === 'string' ? block.meta.before : null
+        const after = typeof block.meta.after === 'string' ? block.meta.after : null
+        if (before === null && after === null) continue
+        const review: FileReview = {
+          path,
+          action: String(block.meta.action || (block.type === 'file.delete' ? 'delete' : 'edit')),
+          before: before ?? '',
+          after: after ?? '',
+          status: 'pending',
+          blockId: block.id,
+        }
+        const list = next[path] || []
+        if (!list.some((item) => item.blockId === block.id)) list.push(review)
+        next[path] = list
+      }
+    }
+    reviews.value = next
+    activeReviewIndex.value = {}
   }
 
   function upsertReview(block: { id: string; type: string; meta: Record<string, unknown> }) {
@@ -806,17 +979,26 @@ export const useAppStore = defineStore('app', () => {
     const before = typeof block.meta.before === 'string' ? block.meta.before : null
     const after = typeof block.meta.after === 'string' ? block.meta.after : null
     if (before === null && after === null) return
-    reviews.value = {
-      ...reviews.value,
-      [path]: {
-        path,
-        action: String(block.meta.action || (block.type === 'file.delete' ? 'delete' : 'edit')),
-        before: before ?? '',
-        after: after ?? '',
-        status: 'pending',
-        blockId: block.id,
-      },
+    const entry: FileReview = {
+      path,
+      action: String(block.meta.action || (block.type === 'file.delete' ? 'delete' : 'edit')),
+      before: before ?? '',
+      after: after ?? '',
+      status: 'pending',
+      blockId: block.id,
     }
+    const list = reviewsForPath(path)
+    const i = list.findIndex((item) => item.blockId === block.id)
+    let nextList: FileReview[]
+    if (i >= 0) {
+      nextList = [...list]
+      nextList[i] = entry
+    } else {
+      nextList = [...list, entry]
+      const pendingCount = nextList.filter((item) => item.status === 'pending').length
+      activeReviewIndex.value = { ...activeReviewIndex.value, [path]: pendingCount - 1 }
+    }
+    reviews.value = { ...reviews.value, [path]: nextList }
     const isNew = !before && after
     if (isNew) {
       sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: 'addedPending' }
@@ -837,20 +1019,35 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  async function acceptReview(path: string) {
-    const review = reviews.value[path]
+  function setReviewStatus(path: string, blockId: string, status: 'accepted' | 'rejected') {
+    reviews.value = {
+      ...reviews.value,
+      [path]: reviewsForPath(path).map((item) => (item.blockId === blockId ? { ...item, status } : item)),
+    }
+    clampReviewIndex(path)
+  }
+
+  async function acceptReview(path: string, blockId?: string) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
     if (!review || review.status !== 'pending') return
-    reviews.value = { ...reviews.value, [path]: { ...review, status: 'accepted' } }
+    setReviewStatus(path, review.blockId, 'accepted')
+    markReviewAcked(review.blockId)
     await syncOpenFile(path, review.after, false)
-    const session = { ...sessionTreeMarks.value }
-    delete session[path]
-    sessionTreeMarks.value = session
-    ackedTreeMarks.value = { ...ackedTreeMarks.value, [path]: true }
+    if (!pendingReviewsForPath(path).length) {
+      const session = { ...sessionTreeMarks.value }
+      delete session[path]
+      sessionTreeMarks.value = session
+      ackedTreeMarks.value = { ...ackedTreeMarks.value, [path]: true }
+    }
     void loadGitChangedPaths()
   }
 
-  async function rejectReview(path: string) {
-    const review = reviews.value[path]
+  async function rejectReview(path: string, blockId?: string) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
     if (!review || review.status !== 'pending' || !workspaceId.value) return
     const created = review.action === 'create' || !review.before
     if (review.action === 'delete') {
@@ -868,7 +1065,9 @@ export const useAppStore = defineStore('app', () => {
       } catch {
         /* already gone */
       }
-      closeFile(path)
+      if (!pendingReviewsForPath(path).filter((item) => item.blockId !== review.blockId).length) {
+        closeFile(path)
+      }
       await loadTree(parentPath(path) || '')
     } else {
       await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`, {
@@ -877,7 +1076,8 @@ export const useAppStore = defineStore('app', () => {
       })
       await syncOpenFile(path, review.before, false)
     }
-    reviews.value = { ...reviews.value, [path]: { ...review, status: 'rejected' } }
+    setReviewStatus(path, review.blockId, 'rejected')
+    markReviewAcked(review.blockId)
     void loadGitChangedPaths()
   }
 
@@ -1088,11 +1288,14 @@ export const useAppStore = defineStore('app', () => {
     detachRun()
     conversationId.value = id
     rememberConversation(id)
+    reviews.value = {}
+    activeReviewIndex.value = {}
     messages.value = []
     const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
     // Ignore late responses if user already switched again
     if (conversationId.value !== id) return
     messages.value = data.messages || []
+    rebuildReviewsFromMessages(messages.value)
     mode.value = (data.mode as typeof mode.value) || 'agent'
     modelId.value = data.model_id
     applied.value = new Set()
@@ -1105,6 +1308,7 @@ export const useAppStore = defineStore('app', () => {
       activeRunId.value = null
       lastEventId.value = null
     }
+    window.dispatchEvent(new Event('ca-messages-loaded'))
   }
 
   async function deleteConversation(id: string) {
@@ -1555,6 +1759,11 @@ export const useAppStore = defineStore('app', () => {
     return empty
   }
 
+  watch(
+    () => [workspaceId.value, openFiles.value.map((f) => f.path).join('\0'), activePath.value] as const,
+    () => persistEditorState(),
+  )
+
   return {
     workspaces,
     recentWorkspaces,
@@ -1589,10 +1798,16 @@ export const useAppStore = defineStore('app', () => {
     skillFocusIntent,
     openSkill,
     reviews,
+    activeReviewIndex,
     pendingReview,
     pendingReviews,
+    pendingReviewPaths,
+    pendingReviewCount,
+    activeReviewIndexFor,
+    cycleFileReview,
     acceptAllReviews,
-    cycleReview,
+    rejectAllReviews,
+    cycleReviewPath,
     confirmDialog,
     askConfirm,
     closeConfirm,

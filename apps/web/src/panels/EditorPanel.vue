@@ -9,6 +9,7 @@ import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import FilePreviewHost from '@/preview/FilePreviewHost.vue'
 import { isPreviewKind } from '@/preview/classify'
 import { langOf } from '@/utils/editorLang'
+import { t } from '@/i18n'
 
 const store = useAppStore()
 const host = ref<HTMLDivElement | null>(null)
@@ -20,15 +21,66 @@ const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
 let monacoMod: typeof import('monaco-editor') | null = null
+let reviewNavDisposables: import('monaco-editor').IDisposable[] = []
+let diffRevealDisposable: import('monaco-editor').IDisposable | null = null
 const models = new Map<string, import('monaco-editor').editor.ITextModel>()
 const origModels = new Map<string, import('monaco-editor').editor.ITextModel>()
 let searchDecorations: string[] = []
 let lastSearchHighlight: { path: string; line: number; query: string; caseSensitive?: boolean } | null = null
 const review = computed(() => store.pendingReview(store.activePath))
 const pendingCount = computed(() => store.pendingReviews.length)
-const reviewIndex = computed(() => {
-  const i = store.pendingReviews.findIndex((r) => r.path === store.activePath)
+const fileReviewCount = computed(() => store.pendingReviewCount(store.activePath))
+const fileReviewIndex = computed(() => store.activeReviewIndexFor(store.activePath) + 1)
+const filePendingPathCount = computed(() => store.pendingReviewPaths.length)
+const filePathIndex = computed(() => {
+  const i = store.pendingReviewPaths.indexOf(store.activePath || '')
   return i < 0 ? 0 : i + 1
+})
+const canCycleDiff = computed(() => fileReviewCount.value > 1)
+const canCycleFile = computed(() => filePendingPathCount.value > 1)
+
+function cycleDiff(delta: number) {
+  const path = store.activePath
+  if (!path || !canCycleDiff.value) return
+  store.cycleFileReview(path, delta)
+}
+
+async function cycleFile(delta: number) {
+  if (!canCycleFile.value) return
+  await store.cycleReviewPath(delta)
+}
+
+const bulkConfirm = ref<'accept' | 'reject' | null>(null)
+const bulkActionRef = ref<HTMLElement | null>(null)
+
+function openBulkConfirm(kind: 'accept' | 'reject') {
+  bulkConfirm.value = bulkConfirm.value === kind ? null : kind
+}
+
+function closeBulkConfirm() {
+  bulkConfirm.value = null
+}
+
+async function confirmBulk() {
+  const kind = bulkConfirm.value
+  if (!kind) return
+  bulkConfirm.value = null
+  if (kind === 'accept') await store.acceptAllReviews()
+  else await store.rejectAllReviews()
+}
+
+function onBulkDocClick(e: MouseEvent) {
+  if (!bulkConfirm.value) return
+  const root = bulkActionRef.value
+  if (root && !root.contains(e.target as Node)) closeBulkConfirm()
+}
+
+function onBulkKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeBulkConfirm()
+}
+
+watch(pendingCount, (n) => {
+  if (!n) closeBulkConfirm()
 })
 
 const isHtmlFile = computed(() => store.openFile?.kind === 'html')
@@ -87,16 +139,6 @@ const canMarkdownPreview = computed(
 )
 const showMarkdownPreview = computed(() => mdPreview.value && canMarkdownPreview.value && !review.value)
 
-const canSave = computed(
-  () =>
-    Boolean(store.openFile) &&
-    !store.openFile?.readonly &&
-    !review.value &&
-    !showMarkdownPreview.value &&
-    !activeIsBinaryPreview.value &&
-    !(isHtmlFile.value && htmlPreview.value),
-)
-
 function uriOf(path: string, original = false) {
   return monacoMod!.Uri.from({
     scheme: 'inmemory',
@@ -151,6 +193,8 @@ function showPath(path: string | null) {
     return
   }
   diffEditor?.setModel(null)
+  clearReviewNavigation()
+  clearDiffReveal()
   if (!editor) return
   const file = path ? store.openFiles.find((f) => f.path === path) : null
   if (!path || !file) {
@@ -244,6 +288,69 @@ function applySearchReveal(path: string) {
   }
 }
 
+function clearReviewNavigation() {
+  for (const disposable of reviewNavDisposables) disposable.dispose()
+  reviewNavDisposables = []
+}
+
+function bindReviewNavigation() {
+  clearReviewNavigation()
+  if (!monacoMod || !diffEditor) return
+  const path = store.activePath
+  const canDiff = store.pendingReviewCount(path) > 1
+  const canFile = store.pendingReviewPaths.length > 1
+  if (!canDiff && !canFile) return
+  const bind = (ed: import('monaco-editor').editor.IStandaloneCodeEditor) => {
+    reviewNavDisposables.push(
+      ed.onKeyDown((e) => {
+        if (canDiff && e.keyCode === monacoMod!.KeyCode.UpArrow) {
+          e.preventDefault()
+          e.stopPropagation()
+          store.cycleFileReview(path!, -1)
+        } else if (canDiff && e.keyCode === monacoMod!.KeyCode.DownArrow) {
+          e.preventDefault()
+          e.stopPropagation()
+          store.cycleFileReview(path!, 1)
+        } else if (canFile && e.keyCode === monacoMod!.KeyCode.LeftArrow) {
+          e.preventDefault()
+          e.stopPropagation()
+          void store.cycleReviewPath(-1)
+        } else if (canFile && e.keyCode === monacoMod!.KeyCode.RightArrow) {
+          e.preventDefault()
+          e.stopPropagation()
+          void store.cycleReviewPath(1)
+        }
+      }),
+    )
+  }
+  bind(diffEditor.getModifiedEditor())
+  bind(diffEditor.getOriginalEditor())
+}
+
+function clearDiffReveal() {
+  diffRevealDisposable?.dispose()
+  diffRevealDisposable = null
+}
+
+function revealDiffPosition() {
+  if (!diffEditor) return
+  clearDiffReveal()
+  diffEditor.revealFirstDiff()
+  diffRevealDisposable = diffEditor.onDidUpdateDiff(() => {
+    const changes = diffEditor?.getLineChanges()
+    if (!changes?.length || !diffEditor) return
+    const first = changes[0]
+    const modLine = Math.max(1, first.modifiedStartLineNumber)
+    const origLine = Math.max(1, first.originalStartLineNumber)
+    const mod = diffEditor.getModifiedEditor()
+    const orig = diffEditor.getOriginalEditor()
+    mod.revealLineInCenter(modLine)
+    orig.revealLineInCenter(origLine)
+    mod.setPosition({ lineNumber: modLine, column: 1 })
+    clearDiffReveal()
+  })
+}
+
 function showDiff(path: string, before: string, after: string) {
   if (!monacoMod || !diffHost.value) return
   if (!diffEditor) {
@@ -259,7 +366,12 @@ function showDiff(path: string, before: string, after: string) {
   const original = ensureOrigModel(path, before)
   const modified = ensureModel(path, after)
   if (original && modified) diffEditor.setModel({ original, modified })
-  requestAnimationFrame(() => diffEditor?.layout())
+  bindReviewNavigation()
+  revealDiffPosition()
+  requestAnimationFrame(() => {
+    diffEditor?.layout()
+    diffEditor?.revealFirstDiff()
+  })
 }
 
 onMounted(async () => {
@@ -279,19 +391,49 @@ onMounted(async () => {
   host.value.addEventListener('copy', onEditorCopy)
   showPath(store.activePath)
   window.addEventListener('ca-theme', onTheme as EventListener)
-  window.addEventListener('keydown', onKey)
   window.addEventListener('ca-file-reload', onReload as EventListener)
+  window.addEventListener('ca-focus-editor', onFocusEditor as EventListener)
+  window.addEventListener('keydown', onReviewKey)
+  document.addEventListener('mousedown', onBulkDocClick)
+  document.addEventListener('keydown', onBulkKey)
 })
+
+function onFocusEditor() {
+  showPath(store.activePath)
+}
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable
+}
+
+function onReviewKey(e: KeyboardEvent) {
+  if (!review.value) return
+  if (isEditableTarget(e.target)) return
+  if (e.key === 'ArrowUp' && canCycleDiff.value) {
+    e.preventDefault()
+    cycleDiff(-1)
+    return
+  }
+  if (e.key === 'ArrowDown' && canCycleDiff.value) {
+    e.preventDefault()
+    cycleDiff(1)
+    return
+  }
+  if (e.key === 'ArrowLeft' && canCycleFile.value) {
+    e.preventDefault()
+    void cycleFile(-1)
+    return
+  }
+  if (e.key === 'ArrowRight' && canCycleFile.value) {
+    e.preventDefault()
+    void cycleFile(1)
+  }
+}
 
 function onTheme() {
   applyEditorTheme()
-}
-
-function onKey(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    e.preventDefault()
-    save()
-  }
 }
 
 function onReload(e: Event) {
@@ -321,7 +463,23 @@ function onEditorCopy() {
 }
 
 watch(
-  () => [store.activePath, review.value?.blockId, review.value?.status, htmlPreview.value] as const,
+  () => store.openFiles.length,
+  async () => {
+    if (!store.activePath || !monacoMod) return
+    await nextTick()
+    showPath(store.activePath)
+  },
+)
+
+watch(
+  () =>
+    [
+      store.activePath,
+      review.value?.blockId,
+      review.value?.status,
+      store.activeReviewIndexFor(store.activePath),
+      htmlPreview.value,
+    ] as const,
   async () => {
     await nextTick()
     showPath(store.activePath)
@@ -371,19 +529,20 @@ watch(
 onBeforeUnmount(() => {
   host.value?.removeEventListener('copy', onEditorCopy)
   window.removeEventListener('ca-theme', onTheme as EventListener)
-  window.removeEventListener('keydown', onKey)
   window.removeEventListener('ca-file-reload', onReload as EventListener)
+  window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
+  window.removeEventListener('keydown', onReviewKey)
+  document.removeEventListener('mousedown', onBulkDocClick)
+  document.removeEventListener('keydown', onBulkKey)
   for (const model of models.values()) model.dispose()
   for (const model of origModels.values()) model.dispose()
   models.clear()
   origModels.clear()
   diffEditor?.dispose()
+  clearReviewNavigation()
+  clearDiffReveal()
   editor?.dispose()
 })
-
-async function save() {
-  await store.saveOpenFile()
-}
 
 function onTabWheel(e: WheelEvent) {
   const el = e.currentTarget as HTMLElement
@@ -459,7 +618,7 @@ async function onTabMenuSelect(id: string) {
         >
           <FileTreeIcon kind="file" :path="file.path" :size="16" />
           <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
-          <span v-if="store.pendingReview(file.path)" class="mark">diff</span>
+          <span v-if="store.pendingReviewCount(file.path)" class="mark">diff</span>
           <span class="x" title="关闭" @click.stop="store.closeFile(file.path)">×</span>
         </button>
       </div>
@@ -471,21 +630,129 @@ async function onTabMenuSelect(id: string) {
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': !htmlPreview }" @click="htmlPreview = false">源码</button>
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': htmlPreview }" @click="htmlPreview = true">预览</button>
       </div>
-      <button type="button" class="btn" :disabled="!canSave" @click="save">保存</button>
     </header>
     <div v-if="store.fileNotice" class="file-notice" role="status">
       <span>{{ store.fileNotice }}</span>
       <button type="button" class="notice-x" @click="store.clearFileNotice()">×</button>
     </div>
     <div v-if="pendingCount" class="review-bar">
-      <span>{{ review ? '请确认当前文件 diff' : '有待确认的改动' }}</span>
-      <span class="count">{{ review ? `${reviewIndex}/${pendingCount}` : `${pendingCount} 个文件` }}</span>
-      <button type="button" class="btn ghost" :disabled="pendingCount < 2" @click="store.cycleReview(-1)">上一个</button>
-      <button type="button" class="btn ghost" :disabled="pendingCount < 2" @click="store.cycleReview(1)">下一个</button>
-      <span class="spacer" />
-      <button v-if="review" type="button" class="btn ghost" @click="store.rejectReview(review.path)">拒绝</button>
-      <button v-if="review" type="button" class="btn primary" @click="store.acceptReview(review.path)">接受</button>
-      <button type="button" class="btn primary" @click="store.acceptAllReviews()">全部接受</button>
+      <div class="review-nav" role="navigation" :aria-label="t('editor.reviewNav')">
+        <div class="review-nav-group">
+          <button
+            type="button"
+            class="nav-btn"
+            :disabled="!canCycleDiff"
+            :title="t('editor.prevDiff')"
+            @click="cycleDiff(-1)"
+          >
+            <AppIcon name="chevron-up" :size="14" />
+          </button>
+          <span class="nav-label">{{ t('editor.diffNav', { i: fileReviewIndex, n: Math.max(fileReviewCount, 1) }) }}</span>
+          <button
+            type="button"
+            class="nav-btn"
+            :disabled="!canCycleDiff"
+            :title="t('editor.nextDiff')"
+            @click="cycleDiff(1)"
+          >
+            <AppIcon name="chevron-down" :size="14" />
+          </button>
+        </div>
+        <span class="review-nav-sep" aria-hidden="true" />
+        <div class="review-nav-group">
+          <button
+            type="button"
+            class="nav-btn"
+            :disabled="!canCycleFile"
+            :title="t('editor.prevFile')"
+            @click="cycleFile(-1)"
+          >
+            <AppIcon name="chevron-left" :size="14" />
+          </button>
+          <span class="nav-label nav-label-long">{{ t('editor.fileNav', { i: filePathIndex || 1, n: filePendingPathCount }) }}</span>
+          <span class="nav-label nav-label-short">{{ filePathIndex || 1 }}/{{ filePendingPathCount }}</span>
+          <button
+            type="button"
+            class="nav-btn"
+            :disabled="!canCycleFile"
+            :title="t('editor.nextFile')"
+            @click="cycleFile(1)"
+          >
+            <AppIcon name="chevron-right" :size="14" />
+          </button>
+        </div>
+      </div>
+      <div class="review-actions">
+        <div v-if="review" class="action-group" role="group" :aria-label="t('editor.reviewActionsCurrent')">
+          <button
+            type="button"
+            class="action-btn is-reject"
+            :title="t('editor.reject')"
+            @click="store.rejectReview(review.path)"
+          >
+            <AppIcon name="close" :size="14" />
+            <span class="action-label">{{ t('editor.reject') }}</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn is-accept"
+            :title="t('editor.accept')"
+            @click="store.acceptReview(review.path)"
+          >
+            <AppIcon name="check" :size="14" />
+            <span class="action-label">{{ t('editor.accept') }}</span>
+          </button>
+        </div>
+        <div ref="bulkActionRef" class="action-group bulk-group" role="group" :aria-label="t('editor.reviewActionsAll')">
+          <button
+            type="button"
+            class="action-btn is-reject"
+            :class="{ 'is-active': bulkConfirm === 'reject' }"
+            :title="t('editor.rejectAll')"
+            @click="openBulkConfirm('reject')"
+          >
+            <AppIcon name="close-all" :size="14" />
+            <span class="action-label">{{ t('editor.rejectAll') }}</span>
+          </button>
+          <button
+            type="button"
+            class="action-btn is-accept"
+            :class="{ 'is-active': bulkConfirm === 'accept' }"
+            :title="t('editor.acceptAll')"
+            @click="openBulkConfirm('accept')"
+          >
+            <AppIcon name="check" :size="14" />
+            <span class="action-label">{{ t('editor.acceptAll') }}</span>
+          </button>
+          <div
+            v-if="bulkConfirm"
+            class="bulk-confirm"
+            :class="{ 'is-danger': bulkConfirm === 'reject' }"
+            role="dialog"
+            :aria-label="bulkConfirm === 'accept' ? t('confirm.acceptAllReviewsTitle') : t('confirm.rejectAllReviewsTitle')"
+            @mousedown.stop
+          >
+            <p class="bulk-confirm-text">
+              {{
+                bulkConfirm === 'accept'
+                  ? t('confirm.acceptAllReviewsSummary', { n: pendingCount })
+                  : t('confirm.rejectAllReviewsSummary', { n: pendingCount })
+              }}
+            </p>
+            <div class="bulk-confirm-actions">
+              <button type="button" class="bulk-btn ghost" @click="closeBulkConfirm">{{ t('common.cancel') }}</button>
+              <button
+                type="button"
+                class="bulk-btn"
+                :class="bulkConfirm === 'reject' ? 'danger' : 'primary'"
+                @click="confirmBulk"
+              >
+                {{ t('confirm.confirm') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="host-wrap">
       <FilePreviewHost
@@ -623,33 +890,269 @@ async function onTabMenuSelect(id: string) {
   color: var(--text-h);
 }
 .review-bar {
+  container-type: inline-size;
+  container-name: review-bar;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   min-height: 36px;
-  padding: 0 10px;
+  padding: 6px 8px;
   border-bottom: var(--border-width) solid var(--border);
-  background: var(--primary-soft);
+  background: color-mix(in srgb, var(--primary) 8%, var(--bg));
   color: var(--text);
   font-size: 12.5px;
+  overflow: visible;
 }
-.count {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.review-bar .btn { margin: 0; height: 26px; }
-.spacer { flex: 1; }
-.btn.ghost {
+.review-nav {
+  display: inline-flex;
+  align-items: stretch;
+  flex-shrink: 1;
+  min-width: 0;
   border: 1px solid var(--border);
+  border-radius: 8px;
   background: var(--bg-elevated);
+  overflow: hidden;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+}
+.review-nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+}
+.review-nav-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+  flex-shrink: 0;
+}
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.nav-btn:hover:not(:disabled) {
+  background: var(--bg-muted);
+  color: var(--text-h);
+}
+.nav-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+.nav-label {
+  min-width: 0;
+  padding: 0 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-h);
+  text-align: center;
+  white-space: nowrap;
+  user-select: none;
+}
+.nav-label-short {
+  display: none;
+  min-width: 36px;
+}
+.nav-label-long {
+  min-width: 72px;
+}
+.review-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+  overflow: visible;
+}
+.action-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+}
+.bulk-group {
+  position: relative;
+  overflow: visible;
+}
+.action-btn.is-active {
+  background: var(--bg-muted);
+}
+.action-btn.is-active.is-accept {
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-muted));
+}
+.bulk-confirm {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: min(200px, 68vw);
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: 0 4px 16px color-mix(in srgb, #000 12%, transparent);
+}
+.bulk-confirm::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: 16px;
+  width: 7px;
+  height: 7px;
+  border-top: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  background: var(--bg-elevated);
+  transform: rotate(45deg);
+}
+.bulk-confirm.is-danger {
+  border-color: color-mix(in srgb, #dc2626 28%, var(--border));
+}
+.bulk-confirm-text {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.35;
   color: var(--text-secondary);
 }
-.btn.primary {
-  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
-  background: var(--bg-elevated);
+.bulk-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.bulk-btn {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bulk-btn:hover {
+  background: var(--bg-muted);
+  color: var(--text-h);
+}
+.bulk-btn.ghost {
+  background: transparent;
+}
+.bulk-btn.primary {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-elevated));
   color: var(--primary);
 }
+.bulk-btn.primary:hover {
+  background: color-mix(in srgb, var(--primary) 20%, var(--bg-elevated));
+}
+.bulk-btn.danger {
+  border-color: color-mix(in srgb, #dc2626 35%, var(--border));
+  background: color-mix(in srgb, #dc2626 10%, var(--bg-elevated));
+  color: #dc2626;
+}
+.bulk-btn.danger:hover {
+  background: color-mix(in srgb, #dc2626 16%, var(--bg-elevated));
+}
+.action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.action-btn:hover {
+  background: var(--bg-muted);
+  color: var(--text-h);
+}
+.action-btn.is-reject:hover {
+  background: color-mix(in srgb, #dc2626 10%, var(--bg-muted));
+  color: #dc2626;
+}
+.action-btn.is-accept {
+  color: var(--primary);
+}
+.action-btn.is-accept:hover {
+  background: color-mix(in srgb, var(--primary) 12%, var(--bg-muted));
+  color: var(--primary);
+}
+.action-btn.is-strong {
+  background: color-mix(in srgb, var(--primary) 14%, var(--bg-elevated));
+}
+.action-btn.is-strong:hover {
+  background: color-mix(in srgb, var(--primary) 24%, var(--bg-elevated));
+}
+@container review-bar (max-width: 640px) {
+  .action-label {
+    display: none;
+  }
+  .action-btn {
+    width: 28px;
+    padding: 0;
+  }
+  .nav-label-long {
+    display: none;
+  }
+  .nav-label-short {
+    display: inline;
+  }
+}
+@container review-bar (max-width: 480px) {
+  .review-bar {
+    align-items: stretch;
+  }
+  .review-nav {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .review-actions {
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+}
+@container review-bar (max-width: 360px) {
+  .review-nav-group {
+    padding: 2px;
+  }
+  .nav-label {
+    font-size: 11px;
+  }
+  .nav-label-short {
+    min-width: 28px;
+  }
+  .action-group {
+    flex: 1;
+    justify-content: center;
+  }
+}
+.spacer { flex: 1; }
 .x {
   width: 16px;
   height: 16px;

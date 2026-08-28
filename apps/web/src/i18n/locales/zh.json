@@ -203,7 +203,11 @@
     "cancel": "取消",
     "deleteSessionTitle": "删除会话",
     "deleteSessionNamed": "确定删除「{title}」？此操作不可恢复。",
-    "deleteSession": "确定删除该会话？此操作不可恢复。"
+    "deleteSession": "确定删除该会话？此操作不可恢复。",
+    "acceptAllReviewsTitle": "全部接受",
+    "acceptAllReviewsSummary": "接受 {n} 个文件？",
+    "rejectAllReviewsTitle": "全部拒绝",
+    "rejectAllReviewsSummary": "拒绝 {n} 个文件？"
   },
   "tree": {
     "untracked": "新增（未跟踪）",
@@ -473,6 +477,17 @@
     "reject": "拒绝",
     "accept": "接受",
     "acceptAll": "全部接受",
+    "rejectAll": "全部拒绝",
+    "reviewNav": "改动导航",
+    "reviewActionsCurrent": "当前改动",
+    "reviewActionsAll": "全部改动",
+    "diffNav": "{i} / {n}",
+    "fileNav": "{i} / {n} 个文件",
+    "prevDiff": "上一处改动",
+    "nextDiff": "下一处改动",
+    "prevFile": "上一个文件",
+    "nextFile": "下一个文件",
+    "diffCount": "改动 {i}/{n}",
     "openFromSidebar": "从侧栏打开文件"
   },
   "search": {

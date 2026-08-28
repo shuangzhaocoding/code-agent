@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
@@ -138,6 +138,10 @@ async function onReady(event: DockviewReadyEvent) {
   }
   if (!restored) seed(event.api)
   openExplorer()
+  await nextTick()
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new Event('ca-layout-ready'))
+  })
   event.api.onDidLayoutChange(() => {
     const layout = event.api.toJSON()
     api('/api/layout', {

@@ -202,7 +202,11 @@
     "cancel": "취소",
     "deleteSessionTitle": "채팅 삭제",
     "deleteSessionNamed": "“{title}”을(를) 삭제할까요? 되돌릴 수 없습니다.",
-    "deleteSession": "이 채팅을 삭제할까요? 되돌릴 수 없습니다."
+    "deleteSession": "이 채팅을 삭제할까요? 되돌릴 수 없습니다.",
+    "acceptAllReviewsTitle": "모두 수락",
+    "acceptAllReviewsSummary": "파일 {n}개 수락?",
+    "rejectAllReviewsTitle": "모두 거부",
+    "rejectAllReviewsSummary": "파일 {n}개 거부?"
   },
   "tree": {
     "untracked": "추가됨(추적 안 됨)",
@@ -472,6 +476,17 @@
     "reject": "거부",
     "accept": "수락",
     "acceptAll": "모두 수락",
+    "rejectAll": "모두 거부",
+    "reviewNav": "변경 탐색",
+    "reviewActionsCurrent": "현재 변경",
+    "reviewActionsAll": "모든 변경",
+    "diffNav": "{i} / {n}",
+    "fileNav": "{i} / {n}개 파일",
+    "prevDiff": "이전 변경",
+    "nextDiff": "다음 변경",
+    "prevFile": "이전 파일",
+    "nextFile": "다음 파일",
+    "diffCount": "변경 {i}/{n}",
     "openFromSidebar": "사이드바에서 파일 열기"
   },
   "search": {

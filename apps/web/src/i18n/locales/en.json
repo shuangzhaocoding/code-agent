@@ -203,7 +203,11 @@
     "cancel": "Cancel",
     "deleteSessionTitle": "Delete chat",
     "deleteSessionNamed": "Delete “{title}”? This cannot be undone.",
-    "deleteSession": "Delete this chat? This cannot be undone."
+    "deleteSession": "Delete this chat? This cannot be undone.",
+    "acceptAllReviewsTitle": "Accept all",
+    "acceptAllReviewsSummary": "Accept {n} files?",
+    "rejectAllReviewsTitle": "Reject all",
+    "rejectAllReviewsSummary": "Reject {n} files?"
   },
   "tree": {
     "untracked": "Added (untracked)",
@@ -473,6 +477,17 @@
     "reject": "Reject",
     "accept": "Accept",
     "acceptAll": "Accept all",
+    "rejectAll": "Reject all",
+    "reviewNav": "Review navigation",
+    "reviewActionsCurrent": "Current change",
+    "reviewActionsAll": "All changes",
+    "diffNav": "{i} of {n}",
+    "fileNav": "{i} of {n} Files",
+    "prevDiff": "Previous change",
+    "nextDiff": "Next change",
+    "prevFile": "Previous file",
+    "nextFile": "Next file",
+    "diffCount": "Change {i}/{n}",
     "openFromSidebar": "Open a file from the sidebar"
   },
   "search": {

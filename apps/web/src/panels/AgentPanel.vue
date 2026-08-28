@@ -725,6 +725,7 @@ function onResizeHandlePointerDown(e: PointerEvent) {
 }
 
 const stick = ref(true)
+const forcePinning = ref(false)
 const showScrollToBottom = computed(() => !stick.value && store.messages.length > 0)
 const contextUsageOpen = ref(false)
 const uploadError = ref('')
@@ -834,16 +835,16 @@ function pauseFollow() {
 }
 
 function jumpToEnd(behavior: ScrollBehavior = 'smooth') {
-  if (!stick.value) return
+  if (!stick.value && !forcePinning.value) return
   const el = scroller.value
   if (!el) return
   const token = followGen
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
-  if (behavior === 'auto' && Math.abs(el.scrollTop - top) < 2) return
+  if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) return
   locking = true
   scrollToTop(el, top, behavior)
   requestAnimationFrame(() => {
-    if (token !== followGen || !stick.value) {
+    if (token !== followGen || (!stick.value && !forcePinning.value)) {
       locking = false
       return
     }
@@ -865,7 +866,7 @@ function resumeStickScroll() {
 
 function onScroll() {
   virtualList.onScroll()
-  if (locking) return
+  if (locking || forcePinning.value) return
   const el = scroller.value
   if (!el) return
   if (distanceToBottom(el) > 16) pauseFollow()
@@ -883,13 +884,55 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function scheduleStickScroll() {
-  if (!stick.value) return
+  if (!stick.value && !forcePinning.value) return
   if (pinRaf) return
   pinRaf = requestAnimationFrame(() => {
     pinRaf = 0
-    if (!stick.value) return
-    jumpToEnd('auto')
+    if (!stick.value && !forcePinning.value) return
+    if (virtualList.enabled.value) virtualList.scrollToEnd('auto')
+    else jumpToEnd('auto')
   })
+}
+
+function raf() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+}
+
+/** Wait until the scroll container has layout and message content height. */
+async function waitForScrollerReady(maxMs = 4000) {
+  const start = Date.now()
+  while (Date.now() - start < maxMs) {
+    await nextTick()
+    const el = scroller.value
+    if (!el || el.clientHeight <= 0) {
+      await raf()
+      continue
+    }
+    if (!store.messages.length) return true
+    if (el.scrollHeight > el.clientHeight + 4) return true
+    if (virtualList.enabled.value && virtualList.totalHeight.value > el.clientHeight) return true
+    const lastId = store.messages.at(-1)?.id
+    if (lastId && document.getElementById(`msg-${lastId}`)) return true
+    await raf()
+  }
+  return Boolean(scroller.value && scroller.value.clientHeight > 0)
+}
+
+function scrollMessagesToEnd(behavior: ScrollBehavior = 'auto') {
+  if (!stick.value && !forcePinning.value) return
+  const el = scroller.value
+  if (!el) return
+  if (virtualList.enabled.value) {
+    virtualList.scrollToEnd(behavior)
+    return
+  }
+  jumpToEnd(behavior)
+}
+
+function revealLastMessage(behavior: ScrollBehavior = 'auto') {
+  const lastId = store.messages.at(-1)?.id
+  if (!lastId) return
+  document.getElementById(`msg-${lastId}`)?.scrollIntoView({ block: 'end', behavior })
 }
 
 /** Force pin to bottom (conversation switch / initial load). */
@@ -897,23 +940,40 @@ async function pinToBottom() {
   stick.value = true
   followGen += 1
   const token = followGen
+  forcePinning.value = true
+  scroller.value?.classList.add('is-pinning')
 
-  const attempt = () => {
-    if (token !== followGen || !stick.value) return
-    jumpToEnd('smooth')
-  }
-
-  await nextTick()
-  attempt()
-  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
-  attempt()
-
-  // Async message blocks / images continue growing after first paint.
-  for (let i = 0; i < 10; i++) {
-    await new Promise<void>((resolve) => window.setTimeout(resolve, 60))
+  const attempt = (behavior: ScrollBehavior = 'auto') => {
     if (token !== followGen) return
-    attempt()
+    scrollMessagesToEnd(behavior)
+    revealLastMessage(behavior)
   }
+
+  try {
+    await waitForScrollerReady()
+    for (let i = 0; i < 16; i++) {
+      if (token !== followGen) return
+      attempt('auto')
+      await nextTick()
+      await raf()
+      if (i > 2) {
+        const el = scroller.value
+        if (el && distanceToBottom(el) <= 16) break
+      }
+      if (i < 15) await new Promise<void>((resolve) => window.setTimeout(resolve, 60))
+    }
+  } finally {
+    if (token === followGen) {
+      forcePinning.value = false
+      scroller.value?.classList.remove('is-pinning')
+      const el = scroller.value
+      if (el && distanceToBottom(el) <= 16) stick.value = true
+    }
+  }
+}
+
+function onMessagesLoaded() {
+  if (store.messages.length) void pinToBottom()
 }
 
 onMounted(() => {
@@ -925,6 +985,8 @@ onMounted(() => {
   }
   if (store.messages.length) void pinToBottom()
   window.addEventListener('ca-add-chat-mention', onAddChatMention)
+  window.addEventListener('ca-messages-loaded', onMessagesLoaded)
+  window.addEventListener('ca-layout-ready', onMessagesLoaded)
   nextTick(() => {
     bindMentionEditorEvents()
     setupHistoryObserver()
@@ -940,6 +1002,8 @@ onBeforeUnmount(() => {
   historyObs = null
   if (pinRaf) cancelAnimationFrame(pinRaf)
   window.removeEventListener('ca-add-chat-mention', onAddChatMention)
+  window.removeEventListener('ca-messages-loaded', onMessagesLoaded)
+  window.removeEventListener('ca-layout-ready', onMessagesLoaded)
 })
 
 watch(
@@ -965,6 +1029,16 @@ watch(
     const filled = switched || (prev[1] === 0 && len > 0)
     if (switched || filled) await pinToBottom()
     nextTick(() => setupHistoryObserver())
+  },
+  { immediate: true },
+)
+
+watch(
+  () => virtualList.enabled.value,
+  (enabled, wasEnabled) => {
+    if (enabled && wasEnabled === false && stick.value && store.messages.length) {
+      void pinToBottom()
+    }
   },
 )
 
@@ -1129,7 +1203,7 @@ function openContextUsageDialog() {
       </Transition>
     </Teleport>
     <div class="agent-main">
-      <div ref="scroller" class="timeline" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
+      <div ref="scroller" class="timeline" :class="{ 'is-pinning': forcePinning }" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
         <div ref="timelineInner" class="timeline-inner">
         <div v-if="!store.messages.length" class="empty">
           <div class="empty-icon" aria-hidden="true">
@@ -1417,9 +1491,12 @@ function openContextUsageDialog() {
   overflow-x: hidden;
   overflow-y: auto;
   overflow-anchor: none;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scrollbar-gutter: auto;
   padding: 12px 20px 8px;
+}
+.timeline.is-pinning {
+  scroll-behavior: auto !important;
 }
 .timeline::-webkit-scrollbar-button {
   display: none;

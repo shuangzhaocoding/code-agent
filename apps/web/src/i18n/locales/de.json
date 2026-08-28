@@ -202,7 +202,11 @@
     "cancel": "Abbrechen",
     "deleteSessionTitle": "Chat löschen",
     "deleteSessionNamed": "„{title}“ löschen? Das kann nicht rückgängig gemacht werden.",
-    "deleteSession": "Diesen Chat löschen? Das kann nicht rückgängig gemacht werden."
+    "deleteSession": "Diesen Chat löschen? Das kann nicht rückgängig gemacht werden.",
+    "acceptAllReviewsTitle": "Alle annehmen",
+    "acceptAllReviewsSummary": "{n} Dateien annehmen?",
+    "rejectAllReviewsTitle": "Alle ablehnen",
+    "rejectAllReviewsSummary": "{n} Dateien ablehnen?"
   },
   "tree": {
     "untracked": "Hinzugefügt (untracked)",
@@ -473,6 +477,17 @@
     "reject": "Ablehnen",
     "accept": "Annehmen",
     "acceptAll": "Alle annehmen",
+    "rejectAll": "Alle ablehnen",
+    "reviewNav": "Änderungsnavigation",
+    "reviewActionsCurrent": "Aktuelle Änderung",
+    "reviewActionsAll": "Alle Änderungen",
+    "diffNav": "{i} von {n}",
+    "fileNav": "{i} von {n} Dateien",
+    "prevDiff": "Vorherige Änderung",
+    "nextDiff": "Nächste Änderung",
+    "prevFile": "Vorherige Datei",
+    "nextFile": "Nächste Datei",
+    "diffCount": "Änderung {i}/{n}",
     "openFromSidebar": "Datei in der Seitenleiste öffnen"
   },
   "search": {

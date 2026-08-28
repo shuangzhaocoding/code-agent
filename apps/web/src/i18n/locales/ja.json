@@ -202,7 +202,11 @@
     "cancel": "キャンセル",
     "deleteSessionTitle": "チャットを削除",
     "deleteSessionNamed": "「{title}」を削除しますか？この操作は元に戻せません。",
-    "deleteSession": "このチャットを削除しますか？この操作は元に戻せません。"
+    "deleteSession": "このチャットを削除しますか？この操作は元に戻せません。",
+    "acceptAllReviewsTitle": "すべて承認",
+    "acceptAllReviewsSummary": "{n} 件を承認？",
+    "rejectAllReviewsTitle": "すべて拒否",
+    "rejectAllReviewsSummary": "{n} 件を拒否？"
   },
   "tree": {
     "untracked": "追加（未追跡）",
@@ -472,6 +476,17 @@
     "reject": "拒否",
     "accept": "承認",
     "acceptAll": "すべて承認",
+    "rejectAll": "すべて拒否",
+    "reviewNav": "変更ナビ",
+    "reviewActionsCurrent": "現在の変更",
+    "reviewActionsAll": "すべての変更",
+    "diffNav": "{i} / {n}",
+    "fileNav": "{i} / {n} ファイル",
+    "prevDiff": "前の変更",
+    "nextDiff": "次の変更",
+    "prevFile": "前のファイル",
+    "nextFile": "次のファイル",
+    "diffCount": "変更 {i}/{n}",
     "openFromSidebar": "サイドバーからファイルを開く"
   },
   "search": {

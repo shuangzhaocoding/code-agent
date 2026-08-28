@@ -19,7 +19,10 @@ export type AppIconName =
   | 'more'
   | 'save'
   | 'arrow-left'
+  | 'chevron-left'
   | 'chevron-right'
+  | 'chevron-up'
+  | 'chevron-down'
   | 'chevron'
   | 'globe'
   | 'check'
@@ -121,7 +124,10 @@ const paths: Record<string, string[]> = {
   more: ['M12 7h.01', 'M12 12h.01', 'M12 17h.01'],
   save: ['M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z', 'M17 21v-8H7v8', 'M7 3v5h8'],
   'arrow-left': ['M12 19l-7-7 7-7', 'M19 12H5'],
+  'chevron-left': ['M15 18l-6-6 6-6'],
   'chevron-right': ['M9 18l6-6-6-6'],
+  'chevron-up': ['M18 15l-6-6-6 6'],
+  'chevron-down': ['M6 9l6 6 6-6'],
   chevron: ['M6 9l6 6 6-6'],
   globe: [
     'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z',
