@@ -49,7 +49,7 @@ function handleClick() {
 <template>
   <button
     type="button"
-    class="chat-context-usage-button"
+    class="ghost-icon-btn chat-context-usage-button"
     :class="[levelClass, { 'is-loading': loading }]"
     :aria-label="tooltip"
     :title="tooltip"
@@ -89,32 +89,6 @@ function handleClick() {
 </template>
 
 <style scoped>
-.chat-context-usage-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  transition: color 0.2s ease, background-color 0.2s ease;
-}
-
-.chat-context-usage-button:hover:not(:disabled) {
-  color: var(--text-h);
-  background: var(--code-bg);
-}
-
-.chat-context-usage-button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
 .chat-context-usage-button__track {
   stroke: var(--border);
 }

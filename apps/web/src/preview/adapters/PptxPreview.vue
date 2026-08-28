@@ -78,11 +78,11 @@ watch(
     <p v-else-if="error" class="status err">{{ error }}</p>
     <template v-else-if="slides.length">
       <div class="toolbar">
-        <button type="button" class="nav" :disabled="active <= 0" @click="active = Math.max(0, active - 1)">上一页</button>
+        <button type="button" class="ghost-btn nav" :disabled="active <= 0" @click="active = Math.max(0, active - 1)">上一页</button>
         <span class="page">{{ active + 1 }} / {{ slides.length }}</span>
         <button
           type="button"
-          class="nav"
+          class="ghost-btn nav"
           :disabled="active >= slides.length - 1"
           @click="active = Math.min(slides.length - 1, active + 1)"
         >
@@ -101,7 +101,7 @@ watch(
           v-for="(s, i) in slides"
           :key="s.index"
           type="button"
-          class="thumb"
+          class="chip thumb"
           :class="{ on: i === active }"
           @click="active = i"
         >
@@ -130,13 +130,7 @@ watch(
   flex-shrink: 0;
 }
 .nav {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
+  padding: 0 10px;
 }
 .nav:disabled {
   opacity: 0.45;
@@ -177,19 +171,25 @@ watch(
   flex-shrink: 0;
 }
 .thumb {
-  min-width: 28px;
-  height: 28px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  border-radius: 6px;
-  font-size: 11px;
+  min-width: var(--ghost-btn-height);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--ghost-btn-radius);
+  padding: 0 8px;
+  height: var(--ghost-btn-height);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
-  color: var(--text);
+  transition: opacity 0.15s ease, color 0.12s ease;
+}
+.thumb:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
+  color: var(--text-h);
 }
 .thumb.on {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  color: var(--primary);
+  opacity: 1;
 }
 .status {
   margin: 24px;

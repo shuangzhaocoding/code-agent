@@ -52,11 +52,11 @@ function onTogglePin(id: string, e: MouseEvent) {
   <div class="panel-shell">
     <div class="list">
       <button class="btn btn-primary" type="button" @click="startNewChat">
-        <AppIcon name="plus" :size="14" />
+        <AppIcon name="plus" :size="16" :stroke-width="1.75" />
         新会话
       </button>
       <div v-if="store.conversations.length" class="search">
-        <AppIcon name="search" :size="13" />
+        <AppIcon name="search" :size="16" :stroke-width="1.75" />
         <input v-model="query" type="search" placeholder="搜索会话" />
       </div>
       <div
@@ -72,7 +72,7 @@ function onTogglePin(id: string, e: MouseEvent) {
           :title="c.title"
           @click="openHistory(c.id)"
         >
-          <AppIcon name="chat" :size="14" />
+          <AppIcon name="chat" :size="16" :stroke-width="1.75" />
           <span class="item-copy">
             <span class="item-title">{{ c.title }}</span>
             <span v-if="c.updated_at || c.created_at" class="item-time">{{ formatRelativeTime(c.updated_at || c.created_at) }}</span>
@@ -81,20 +81,20 @@ function onTogglePin(id: string, e: MouseEvent) {
         <div class="item-actions">
           <button
             type="button"
-            class="item-action"
+            class="ghost-icon-btn item-action"
             :class="{ on: pins.isPinned(c.id) }"
             :title="pins.isPinned(c.id) ? '取消置顶' : '置顶'"
             @click="onTogglePin(c.id, $event)"
           >
-            <AppIcon name="pin" :size="13" />
+            <AppIcon name="pin" :size="16" :stroke-width="1.75" />
           </button>
           <button
             type="button"
-            class="item-action danger"
+            class="ghost-icon-btn item-action danger"
             title="删除会话"
             @click="removeConversation(c.id, $event)"
           >
-            <AppIcon name="trash" :size="13" />
+            <AppIcon name="trash" :size="16" :stroke-width="1.75" />
           </button>
         </div>
       </div>
@@ -178,24 +178,12 @@ function onTogglePin(id: string, e: MouseEvent) {
   transition: opacity 0.15s ease;
 }
 .item-action {
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
+  opacity: 1;
 }
-.item-action:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
-}
-.item-action.on { color: var(--primary); }
+.item-action.on { color: var(--primary); opacity: 1; }
 .item-action.danger:hover {
-  background: color-mix(in srgb, var(--danger) 12%, var(--code-bg));
   color: var(--danger);
+  opacity: 1;
 }
 .empty {
   margin: 8px;

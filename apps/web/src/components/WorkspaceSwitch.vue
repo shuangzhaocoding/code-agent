@@ -40,11 +40,13 @@ const recents = computed(() => store.recentWorkspaces)
     <div class="page-panel sheet" role="dialog" aria-label="打开工作区">
       <header>
         <h1 class="page-panel__title">打开工作空间</h1>
-        <button type="button" class="icon-btn" title="关闭" @click="emit('close')">×</button>
+        <button type="button" class="ghost-icon-btn" title="关闭" @click="emit('close')">
+          <AppIcon name="close" :size="16" :stroke-width="1.75" />
+        </button>
       </header>
       <p class="page-panel__lead">选择本地目录，或从最近工作空间进入。</p>
       <div class="search-box">
-        <AppIcon class="search-box-icon" name="folder" :size="18" />
+        <AppIcon class="search-box-icon" name="folder" :size="16" :stroke-width="1.75" />
         <input v-model="path" placeholder="/path/to/project" @keydown.enter="openPath" />
         <button type="button" class="search-box-btn" @click="openPath">打开</button>
       </div>
@@ -120,12 +122,6 @@ header {
   gap: 12px;
 }
 header .page-panel__title { margin: 0; }
-.icon-btn {
-  width: 32px;
-  height: 32px;
-  font-size: 20px;
-  line-height: 1;
-}
 .err {
   margin: 8px 0 0;
   color: var(--error-text);

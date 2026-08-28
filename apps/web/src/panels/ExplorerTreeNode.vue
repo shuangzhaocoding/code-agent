@@ -84,7 +84,14 @@ function onRowClick() {
       />
       <span v-else class="label">{{ item.name }}</span>
       <span
-        v-if="mark.show"
+        v-if="mark.show && mark.letter"
+        class="tree-letter"
+        :class="mark.kind ? `tree-letter--${mark.kind}` : undefined"
+        :title="mark.title"
+        :aria-label="mark.title"
+      >{{ mark.letter }}</span>
+      <span
+        v-else-if="mark.show"
         class="tree-dot"
         :class="mark.kind ? `tree-dot--${mark.kind}` : undefined"
         :title="mark.title"
@@ -170,6 +177,28 @@ function onRowClick() {
   color: var(--text);
   outline: none;
   font-family: inherit;
+}
+.tree-letter {
+  margin-left: auto;
+  flex-shrink: 0;
+  min-width: 14px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-family: var(--mono);
+  text-align: right;
+  color: var(--text-muted);
+}
+.tree-letter--modified {
+  color: var(--traj-tool);
+}
+.tree-letter--added {
+  color: var(--traj-context);
+}
+.tree-letter--deleted,
+.tree-letter--conflict {
+  color: var(--danger);
 }
 .tree-dot {
   width: 6px;

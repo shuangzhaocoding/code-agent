@@ -414,7 +414,7 @@ function openCommit(row: GitCommit) {
   <div class="panel-shell git panel-chromeless">
     <div class="git-bar">
       <span class="branch">
-        <AppIcon name="git" :size="14" />
+        <AppIcon name="git" :size="16" :stroke-width="1.75" />
         {{ status?.branch || 'Git' }}
       </span>
       <span v-if="status?.ahead" class="pill">↑{{ status.ahead }}</span>
@@ -449,7 +449,7 @@ function openCommit(row: GitCommit) {
           title="普通列表"
           @click="viewMode = 'list'"
         >
-          <AppIcon name="list" :size="14" />
+          <AppIcon name="list" :size="16" :stroke-width="1.75" />
         </button>
         <button
           type="button"
@@ -458,11 +458,11 @@ function openCommit(row: GitCommit) {
           title="树形展示"
           @click="viewMode = 'tree'"
         >
-          <AppIcon name="tree" :size="14" />
+          <AppIcon name="tree" :size="16" :stroke-width="1.75" />
         </button>
       </template>
       <button type="button" class="icon-btn icon-btn-ghost" title="刷新" @click="refresh(true)">
-        <AppIcon name="refresh" :size="14" />
+        <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
     </div>
     <p v-if="error" class="err">{{ error }}</p>
@@ -606,35 +606,38 @@ function openCommit(row: GitCommit) {
 .seg {
   display: inline-flex;
   align-items: center;
-  padding: 2px;
+  padding: 0;
   gap: 2px;
   flex-shrink: 0;
-  border-radius: 8px;
-  background: var(--code-bg);
-  border: var(--border-width) solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  border: 0;
 }
 .seg button {
-  height: 22px;
-  padding: 0 10px;
+  height: var(--ghost-btn-height);
+  padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 5px;
   line-height: 1;
+  transition: opacity 0.15s ease, color 0.12s ease;
 }
 .seg button:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
   color: var(--text-h);
 }
 .seg button.on {
-  background: var(--bg-elevated);
-  color: var(--text-h);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
+  color: var(--primary);
+  opacity: 1;
+  box-shadow: none;
 }
 .seg-count {
   min-width: 16px;
@@ -827,6 +830,4 @@ textarea {
   gap: 6px;
   margin-top: 8px;
 }
-.btn { height: 28px; padding: 0 10px; font-size: 12px; }
-.icon-btn { width: 28px; height: 28px; }
 </style>

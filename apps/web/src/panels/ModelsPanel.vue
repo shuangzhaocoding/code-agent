@@ -714,7 +714,7 @@ function capabilityTags(m: LlmModel) {
               <div class="card-actions inline">
                 <button
                   type="button"
-                  class="icon-btn"
+                  class="icon-btn icon-btn-ghost"
                   title="同步模型"
                   :disabled="syncingId === p.id"
                   @click="syncModels(p.id)"
@@ -723,7 +723,7 @@ function capabilityTags(m: LlmModel) {
                 </button>
                 <button
                   type="button"
-                  class="icon-btn"
+                  class="icon-btn icon-btn-ghost"
                   :class="{ testing: testingId === p.id }"
                   title="测试连接"
                   :disabled="testingId === p.id"
@@ -731,10 +731,10 @@ function capabilityTags(m: LlmModel) {
                 >
                   <AppIcon name="zap" :size="16" />
                 </button>
-                <button type="button" class="icon-btn" title="编辑" @click="startEditProvider(p)">
+                <button type="button" class="icon-btn icon-btn-ghost" title="编辑" @click="startEditProvider(p)">
                   <AppIcon name="pencil" :size="16" />
                 </button>
-                <button type="button" class="icon-btn danger" title="删除" @click="removeProvider(p)">
+                <button type="button" class="icon-btn icon-btn-ghost danger" title="删除" @click="removeProvider(p)">
                   <AppIcon name="trash" :size="16" />
                 </button>
               </div>
@@ -751,18 +751,18 @@ function capabilityTags(m: LlmModel) {
               </template>
               <button
                 type="button"
-                class="icon-btn"
+                class="icon-btn icon-btn-ghost"
                 title="刷新余额"
                 :disabled="balances[p.id]?.loading"
                 @click="loadBalance(p.id, true)"
               >
-                <AppIcon name="refresh" :size="14" />
+                <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
               </button>
             </div>
             <div v-if="notices[p.id]" class="provider-notice" :class="notices[p.id].kind">
               <span>{{ notices[p.id].text }}</span>
               <button type="button" class="notice-close" title="关闭" @click="clearNotice(p.id)">
-                <AppIcon name="close" :size="12" />
+                <AppIcon name="close" :size="16" :stroke-width="1.75" />
               </button>
             </div>
             <div v-if="probe?.providerId === p.id" class="probe-progress">
@@ -775,7 +775,7 @@ function capabilityTags(m: LlmModel) {
               </p>
             </div>
             <button type="button" class="models-toggle" @click="toggleModelsCollapsed(p)">
-              <AppIcon class="models-twist" name="chevron-right" :size="14" :class="{ open: !isModelsCollapsed(p) }" />
+              <AppIcon class="models-twist" name="chevron-right" :size="16" :stroke-width="1.75" :class="{ open: !isModelsCollapsed(p) }" />
               <span>模型 {{ modelStats(p).total }}</span>
               <span class="models-toggle-meta">
                 可用 {{ modelStats(p).ok }}
@@ -895,11 +895,11 @@ function capabilityTags(m: LlmModel) {
                     <span v-for="tag in capabilityTags(m)" :key="tag" class="cap-tag">{{ tag }}</span>
                   </div>
                   <div class="model-actions">
-                    <button type="button" class="icon-btn" title="编辑" @click="startEditModel(m)">
-                      <AppIcon name="pencil" :size="15" />
+                    <button type="button" class="icon-btn icon-btn-ghost" title="编辑" @click="startEditModel(m)">
+                      <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
                     </button>
-                    <button type="button" class="icon-btn danger" title="删除" @click="removeModel(m, p.name)">
-                      <AppIcon name="trash" :size="15" />
+                    <button type="button" class="icon-btn icon-btn-ghost danger" title="删除" @click="removeModel(m, p.name)">
+                      <AppIcon name="trash" :size="16" :stroke-width="1.75" />
                     </button>
                   </div>
                 </template>
@@ -1267,28 +1267,10 @@ function capabilityTags(m: LlmModel) {
   gap: 6px;
   margin-top: 8px;
 }
-.icon-btn {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.icon-btn:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
-}
-.icon-btn.danger:hover {
-  background: color-mix(in srgb, var(--danger) 12%, var(--code-bg));
-  color: var(--danger);
-}
 .icon-btn.testing {
   color: var(--primary);
-  background: var(--primary-soft);
+  background: transparent;
+  opacity: 1;
   pointer-events: none;
 }
 .icon-btn.testing :deep(svg) {

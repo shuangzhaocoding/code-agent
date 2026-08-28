@@ -52,10 +52,10 @@ function close(e: MouseEvent) {
 
 <template>
   <div class="ptab" :title="info.label">
-    <AppIcon class="ptab-ico" :name="info.icon" :size="13" />
+    <AppIcon class="ptab-ico" :name="info.icon" :size="16" :stroke-width="1.75" />
     <span class="lbl">{{ info.label }}</span>
-    <button type="button" class="x" :title="t('common.close')" @mousedown.stop.prevent @click="close">
-      <AppIcon name="close" :size="11" />
+    <button type="button" class="ghost-icon-btn ptab-close" :title="t('common.close')" @mousedown.stop.prevent @click="close">
+      <AppIcon name="close" :size="12" :stroke-width="1.75" />
     </button>
   </div>
 </template>
@@ -82,20 +82,11 @@ function close(e: MouseEvent) {
   white-space: nowrap;
   color: inherit;
 }
-.x {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
+.ptab-close {
   margin-left: 2px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
   opacity: 0;
-  cursor: pointer;
+  transition: opacity 0.15s ease;
 }
-.ptab:hover .x { opacity: 0.5; }
-.x:hover { opacity: 1 !important; background: color-mix(in srgb, currentColor 14%, transparent); }
+.ptab:hover .ptab-close { opacity: var(--ghost-hover-opacity); }
+.ptab-close:hover { opacity: 1 !important; }
 </style>

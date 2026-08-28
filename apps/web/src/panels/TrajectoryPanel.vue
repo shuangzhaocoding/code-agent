@@ -138,7 +138,7 @@ watch(filter, () => scrollToTail(true))
               </span>
               <span v-if="entry.subtitle" class="ledger-sub">{{ entry.subtitle }}</span>
             </span>
-            <AppIcon class="ledger-chev" name="chevron" :size="13" />
+            <AppIcon class="ledger-chev" name="chevron" :size="16" :stroke-width="1.75" />
           </button>
           <div v-if="expanded === entry.id" class="ledger-body">
             <component :is="rendererFor(entry.block.type)" :block="entry.block as Block" />

@@ -43,8 +43,8 @@ function decide(allowed: boolean) {
     <pre v-if="details" class="details">{{ details }}</pre>
     <template v-if="pending || decision" #footer>
       <div v-if="pending" class="actions">
-        <button type="button" class="btn ghost" @click.stop="decide(false)">拒绝</button>
-        <button type="button" class="btn danger" @click.stop="decide(true)">允许执行</button>
+        <button type="button" class="btn btn-ghost" @click.stop="decide(false)">拒绝</button>
+        <button type="button" class="btn btn-primary" @click.stop="decide(true)">允许执行</button>
       </div>
       <p v-else class="done">{{ decision === 'approved' ? '已允许' : '已拒绝' }}</p>
     </template>
@@ -67,23 +67,6 @@ function decide(allowed: boolean) {
   white-space: pre-wrap;
 }
 .actions { display: flex; justify-content: flex-end; gap: 8px; }
-.btn {
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 7px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.btn.ghost {
-  border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-}
-.btn.danger {
-  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
-  background: color-mix(in srgb, var(--danger) 12%, var(--bg-elevated));
-  color: var(--danger);
-}
 .done {
   margin: 0;
   font-size: 12px;

@@ -135,11 +135,12 @@ export function useVirtualList<T extends { id: string }>(
   function scrollToEnd(behavior: ScrollBehavior = 'auto') {
     const el = scrollElement.value
     if (!el) return
-    const top = enabled.value
-      ? Math.max(0, layout.value.total - el.clientHeight)
-      : Math.max(0, el.scrollHeight - el.clientHeight)
+    if (enabled.value && items.value.length) {
+      scrollToIndex(items.value.length - 1, 'auto')
+    }
+    const top = Math.max(0, el.scrollHeight - el.clientHeight)
     el.scrollTo({ top, behavior })
-    scrollTop.value = top
+    scrollTop.value = el.scrollTop
     viewportHeight.value = el.clientHeight
   }
 

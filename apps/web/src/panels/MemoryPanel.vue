@@ -127,7 +127,7 @@ onMounted(() => void load())
           <p class="page-lead">{{ t('memory.hint') }}</p>
         </div>
         <button type="button" class="btn btn-ghost" :disabled="loading" @click="load">
-          <AppIcon name="refresh" :size="13" />
+          <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
           {{ t('common.refresh') }}
         </button>
       </header>
@@ -142,7 +142,7 @@ onMounted(() => void load())
 
       <div class="toolbar">
         <div class="search">
-          <AppIcon name="search" :size="14" />
+          <AppIcon name="search" :size="16" :stroke-width="1.75" />
           <input v-model="query" type="search" :placeholder="t('memory.search')" />
         </div>
         <div class="filters">
@@ -194,12 +194,12 @@ onMounted(() => void load())
             </div>
             <button
               type="button"
-              class="icon-btn"
+              class="card-delete-btn icon-btn icon-btn-ghost danger"
               :title="t('common.delete')"
               :disabled="deletingId === row.id"
               @click="remove(row)"
             >
-              <AppIcon name="trash" :size="14" />
+              <AppIcon name="trash" :size="16" :stroke-width="1.75" />
             </button>
           </div>
 
@@ -246,36 +246,6 @@ onMounted(() => void load())
   line-height: 1.5;
   max-width: 52ch;
 }
-.page-head .btn {
-  height: 26px;
-  padding: 0 10px;
-  font-size: 12px;
-  gap: 5px;
-  flex-shrink: 0;
-}
-
-.btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.btn-ghost:hover:not(:disabled) {
-  color: var(--text-h);
-  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
-}
-.btn-ghost:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 .tip-card {
   display: flex;
   gap: 12px;
@@ -344,19 +314,24 @@ onMounted(() => void load())
   max-width: 100%;
 }
 .chip {
-  border: 1px solid var(--border);
-  background: var(--bg);
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 12px;
+  border-radius: var(--ghost-btn-radius);
+  padding: 0 8px;
+  height: var(--ghost-btn-height);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: opacity 0.15s ease, color 0.12s ease;
+}
+.chip:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
+  color: var(--text-h);
 }
 .chip.on {
-  background: var(--primary-soft);
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   color: var(--primary);
+  opacity: 1;
 }
 .stats {
   display: flex;
@@ -464,29 +439,16 @@ onMounted(() => void load())
   color: var(--text-secondary);
 }
 
-.icon-btn {
+.card-delete-btn {
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transition: opacity 0.15s ease;
 }
-.memory-card:hover .icon-btn,
-.icon-btn:focus-visible {
+.memory-card:hover .card-delete-btn,
+.card-delete-btn:focus-visible {
   opacity: 1;
 }
-.icon-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--danger) 10%, transparent);
-  color: var(--danger);
-}
-.icon-btn:disabled {
+.card-delete-btn:disabled {
   opacity: 0.5;
   cursor: wait;
 }

@@ -5,7 +5,7 @@ import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
-import { gitMarkKind, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
+import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -30,6 +30,7 @@ export type FileTreeMark = {
   show: boolean
   title: string
   kind: GitMarkKind | ''
+  letter?: string
 }
 export type OpenFile = {
   path: string
@@ -1743,11 +1744,27 @@ export const useAppStore = defineStore('app', () => {
 
   function fileTreeMark(path: string, isDir = false): FileTreeMark {
     const empty: FileTreeMark = { show: false, title: '', kind: '' }
-    if (!gitRepoOk.value) return empty
+
+    const markFromGit = (git: GitPathMark): FileTreeMark => {
+      const letter = gitMarkLetter(git.code)
+      return {
+        show: true,
+        title: gitMarkTitle(git, path),
+        kind: git.kind,
+        ...(letter ? { letter } : {}),
+      }
+    }
+
+    const dirtyMark = (): FileTreeMark | null => {
+      if (isDir || !isFileDirty(path)) return null
+      return { show: true, title: t('tree.unsaved'), kind: 'modified', letter: 'M' }
+    }
+
+    if (!gitRepoOk.value) return dirtyMark() ?? empty
 
     if (isDir) {
       const own = gitChangedPaths.value[path]
-      if (own) return { show: true, title: gitMarkTitle(own, path), kind: own.kind }
+      if (own) return markFromGit(own)
       if (gitMarkedAncestorPaths.value.has(path)) {
         return { show: true, title: t('tree.containsChanges'), kind: 'changed' }
       }
@@ -1755,8 +1772,8 @@ export const useAppStore = defineStore('app', () => {
     }
 
     const git = gitChangedPaths.value[path]
-    if (git) return { show: true, title: gitMarkTitle(git, path), kind: git.kind }
-    return empty
+    if (git) return markFromGit(git)
+    return dirtyMark() ?? empty
   }
 
   watch(

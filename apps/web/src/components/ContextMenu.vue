@@ -83,8 +83,9 @@ onBeforeUnmount(() => {
 <template>
   <div
     ref="root"
-    class="ctx"
-    :style="{ left: pos.left + 'px', top: pos.top + 'px' }"
+    class="ctx dropdown-panel"
+    :class="{ ready: true }"
+    :style="{ left: pos.left + 'px', top: pos.top + 'px', position: 'fixed', zIndex: '80', opacity: 1, pointerEvents: 'auto' }"
     @click.stop
     @contextmenu.prevent
   >
@@ -93,11 +94,12 @@ onBeforeUnmount(() => {
       <button
         v-else
         type="button"
+        class="menu-item"
         :class="{ danger: item.danger }"
         :disabled="item.disabled"
         @click="onSelect(item)"
       >
-        <AppIcon v-if="item.icon" class="ctx-ico" :name="item.icon" :size="15" />
+        <AppIcon v-if="item.icon" class="ctx-ico" :name="item.icon" :size="16" :stroke-width="1.75" />
         <span>{{ item.label }}</span>
       </button>
     </template>
@@ -106,47 +108,27 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .ctx {
-  position: fixed;
-  z-index: 80;
   min-width: 168px;
-  padding: 6px;
-  background: var(--bg-elevated);
-  border: var(--border-width) solid var(--border);
-  border-radius: 8px;
-  box-shadow: var(--shadow-md);
-  display: flex;
-  flex-direction: column;
+  gap: 2px;
 }
 .ctx-sep {
-  height: 1px;
-  margin: 4px 6px;
-  background: var(--border);
+  height: 0;
+  margin: 4px 0;
+  border-top: var(--border-width) solid var(--border);
 }
-.ctx button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  text-align: left;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  padding: 7px 10px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 13px;
-  line-height: 1.3;
+.ctx .menu-item {
+  width: 100%;
 }
 .ctx-ico {
   flex: 0 0 16px;
   width: 16px;
-  color: color-mix(in srgb, var(--text) 62%, transparent);
+  color: inherit;
 }
-.ctx button:hover:not(:disabled) { background: var(--bg-muted); color: var(--text-h); }
-.ctx button:hover:not(:disabled) .ctx-ico { color: var(--text-h); }
-.ctx button:disabled {
+.ctx .menu-item.danger {
+  color: var(--danger);
+}
+.ctx .menu-item:disabled {
   opacity: 0.4;
   cursor: default;
 }
-.ctx button.danger { color: var(--danger); }
-.ctx button.danger .ctx-ico { color: var(--danger); }
 </style>

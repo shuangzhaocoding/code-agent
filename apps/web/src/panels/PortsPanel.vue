@@ -131,7 +131,7 @@ function onToggleAuto() {
   <div class="panel-shell ports panel-chromeless">
     <div class="ports-bar">
       <span class="title">
-        <AppIcon name="ports" :size="14" />
+        <AppIcon name="ports" :size="16" :stroke-width="1.75" />
         {{ t('ports.title') }}
         <span class="count">{{ filtered.length }}</span>
         <span v-if="highlightedPorts.size" class="new-count">{{ highlightedPorts.size }}</span>
@@ -142,12 +142,12 @@ function onToggleAuto() {
         {{ t('ports.autoRefresh') }}
       </label>
       <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" :disabled="loading" @click="refresh">
-        <AppIcon name="refresh" :size="14" />
+        <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
     </div>
 
     <div class="search">
-      <AppIcon name="search" :size="14" />
+      <AppIcon name="search" :size="16" :stroke-width="1.75" />
         <input v-model="query" type="search" :placeholder="t('ports.search')" />
     </div>
 
@@ -182,10 +182,10 @@ function onToggleAuto() {
           </span>
           <span class="actions" @click.stop>
             <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.openProxy')" @click="openExternal(item)">
-              <AppIcon name="globe" :size="13" />
+              <AppIcon name="globe" :size="16" :stroke-width="1.75" />
             </button>
             <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.copyLocal', { url: item.url })" @click="copyUrl(item)">
-              <AppIcon name="file" :size="13" />
+              <AppIcon name="file" :size="16" :stroke-width="1.75" />
             </button>
             <button
               type="button"
@@ -194,7 +194,7 @@ function onToggleAuto() {
               :disabled="item.self"
               @click="openPreview(item)"
             >
-              <AppIcon name="eye" :size="13" />
+              <AppIcon name="eye" :size="16" :stroke-width="1.75" />
             </button>
             <button
               type="button"
@@ -203,7 +203,7 @@ function onToggleAuto() {
               :disabled="item.self || !item.pid || killing === item.port"
               @click="killPort(item)"
             >
-              <AppIcon name="trash" :size="13" />
+              <AppIcon name="trash" :size="16" :stroke-width="1.75" />
             </button>
           </span>
         </button>
@@ -449,10 +449,5 @@ function onToggleAuto() {
   width: 100%;
   border: 0;
   background: #fff;
-}
-.icon-btn { width: 28px; height: 28px; }
-.icon-btn.danger:hover {
-  color: var(--error-text, #dc2626);
-  background: color-mix(in srgb, #ef4444 12%, transparent);
 }
 </style>

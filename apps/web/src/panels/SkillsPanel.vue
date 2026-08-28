@@ -170,7 +170,7 @@ watch(
           <p class="page-lead">Agent 可按任务自动加载的指令包。放好目录后刷新即可发现。</p>
         </div>
         <button type="button" class="btn btn-ghost" :disabled="loading" @click="refresh">
-          <AppIcon name="refresh" :size="15" />
+          <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
           刷新
         </button>
       </header>
@@ -191,7 +191,7 @@ watch(
 
       <div class="toolbar">
         <div class="search">
-          <AppIcon name="search" :size="14" />
+          <AppIcon name="search" :size="16" :stroke-width="1.75" />
           <input v-model="query" type="search" placeholder="搜索名称、描述或路径" />
         </div>
         <div class="filters">
@@ -372,18 +372,24 @@ watch(
   gap: 6px;
 }
 .chip {
-  border: 1px solid var(--border);
-  background: var(--bg);
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 12px;
+  border-radius: var(--ghost-btn-radius);
+  padding: 0 8px;
+  height: var(--ghost-btn-height);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 0.15s ease, color 0.12s ease;
+}
+.chip:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
+  color: var(--text-h);
 }
 .chip.on {
-  background: var(--primary-soft);
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   color: var(--primary);
+  opacity: 1;
 }
 .stats {
   display: flex;
@@ -597,23 +603,4 @@ watch(
   word-break: break-word;
 }
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  border-radius: var(--radius-sm);
-  padding: 7px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
-.btn-ghost:hover {
-  background: var(--bg-muted, var(--code-bg));
-}
-.btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
 </style>

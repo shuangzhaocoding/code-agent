@@ -182,21 +182,22 @@ onBeforeUnmount(() => {
     <button
       ref="trigger"
       type="button"
-      class="history-trigger"
+      class="ghost-icon-btn"
+      :class="{ active: open }"
       :aria-expanded="open"
       aria-haspopup="listbox"
       :title="t('chat.userHistory')"
       :disabled="!entries.length"
       @click="toggleMenu"
     >
-      <AppIcon name="history" :size="15" />
+      <AppIcon name="history" :size="16" :stroke-width="1.75" />
     </button>
 
     <Teleport to="body">
       <div
         v-if="open"
         ref="menuRef"
-        class="history-menu"
+        class="history-menu dropdown-panel"
         :class="{ ready }"
         :style="menuStyle"
         role="listbox"
@@ -228,19 +229,19 @@ onBeforeUnmount(() => {
             <div class="history-actions">
               <button
                 type="button"
-                class="history-action-btn"
+                class="ghost-icon-btn history-action-btn"
                 :title="t('common.edit')"
                 @click="onEdit(entry.id, $event)"
               >
-                <AppIcon name="pencil" :size="13" />
+                <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
               </button>
               <button
                 type="button"
-                class="history-action-btn"
+                class="ghost-icon-btn history-action-btn"
                 :title="t('common.copy')"
                 @click="onCopy(entry.id, $event)"
               >
-                <AppIcon name="copy" :size="13" />
+                <AppIcon name="copy" :size="16" :stroke-width="1.75" />
               </button>
             </div>
           </li>
@@ -254,51 +255,19 @@ onBeforeUnmount(() => {
 .history-menu-root {
   flex-shrink: 0;
 }
-.history-trigger {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.history-trigger:hover:not(:disabled),
-.history-menu-root.open .history-trigger {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.history-trigger:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
 .history-menu {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: var(--border-width) solid var(--border-strong);
-  border-radius: var(--radius-md);
-  background: var(--panel-bg);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-.history-menu.ready {
-  opacity: 1;
-  pointer-events: auto;
-}
-html[data-theme='dark'] .history-menu {
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  gap: 0;
+  padding: 0;
 }
 .history-menu-head {
   flex-shrink: 0;
-  padding: 10px 12px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  padding: 8px 10px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
   border-bottom: var(--border-width) solid var(--border);
@@ -315,15 +284,16 @@ html[data-theme='dark'] .history-menu {
   display: flex;
   align-items: flex-start;
   gap: 2px;
+  min-height: 34px;
   border-radius: var(--radius-sm);
-  transition: background 0.12s ease;
+  transition: background-color 0.12s ease;
 }
 .history-item:hover,
 .history-item.active {
   background: var(--code-bg);
 }
 .history-item.current {
-  background: var(--primary-soft);
+  background: var(--code-bg);
 }
 .history-row {
   display: flex;
@@ -331,7 +301,7 @@ html[data-theme='dark'] .history-menu {
   gap: 8px;
   flex: 1;
   min-width: 0;
-  padding: 8px;
+  padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -342,9 +312,9 @@ html[data-theme='dark'] .history-menu {
 }
 .history-actions {
   display: flex;
-  gap: 2px;
+  gap: 0;
   flex-shrink: 0;
-  padding: 6px 6px 6px 0;
+  padding: 0 4px 0 0;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -354,25 +324,7 @@ html[data-theme='dark'] .history-menu {
   opacity: 1;
 }
 .history-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.history-action-btn:hover {
-  background: color-mix(in srgb, var(--text-h) 10%, var(--panel-bg));
-  color: var(--text-h);
-}
-.history-item.current .history-action-btn:hover {
-  background: color-mix(in srgb, var(--primary) 16%, var(--panel-bg));
-  color: var(--primary);
+  opacity: 1;
 }
 .history-index {
   flex-shrink: 0;

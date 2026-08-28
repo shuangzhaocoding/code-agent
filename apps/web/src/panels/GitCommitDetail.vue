@@ -102,7 +102,7 @@ async function copyHash() {
   <div class="detail">
     <div class="detail-bar">
       <button type="button" class="back" @click="emit('back')">
-        <AppIcon name="arrow-left" :size="14" />
+        <AppIcon name="arrow-left" :size="16" :stroke-width="1.75" />
         返回
       </button>
       <button v-if="header" type="button" class="hash" :title="header.hash" @click="copyHash">{{ header.short }}</button>
@@ -114,7 +114,7 @@ async function copyHash() {
         title="普通列表"
         @click="viewMode = 'list'"
       >
-        <AppIcon name="list" :size="14" />
+        <AppIcon name="list" :size="16" :stroke-width="1.75" />
       </button>
       <button
         type="button"
@@ -123,7 +123,7 @@ async function copyHash() {
         title="树形展示"
         @click="viewMode = 'tree'"
       >
-        <AppIcon name="tree" :size="14" />
+        <AppIcon name="tree" :size="16" :stroke-width="1.75" />
       </button>
     </div>
     <div v-if="header" class="header">
@@ -216,7 +216,6 @@ async function copyHash() {
   color: var(--text-muted);
 }
 .spacer { margin-left: auto; }
-.icon-btn { width: 28px; height: 28px; flex-shrink: 0; }
 .back:hover,
 .hash:hover { background: var(--bg-muted); }
 .header {

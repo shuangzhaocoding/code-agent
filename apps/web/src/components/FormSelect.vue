@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
       @click="toggleMenu"
     >
       <span class="trigger-label">{{ displayLabel }}</span>
-      <AppIcon class="trigger-chev" name="chevron" :size="13" />
+      <AppIcon class="trigger-chev" name="chevron" :size="16" :stroke-width="1.75" />
     </button>
 
     <Teleport to="body">
@@ -177,7 +177,7 @@ onBeforeUnmount(() => {
           @click="pick(option.value)"
         >
           <span class="menu-label">{{ option.label }}</span>
-          <AppIcon v-if="option.value === modelValue" class="menu-check" name="check" :size="14" />
+          <AppIcon v-if="option.value === modelValue" class="menu-check" name="check" :size="16" :stroke-width="1.75" />
         </button>
       </div>
     </Teleport>
@@ -248,11 +248,12 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   overflow: auto;
-  padding: 4px;
-  border: var(--border-width) solid var(--border-strong);
+  gap: 2px;
+  padding: 6px;
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  box-shadow: var(--dropdown-shadow);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -262,30 +263,14 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 html[data-theme='dark'] .form-select-menu {
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--dropdown-shadow-dark);
 }
-.menu-item {
+.form-select-menu .menu-item {
   width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
+}
+.form-select-menu .menu-item.active {
   color: var(--text-h);
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-.menu-item:hover,
-.menu-item.active {
-  background: var(--code-bg);
-}
-.menu-item.active {
-  color: var(--primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 .menu-label {
   flex: 1;

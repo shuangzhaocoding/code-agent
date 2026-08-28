@@ -172,7 +172,7 @@ onMounted(() => {
           <p class="page-lead">已安装并完成注册的扩展。模型适配器决定如何拉模型、探测连通性和发起对话请求。</p>
         </div>
         <button type="button" class="btn btn-ghost" :disabled="loading" @click="refresh">
-          <AppIcon name="refresh" :size="13" />
+          <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
           刷新
         </button>
       </header>
@@ -194,7 +194,7 @@ onMounted(() => {
 
       <div class="toolbar">
         <div class="search">
-          <AppIcon name="search" :size="14" />
+          <AppIcon name="search" :size="16" :stroke-width="1.75" />
           <input v-model="query" type="search" placeholder="搜索名称、来源或类型" />
         </div>
         <div class="filters">
@@ -275,12 +275,12 @@ onMounted(() => {
               <h3>链接</h3>
               <ul class="link-list">
                 <li v-if="p.homepage">
-                  <AppIcon name="globe" :size="13" />
+                  <AppIcon name="globe" :size="16" :stroke-width="1.75" />
                   <a :href="externalUrl(p.homepage) || '#'" target="_blank" rel="noopener noreferrer">主页</a>
                   <span>{{ p.homepage }}</span>
                 </li>
                 <li v-if="p.repository">
-                  <AppIcon name="git" :size="13" />
+                  <AppIcon name="git" :size="16" :stroke-width="1.75" />
                   <a :href="externalUrl(p.repository) || '#'" target="_blank" rel="noopener noreferrer">源码</a>
                   <span>{{ p.repository }}</span>
                 </li>
@@ -343,13 +343,6 @@ onMounted(() => {
   font-size: 13px;
   color: var(--text-secondary);
   line-height: 1.5;
-}
-.page-head .btn {
-  height: 26px;
-  padding: 0 10px;
-  font-size: 12px;
-  gap: 5px;
-  flex-shrink: 0;
 }
 .tip-card {
   display: flex;
@@ -429,18 +422,24 @@ onMounted(() => {
   gap: 6px;
 }
 .chip {
-  border: 1px solid var(--border);
-  background: var(--bg);
+  border: 0;
+  background: transparent;
   color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 12px;
+  border-radius: var(--ghost-btn-radius);
+  padding: 0 8px;
+  height: var(--ghost-btn-height);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 0.15s ease, color 0.12s ease;
+}
+.chip:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
+  color: var(--text-h);
 }
 .chip.on {
-  background: var(--primary-soft);
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   color: var(--primary);
+  opacity: 1;
 }
 .stats {
   display: flex;
@@ -612,33 +611,23 @@ onMounted(() => {
   color: #dc2626;
   background: color-mix(in srgb, #ef4444 12%, transparent);
 }
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  border-radius: var(--radius-sm);
-  padding: 7px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
 .toggle-btn {
-  height: 22px;
+  height: var(--ghost-btn-height);
   padding: 0 8px;
-  border: var(--border-width) solid var(--border);
-  border-radius: 999px;
+  border: 0;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-h);
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 .toggle-btn:hover {
-  background: var(--code-bg);
+  background: transparent;
   color: var(--text-h);
+  opacity: var(--ghost-hover-opacity);
 }
 .plugin-detail {
   border-top: 1px solid var(--border);

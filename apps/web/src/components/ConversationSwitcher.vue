@@ -271,12 +271,12 @@ onBeforeUnmount(() => {
         @click="toggleMenu"
       >
         <span class="switcher-icon">
-          <AppIcon name="chat" :size="14" />
+          <AppIcon name="chat" :size="16" :stroke-width="1.75" />
         </span>
         <span class="switcher-copy">
           <span class="switcher-title">{{ currentTitle }}</span>
         </span>
-        <AppIcon class="switcher-chev" name="chevron" :size="13" />
+        <AppIcon class="switcher-chev" name="chevron" :size="16" :stroke-width="1.75" />
       </button>
 
       <Teleport to="body">
@@ -290,7 +290,7 @@ onBeforeUnmount(() => {
           @pointerdown.stop
         >
           <div class="switcher-search">
-            <AppIcon name="search" :size="14" />
+            <AppIcon name="search" :size="16" :stroke-width="1.75" />
             <input
               ref="searchEl"
               v-model="query"
@@ -321,7 +321,7 @@ onBeforeUnmount(() => {
                 @click="onRowClick(item.id)"
               >
                 <span class="row-icon">
-                  <AppIcon name="chat" :size="13" />
+                  <AppIcon name="chat" :size="16" :stroke-width="1.75" />
                 </span>
                 <span class="row-copy">
                   <input
@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
                     :title="t('common.rename')"
                     @click="startRename(item, $event)"
                   >
-                    <AppIcon name="pencil" :size="12" />
+                    <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
                   </button>
                   <button
                     type="button"
@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
                     :title="t('sidebar.deleteSession')"
                     @click="onDelete(item.id, $event)"
                   >
-                    <AppIcon name="trash" :size="12" />
+                    <AppIcon name="trash" :size="16" :stroke-width="1.75" />
                   </button>
                   <button
                     type="button"
@@ -364,10 +364,10 @@ onBeforeUnmount(() => {
                     :title="pins.isPinned(item.id) ? '取消置顶' : '置顶'"
                     @click="onTogglePin(item.id, $event)"
                   >
-                    <AppIcon name="pin" :size="12" />
+                    <AppIcon name="pin" :size="16" :stroke-width="1.75" />
                   </button>
                   <span class="row-check-slot" aria-hidden="true">
-                    <AppIcon v-if="item.id === store.conversationId" class="row-check" name="check" :size="14" />
+                    <AppIcon v-if="item.id === store.conversationId" class="row-check" name="check" :size="16" :stroke-width="1.75" />
                   </span>
                   <span class="row-turns">{{ turnCount(item) }}轮</span>
                 </span>
@@ -380,8 +380,8 @@ onBeforeUnmount(() => {
 
     <div class="switcher-actions">
       <slot name="actions" />
-      <button type="button" class="switcher-new" title="新会话" @click="startNew">
-        <AppIcon name="plus" :size="15" />
+      <button type="button" class="ghost-icon-btn switcher-new" title="新会话" @click="startNew">
+        <AppIcon name="plus" :size="16" :stroke-width="1.75" />
       </button>
     </div>
   </header>
@@ -404,21 +404,25 @@ onBeforeUnmount(() => {
 }
 .switcher-trigger {
   width: 100%;
-  height: 30px;
+  height: var(--ghost-btn-height);
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0 8px 0 4px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
   color: var(--text-h);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 .switcher-trigger:hover,
 .switcher-main.open .switcher-trigger {
-  background: var(--code-bg);
+  background: transparent;
+  opacity: var(--ghost-hover-opacity);
 }
 .switcher-icon,
 .row-icon {
@@ -516,30 +520,16 @@ onBeforeUnmount(() => {
   gap: 2px;
   flex-shrink: 0;
 }
-.switcher-new {
-  width: 30px;
-  height: 30px;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-.switcher-new:hover {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
 .switcher-menu {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: var(--border-width) solid var(--border-strong);
+  gap: 2px;
+  padding: 6px;
+  border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-bg);
-  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.12);
+  box-shadow: var(--dropdown-shadow);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.12s ease;
@@ -549,7 +539,7 @@ onBeforeUnmount(() => {
   pointer-events: auto;
 }
 html[data-theme='dark'] .switcher-menu {
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--dropdown-shadow-dark);
 }
 .switcher-search {
   display: flex;
@@ -604,7 +594,8 @@ html[data-theme='dark'] .switcher-menu {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 7px 8px;
+  min-height: 34px;
+  padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -612,29 +603,34 @@ html[data-theme='dark'] .switcher-menu {
   text-align: left;
   cursor: pointer;
   font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.12s ease;
 }
 .session-row:hover,
 .session-row.active {
   background: var(--code-bg);
 }
 .session-row.current {
-  background: var(--primary-soft);
+  background: var(--code-bg);
 }
 .session-row.current .row-title {
   color: var(--primary);
 }
 .row-action {
-  width: 22px;
-  height: 22px;
+  width: auto;
+  min-width: var(--ghost-btn-height);
+  height: var(--ghost-btn-height);
   flex-shrink: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
   color: var(--text-muted);
   display: grid;
   place-items: center;
   opacity: 0;
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 .session-row:hover .row-action,
 .session-row.active .row-action,
@@ -645,11 +641,13 @@ html[data-theme='dark'] .switcher-menu {
 .row-action:hover,
 .row-action.on {
   color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  background: transparent;
+  opacity: var(--ghost-hover-opacity);
 }
 .row-action-danger:hover {
   color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  background: transparent;
+  opacity: 1;
 }
 .row-check {
   flex-shrink: 0;

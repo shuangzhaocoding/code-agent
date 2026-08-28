@@ -274,7 +274,7 @@ onUnmounted(() => window.clearTimeout(searchTimer))
   <div class="panel-shell panel-chromeless search-panel">
     <div class="search-bar">
       <span class="title">
-        <AppIcon name="search" :size="14" />
+        <AppIcon name="search" :size="16" :stroke-width="1.75" />
         搜索
       </span>
       <span v-if="searchingMode && !searching && hits.length" class="meta">{{ hitFileCount }} 文件 · {{ hits.length }} 处</span>
@@ -286,7 +286,7 @@ onUnmounted(() => window.clearTimeout(searchTimer))
         title="普通列表"
         @click="viewMode = 'list'"
       >
-        <AppIcon name="list" :size="14" />
+        <AppIcon name="list" :size="16" :stroke-width="1.75" />
       </button>
       <button
         type="button"
@@ -295,18 +295,18 @@ onUnmounted(() => window.clearTimeout(searchTimer))
         title="树形展示"
         @click="viewMode = 'tree'"
       >
-        <AppIcon name="tree" :size="14" />
+        <AppIcon name="tree" :size="16" :stroke-width="1.75" />
       </button>
       <button type="button" class="icon-btn icon-btn-ghost" title="刷新" :disabled="!searchingMode" @click="runSearch(query.trim())">
-        <AppIcon name="refresh" :size="14" />
+        <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
       <button type="button" class="icon-btn icon-btn-ghost" title="清除" @click="clearResults">
-        <AppIcon name="close" :size="14" />
+        <AppIcon name="close" :size="16" :stroke-width="1.75" />
       </button>
     </div>
     <div class="search-form">
       <div class="field">
-        <AppIcon name="search" :size="13" />
+        <AppIcon name="search" :size="16" :stroke-width="1.75" />
         <input
           ref="queryEl"
           v-model="query"
@@ -317,24 +317,24 @@ onUnmounted(() => window.clearTimeout(searchTimer))
         />
         <button
           type="button"
-          class="icon-btn icon-btn-ghost mini"
+          class="icon-btn icon-btn-ghost search-toggle"
           :class="{ active: caseSensitive }"
           title="区分大小写"
           @click="caseSensitive = !caseSensitive"
         >Aa</button>
         <button
           type="button"
-          class="icon-btn icon-btn-ghost mini"
+          class="icon-btn icon-btn-ghost search-toggle"
           :class="{ active: showReplace }"
           :title="showReplace ? '收起替换' : '展开替换'"
           @click="showReplace = !showReplace"
         >
-          <AppIcon name="pencil" :size="13" />
+          <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
         </button>
       </div>
       <div v-if="showReplace" class="replace-row">
         <div class="field">
-          <AppIcon name="pencil" :size="13" />
+          <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
           <input
             v-model="replacement"
             type="text"
@@ -506,10 +506,8 @@ onUnmounted(() => window.clearTimeout(searchTimer))
   font-family: var(--mono);
 }
 .filter input:focus { border-color: var(--primary); }
-.btn { height: 28px; padding: 0 10px; font-size: 12px; flex-shrink: 0; }
-.icon-btn { width: 28px; height: 28px; flex-shrink: 0; }
-.icon-btn.mini {
-  width: 22px;
+.search-toggle {
+  min-width: 22px;
   height: 22px;
   font-size: 10px;
   font-weight: 700;

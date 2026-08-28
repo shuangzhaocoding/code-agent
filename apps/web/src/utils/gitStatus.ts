@@ -29,3 +29,14 @@ export function gitMarkTitle(mark: GitPathMark, path?: string): string {
   const label = gitMarkLabel(mark.code)
   return path ? `${label} · ${path}` : label
 }
+
+/** Single-letter tree badge (e.g. M/A/D). Null → colored dot fallback. */
+export function gitMarkLetter(code: string): string | null {
+  const raw = code.trim()
+  if (!raw || raw === '?') return null
+  if (raw.includes('U')) return null
+  if (raw.includes('D')) return 'D'
+  if (raw.includes('M')) return 'M'
+  if (raw.includes('A')) return 'A'
+  return null
+}

@@ -273,8 +273,8 @@ onBeforeUnmount(() => {
     <aside class="term-sidebar" :style="{ width: sideWidth + 'px' }">
       <div class="side-head">
         <span class="side-title">终端</span>
-        <button type="button" class="side-btn" title="新建终端" @click="addTerminal">
-          <AppIcon name="plus" :size="14" />
+        <button type="button" class="ghost-icon-btn" title="新建终端" @click="addTerminal">
+          <AppIcon name="plus" :size="16" :stroke-width="1.75" />
         </button>
       </div>
       <div class="side-list">
@@ -285,7 +285,7 @@ onBeforeUnmount(() => {
           :class="{ active: tab.id === activeId }"
           @click="activateTab(tab.id)"
         >
-          <AppIcon name="terminal" :size="14" />
+          <AppIcon name="terminal" :size="16" :stroke-width="1.75" />
           <input
             v-if="renamingId === tab.id"
             v-model="renameVal"
@@ -295,8 +295,8 @@ onBeforeUnmount(() => {
             @keydown.escape="renamingId = null"
           />
           <span v-else class="side-item-name" @dblclick.stop="startRename(tab)">{{ tab.title }}</span>
-          <button type="button" class="side-item-close" title="关闭终端" @click.stop="removeTerminal(tab.id)">
-            <AppIcon name="close" :size="12" />
+          <button type="button" class="ghost-icon-btn side-item-close" title="关闭终端" @click.stop="removeTerminal(tab.id)">
+            <AppIcon name="close" :size="16" :stroke-width="1.75" />
           </button>
         </div>
       </div>
@@ -358,18 +358,6 @@ onBeforeUnmount(() => {
   letter-spacing: 0.04em;
   color: var(--text-secondary);
 }
-.side-btn {
-  width: 24px;
-  height: 24px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-}
-.side-btn:hover { background: var(--bg-muted); color: var(--text-h); }
 .side-list {
   flex: 1;
   overflow: auto;
@@ -407,17 +395,9 @@ onBeforeUnmount(() => {
 }
 .side-item-close {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
   opacity: 0;
+  transition: opacity 0.15s ease;
 }
-.side-item:hover .side-item-close { opacity: 0.6; }
-.side-item-close:hover { opacity: 1 !important; background: var(--bg-muted); color: var(--text); }
+.side-item:hover .side-item-close { opacity: var(--ghost-hover-opacity); }
+.side-item-close:hover { opacity: 1 !important; }
 </style>

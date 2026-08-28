@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AppIcon from '@/components/AppIcon.vue'
 import { fetchContextUsage } from '@/services/contextUsageService'
 import type { ContextUsageCategoryItem, ContextUsageData, PendingFilePayload } from '@/types/contextUsage'
 import type { ThinkingLevel } from '@/types/thinking'
@@ -144,7 +145,9 @@ watch(
               {{ levelLabel(usage.level) }}
             </span>
           </div>
-          <button type="button" class="ctx-dialog__close" aria-label="关闭" :disabled="loading" @click="handleClose">×</button>
+          <button type="button" class="ghost-icon-btn ctx-dialog__close" aria-label="关闭" :disabled="loading" @click="handleClose">
+            <AppIcon name="close" :size="16" :stroke-width="1.75" />
+          </button>
         </header>
 
         <p v-if="!loading && !error && !userContent.trim()" class="ctx-dialog__hint">
@@ -302,20 +305,6 @@ watch(
 
 .ctx-dialog__close {
   flex-shrink: 0;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.ctx-dialog__close:hover:not(:disabled) {
-  background: var(--code-bg);
-  color: var(--text-h);
 }
 
 .ctx-dialog__hint {

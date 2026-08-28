@@ -147,10 +147,10 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <footer>
-            <button v-if="!item.compact" type="button" class="btn" @click="copyAddress(item)">
+            <button v-if="!item.compact" type="button" class="btn btn-ghost" @click="copyAddress(item)">
               {{ t('ports.copyAddr') }}
             </button>
-            <button type="button" class="btn primary" @click="openPreview(item)">{{ t('ports.open') }}</button>
+            <button type="button" class="btn btn-primary" @click="openPreview(item)">{{ t('ports.open') }}</button>
           </footer>
         </article>
       </TransitionGroup>
@@ -274,23 +274,10 @@ footer {
 .port-toast.compact footer {
   margin-top: 8px;
 }
-.btn {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-h);
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  font-size: 12.5px;
-  cursor: pointer;
-}
 .port-toast.compact .btn {
-  padding: 4px 10px;
+  height: 28px;
+  padding: 0 10px;
   font-size: 12px;
-}
-.btn.primary {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
 }
 .port-toast-enter-active,
 .port-toast-leave-active {

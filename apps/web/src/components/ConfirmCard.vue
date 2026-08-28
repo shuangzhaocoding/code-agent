@@ -27,8 +27,8 @@ const cancelText = computed(() => props.cancelLabel || t('common.cancel'))
       <p class="summary">{{ summary }}</p>
       <pre v-if="details" class="details">{{ details }}</pre>
       <footer>
-        <button type="button" class="btn" @click="emit('cancel')">{{ cancelText }}</button>
-        <button type="button" class="btn" :class="danger ? 'danger' : 'primary'" @click="emit('confirm')">
+        <button type="button" class="btn btn-ghost" @click="emit('cancel')">{{ cancelText }}</button>
+        <button type="button" class="btn" :class="danger ? 'confirm-danger' : 'btn-primary'" @click="emit('confirm')">
           {{ confirmText }}
         </button>
       </footer>
@@ -87,24 +87,12 @@ footer {
   gap: 8px;
   margin-top: 14px;
 }
-.btn {
-  height: 30px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 13px;
+.confirm-danger {
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
 }
-.btn.primary {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.btn.danger {
-  border-color: color-mix(in srgb, var(--error-text) 40%, var(--border));
-  background: color-mix(in srgb, var(--error-text) 12%, var(--panel-bg));
-  color: var(--error-text);
+.confirm-danger:hover {
+  opacity: 0.88;
 }
 </style>

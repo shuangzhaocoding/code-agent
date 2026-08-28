@@ -264,9 +264,8 @@ onBeforeUnmount(() => {
       <span
         v-if="selected?.icon"
         class="trigger-icon"
-        :style="selected.accent ? { '--accent': selected.accent } : undefined"
       >
-        <AppIcon :name="selected.icon" :size="14" />
+        <AppIcon :name="selected.icon" :size="16" :stroke-width="1.75" />
       </span>
       <span class="trigger-copy">
         <span class="trigger-label">
@@ -275,7 +274,6 @@ onBeforeUnmount(() => {
         </span>
         <span v-if="selected?.description && grow" class="trigger-desc">{{ selected.description }}</span>
       </span>
-      <AppIcon class="trigger-chev" name="chevron" :size="12" />
     </button>
 
     <Teleport to="body">
@@ -310,9 +308,8 @@ onBeforeUnmount(() => {
             <span
               v-if="option.icon"
               class="menu-icon"
-              :style="option.accent ? { '--accent': option.accent } : undefined"
             >
-              <AppIcon :name="option.icon" :size="14" />
+              <AppIcon :name="option.icon" :size="16" :stroke-width="1.75" />
             </span>
             <span class="menu-copy">
               <span class="menu-label">
@@ -321,15 +318,15 @@ onBeforeUnmount(() => {
               </span>
               <span v-if="option.description" class="menu-desc">{{ option.description }}</span>
             </span>
-            <AppIcon v-if="option.children?.length" class="menu-check" name="chevron-right" :size="12" />
-            <AppIcon v-else-if="option.value === modelValue" class="menu-check" name="check" :size="14" />
+            <AppIcon v-if="option.children?.length" class="menu-check" name="chevron-right" :size="16" :stroke-width="1.75" />
+            <AppIcon v-else-if="option.value === modelValue" class="menu-check" name="check" :size="16" :stroke-width="1.75" />
           </button>
           </div>
         </section>
         <p v-if="searchable && !visibleOptions.length" class="menu-empty">{{ t('chat.noMatch') }}</p>
         </div>
         <div v-if="searchable" class="menu-search">
-          <AppIcon name="search" :size="13" />
+          <AppIcon name="search" :size="16" :stroke-width="1.75" />
           <input
             ref="searchInput"
             v-model="query"
@@ -365,7 +362,8 @@ onBeforeUnmount(() => {
             v-if="expandedOption.value === modelValue && child.value === selectedChildValue"
             class="menu-check"
             name="check"
-            :size="14"
+            :size="16"
+            :stroke-width="1.75"
           />
         </button>
       </div>
@@ -380,55 +378,53 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 .toolbar-select.grow {
-  flex: 1 1 120px;
-  max-width: 240px;
+  flex: 1 1 96px;
+  max-width: 200px;
+}
+.toolbar-select:not(.grow) .toolbar-select-trigger {
+  width: auto;
 }
 .toolbar-select-trigger {
   width: 100%;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 10px 0 8px;
-  border: var(--border-width) solid transparent;
-  border-radius: 999px;
-  background: var(--panel-bg);
+  gap: 6px;
+  height: 28px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
   color: var(--text-h);
   font: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease;
+  transition: opacity 0.15s ease;
 }
 .toolbar-select-trigger.placeholder {
   color: var(--text-muted);
-  font-weight: 500;
 }
 .toolbar-select-trigger:hover,
 .toolbar-select.open .toolbar-select-trigger {
-  background: var(--code-bg);
-  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background: transparent;
+  color: var(--text-h);
+  opacity: 0.72;
 }
 .trigger-icon,
 .menu-icon {
-  width: 22px;
-  height: 22px;
   flex-shrink: 0;
   display: grid;
   place-items: center;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--accent, var(--primary)) 14%, var(--code-bg));
-  color: var(--accent, var(--primary));
+  color: inherit;
 }
 .trigger-copy {
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1px;
+  justify-content: center;
+  gap: 0;
   text-align: left;
 }
 .trigger-label {
@@ -436,7 +432,7 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-  line-height: 1.2;
+  line-height: 1;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -449,15 +445,6 @@ onBeforeUnmount(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 100%;
-}
-.trigger-chev {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  transform: rotate(-90deg);
-  transition: transform 0.15s ease;
-}
-.toolbar-select.open .trigger-chev {
-  transform: rotate(0deg);
 }
 .toolbar-select-menu {
   max-height: min(360px, 50vh);
@@ -535,8 +522,9 @@ html[data-theme='dark'] .toolbar-select-menu {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -550,7 +538,7 @@ html[data-theme='dark'] .toolbar-select-menu {
 }
 .menu-item.active,
 .menu-item.open {
-  background: var(--primary-soft);
+  background: var(--code-bg);
 }
 .toolbar-select-submenu {
   overflow: auto;
@@ -579,7 +567,7 @@ html[data-theme='dark'] .toolbar-select-submenu {
 }
 .menu-label {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.2;
   display: inline-flex;
   align-items: center;
@@ -588,21 +576,21 @@ html[data-theme='dark'] .toolbar-select-submenu {
 .option-badge {
   font-size: 10px;
   font-style: normal;
-  font-weight: 600;
-  padding: 0 5px;
-  border-radius: 999px;
-  line-height: 1.5;
+  font-weight: 500;
+  padding: 0;
+  border-radius: 0;
+  line-height: 1.2;
   flex-shrink: 0;
-  background: var(--code-bg);
+  background: transparent;
   color: var(--text-muted);
 }
 .option-badge.ok {
   color: #15803d;
-  background: color-mix(in srgb, #22c55e 16%, var(--panel-bg));
+  background: transparent;
 }
 .option-badge.fail {
   color: #b91c1c;
-  background: color-mix(in srgb, #ef4444 14%, var(--panel-bg));
+  background: transparent;
 }
 .option-badge.unknown {
   color: var(--text-muted);
@@ -614,6 +602,6 @@ html[data-theme='dark'] .toolbar-select-submenu {
 }
 .menu-check {
   flex-shrink: 0;
-  color: var(--primary);
+  color: var(--text-muted);
 }
 </style>

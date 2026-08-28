@@ -55,15 +55,15 @@ function onChevron(e: Event) {
     <div class="row">
       <div class="head" :class="{ activatable }" @click="onHeadClick">
         <span class="glyph" aria-hidden="true">
-          <AppIcon :name="icon" :size="13" />
+          <AppIcon :name="icon" :size="16" :stroke-width="1.75" />
         </span>
         <span class="titles">
           <span class="title" :class="{ running: status === 'streaming' }">{{ title }}</span>
           <span v-if="subtitle" class="sub">{{ subtitle }}</span>
         </span>
         <span v-if="status === 'error'" class="pill error">失败</span>
-        <button type="button" class="chev-btn" @click="onChevron">
-          <AppIcon class="chev" name="chevron" :size="13" />
+        <button type="button" class="ghost-icon-btn chev-btn" @click="onChevron">
+          <AppIcon class="chev" name="chevron" :size="16" :stroke-width="1.75" />
         </button>
       </div>
       <div v-show="open" class="body">
@@ -191,18 +191,8 @@ function onChevron(e: Event) {
 }
 .chev-btn {
   flex-shrink: 0;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
   color: var(--text-muted);
-  cursor: pointer;
-  padding: 0;
 }
-.chev-btn:hover { background: var(--code-bg); color: var(--text); }
 .chev { transition: transform 0.16s ease; transform: rotate(-90deg); }
 .open .chev { transform: rotate(0deg); }
 .body {

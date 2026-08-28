@@ -204,19 +204,19 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
       <span class="explorer-title" :title="workspaceTitle">{{ workspaceTitle }}</span>
       <div class="explorer-actions">
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newFile')" @click.stop="startCreate('file')">
-          <AppIcon name="file-plus" :size="14" />
+          <AppIcon name="file-plus" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newDir')" @click.stop="startCreate('dir')">
-          <AppIcon name="folder-plus" :size="14" />
+          <AppIcon name="folder-plus" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" @click.stop="store.refreshTree()">
-          <AppIcon name="refresh" :size="14" />
+          <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.collapseAll')" @click.stop="store.collapseAllDirs()">
-          <AppIcon name="collapse-all" :size="14" />
+          <AppIcon name="collapse-all" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.expandAll')" @click.stop="store.expandAllDirs()">
-          <AppIcon name="expand-all" :size="14" />
+          <AppIcon name="expand-all" :size="16" :stroke-width="1.75" />
         </button>
       </div>
     </div>
@@ -328,7 +328,6 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   gap: 8px;
   flex-shrink: 0;
 }
-.icon-btn { width: 28px; height: 28px; flex-shrink: 0; }
 .err {
   margin: 0;
   padding: 6px 12px;
@@ -345,11 +344,13 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   z-index: 80;
   min-width: 168px;
   padding: 6px;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  background: var(--panel-bg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--dropdown-shadow);
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
 .ctx-sep {
   height: 1px;
@@ -363,18 +364,21 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   text-align: left;
   border: 0;
   background: transparent;
-  color: var(--text);
-  padding: 8px 10px;
-  border-radius: 6px;
+  color: var(--text-h);
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.12s ease;
 }
 .ctx-ico {
   flex: 0 0 16px;
   width: 16px;
   color: color-mix(in srgb, var(--text) 62%, transparent);
 }
-.ctx button:hover { background: var(--bg-muted); color: var(--text-h); }
+.ctx button:hover { background: var(--code-bg); color: var(--text-h); }
 .ctx button:hover .ctx-ico { color: var(--text-h); }
 .ctx button.danger { color: var(--danger); }
 .ctx button.danger .ctx-ico { color: var(--danger); }

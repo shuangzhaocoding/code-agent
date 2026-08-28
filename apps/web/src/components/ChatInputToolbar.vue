@@ -1,18 +1,33 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import ToolbarSelect, { type ToolbarSelectOption } from '@/components/ToolbarSelect.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import { chatInputToolbarOverflowKey, type ChatInputToolbarOverflowApi } from '@/composables/chatInputToolbarOverflow'
+import { useSenderFooterBreakpoints } from '@/composables/useSenderFooterBreakpoints'
 import { type ThinkingLevel } from '@/types/thinking'
 import type { LlmModel, LlmProvider, ThinkingOption } from '@/types/llm'
 
 const { t } = useI18n()
 const store = useAppStore()
+const {
+  leftBudget,
+  showProbeInline,
+  showModelInline,
+  showModeInline,
+  showThinkingInline,
+  moreHasProbe,
+  moreHasModel,
+  moreHasMode,
+  moreHasThinking,
+} = useSenderFooterBreakpoints()
 const paramsOpen = ref(false)
 const paramsReady = ref(false)
 const paramsBtn = ref<HTMLElement | null>(null)
+const paramsBtnMore = ref<HTMLElement | null>(null)
+const paramsAnchorRect = ref<DOMRect | null>(null)
 const paramsPanel = ref<HTMLElement | null>(null)
 const paramsStyle = ref<Record<string, string>>({})
 type SavedModelParams = {
@@ -59,7 +74,7 @@ function snapshotCurrentParams(modelId: string) {
 
 const modeOptions = computed<ToolbarSelectOption[]>(() => [
   { value: 'ask', label: 'Ask', description: t('chat.modeAsk'), icon: 'chat', accent: '#0891b2' },
-  { value: 'agent', label: 'Agent', description: t('chat.modeAgent'), icon: 'atom', accent: 'var(--primary)' },
+  { value: 'agent', label: 'Agent', description: t('chat.modeAgent'), icon: 'zap', accent: 'var(--primary)' },
   { value: 'plan', label: 'Plan', description: t('chat.modePlan'), icon: 'list', accent: '#d97706' },
 ])
 
@@ -135,7 +150,22 @@ const topPSpec = computed(() => {
   return spec?.supported ? spec : null
 })
 
-const canTuneParams = computed(() => Boolean(thinkingOptions.value.length || temperatureSpec.value || topPSpec.value))
+const thinkingSelectOptions = computed<ToolbarSelectOption[]>(() =>
+  thinkingOptions.value.map((item) => ({
+    value: item.value,
+    label: item.label,
+    description: item.description,
+    icon: 'atom',
+  })),
+)
+
+const showAdvancedParams = computed(() => Boolean(temperatureSpec.value || topPSpec.value))
+
+const showAdvancedParamsInline = computed(
+  () => showAdvancedParams.value && leftBudget.value >= (thinkingOptions.value.length ? 236 : 76),
+)
+
+const canTuneParams = computed(() => Boolean(thinkingOptions.value.length || showAdvancedParams.value))
 
 const thinkingLabel = computed(() => {
   if (!thinkingOptions.value.length) return ''
@@ -144,6 +174,8 @@ const thinkingLabel = computed(() => {
 })
 
 const paramsButtonLabel = computed(() => thinkingLabel.value || t('chat.params'))
+
+const isThinkingActive = computed(() => store.thinkingLevel !== 'off' && Boolean(thinkingLabel.value))
 
 watch(
   visibleModels,
@@ -215,9 +247,9 @@ watch(
 )
 
 function placeParamsPanel() {
-  const el = paramsBtn.value
-  if (!el) return
-  const rect = el.getBoundingClientRect()
+  const el = paramsBtn.value ?? paramsBtnMore.value
+  const rect = el?.getBoundingClientRect() ?? paramsAnchorRect.value
+  if (!rect) return
   const width = 280
   let left = rect.left
   if (left + width > window.innerWidth - 8) left = window.innerWidth - width - 8
@@ -232,7 +264,7 @@ function placeParamsPanel() {
 }
 
 function openParams() {
-  if (!canTuneParams.value) return
+  if (!showAdvancedParams.value) return
   placeParamsPanel()
   paramsReady.value = false
   paramsOpen.value = true
@@ -245,6 +277,7 @@ function openParams() {
 function closeParams() {
   paramsOpen.value = false
   paramsReady.value = false
+  paramsAnchorRect.value = null
 }
 
 function toggleParams() {
@@ -252,16 +285,31 @@ function toggleParams() {
   else openParams()
 }
 
+function openParamsFromMore(anchor?: HTMLElement | null) {
+  if (anchor) {
+    paramsAnchorRect.value = anchor.getBoundingClientRect()
+    paramsBtnMore.value = null
+  }
+  void nextTick(() => openParams())
+}
+
 function onDocPointer(e: PointerEvent) {
   const target = e.target as Node
-  if (paramsBtn.value?.contains(target) || paramsPanel.value?.contains(target)) return
+  if (
+    paramsBtn.value?.contains(target) ||
+    paramsBtnMore.value?.contains(target) ||
+    paramsPanel.value?.contains(target)
+  ) {
+    return
+  }
   closeParams()
 }
 
 onMounted(() => document.addEventListener('pointerdown', onDocPointer))
 onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 
-function onThinkingChange(value: string) {
+function onThinkingChange(value: string | null) {
+  if (!value) return
   store.thinkingLevel = value as ThinkingLevel
 }
 
@@ -325,49 +373,96 @@ function openModelsAndProbe() {
   store.pendingModelProbe = true
   window.dispatchEvent(new CustomEvent('ca-open-models'))
 }
+
+const toolbarOverflowRef = inject(chatInputToolbarOverflowKey, null)
+
+onMounted(() => {
+  if (!toolbarOverflowRef) return
+  toolbarOverflowRef.value = {
+    moreHasThinking: computed(() => moreHasThinking.value && thinkingOptions.value.length > 0),
+    moreHasAdvancedParams: computed(() => showAdvancedParams.value && !showAdvancedParamsInline.value),
+    moreHasMode,
+    moreHasModel,
+    moreHasProbe,
+    thinkingSelectOptions,
+    thinkingLevel: computed(() => store.thinkingLevel),
+    onThinkingChange,
+    canTuneParams,
+    paramsButtonLabel,
+    isThinkingActive,
+    modeOptions,
+    modelOptions,
+    mode: computed(() => store.mode),
+    modelId: computed(() => store.modelId),
+    providersEmpty: computed(() => !store.providers.length),
+    openParamsFromMore,
+    paramsPanelContains: (target) => paramsPanel.value?.contains(target) ?? false,
+    openModelsAndProbeFromMore: openModelsAndProbe,
+    onModeChange: (value) => {
+      store.mode = value as typeof store.mode
+    },
+    onModelChange,
+  } as ChatInputToolbarOverflowApi
+})
+
+onBeforeUnmount(() => {
+  if (toolbarOverflowRef) toolbarOverflowRef.value = null
+})
 </script>
 
 <template>
   <div class="chat-input-toolbar">
     <ToolbarSelect
-      :model-value="store.mode"
-      :options="modeOptions"
-      :min-width="108"
-      @update:model-value="store.mode = $event as typeof store.mode"
+      v-if="thinkingOptions.length && showThinkingInline"
+      :model-value="store.thinkingLevel"
+      :options="thinkingSelectOptions"
+      :min-width="72"
+      @update:model-value="onThinkingChange"
     />
 
     <button
-      v-if="canTuneParams"
+      v-if="showAdvancedParams && showAdvancedParamsInline"
       ref="paramsBtn"
       type="button"
-      class="params-btn"
-      :class="{ open: paramsOpen, active: store.thinkingLevel !== 'off' && Boolean(thinkingLabel) }"
-      :title="paramsButtonLabel"
+      class="ghost-btn params-btn"
+      :class="{ open: paramsOpen }"
+      :title="t('chat.params')"
       @click.stop="toggleParams"
     >
-      <AppIcon name="atom" :size="16" :stroke-width="2" />
-      <span class="params-text">{{ paramsButtonLabel }}</span>
+      <AppIcon name="tune" :size="16" :stroke-width="1.75" />
+      <span class="params-text">{{ t('chat.params') }}</span>
     </button>
 
     <ToolbarSelect
+      v-if="showModeInline"
+      :model-value="store.mode"
+      :options="modeOptions"
+      :min-width="72"
+      @update:model-value="store.mode = $event as typeof store.mode"
+    />
+
+    <ToolbarSelect
+      v-if="showModelInline"
       :model-value="store.modelId"
       :options="modelOptions"
       :placeholder="t('chat.selectModel')"
-      :min-width="128"
+      :min-width="96"
       grow
       searchable
       :search-placeholder="t('chat.searchModel')"
       @update:model-value="onModelChange"
     />
     <button
+      v-if="showProbeInline"
       type="button"
-      class="probe-btn"
+      class="ghost-icon-btn probe-btn"
       :disabled="!store.providers.length"
       :title="t('chat.openModels')"
       @click="openModelsAndProbe"
     >
-      <AppIcon name="refresh" :size="14" />
+      <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
     </button>
+
     <Teleport to="body">
       <div
         v-if="paramsOpen"
@@ -378,22 +473,6 @@ function openModelsAndProbe() {
         @pointerdown.stop
       >
         <p class="params-title">{{ t('chat.paramsTitle') }}</p>
-        <section v-if="thinkingOptions.length" class="params-block">
-          <span class="params-label">{{ t('chat.thinkingLevel') }}</span>
-          <div class="params-chips">
-            <button
-              v-for="item in thinkingOptions"
-              :key="item.value"
-              type="button"
-              class="chip"
-              :class="{ on: store.thinkingLevel === item.value }"
-              :title="item.description"
-              @click="onThinkingChange(item.value)"
-            >
-              {{ item.label }}
-            </button>
-          </div>
-        </section>
         <section v-if="temperatureSpec" class="params-block">
           <span class="params-label">{{ t('chat.temperature', { value: store.sampling.temperature ?? temperatureSpec.default ?? 0.2 }) }}</span>
           <input
@@ -434,51 +513,25 @@ function openModelsAndProbe() {
 .chat-input-toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 14px;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+}
+.chat-input-toolbar :deep(.trigger-desc) {
+  display: none;
+}
+.chat-input-toolbar :deep(.option-badge) {
+  display: none;
+}
+.chat-input-toolbar :deep(.toolbar-select) {
   min-width: 0;
 }
-.probe-btn {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 999px;
-  background: var(--panel-bg);
-  color: var(--text-secondary);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
+.chat-input-toolbar :deep(.toolbar-select-trigger) {
+  padding: 0 2px;
 }
-.probe-btn:hover:not(:disabled) {
-  background: var(--code-bg);
-  color: var(--primary);
-}
-.probe-btn:disabled {
-  cursor: default;
-  opacity: 0.7;
-}
-.params-btn {
-  height: 34px;
-  padding: 0 10px 0 8px;
-  flex-shrink: 0;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-secondary);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-}
-.params-btn:hover,
-.params-btn.open,
-.params-btn.active {
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+.params-btn.open {
+  opacity: var(--ghost-hover-opacity);
 }
 .params-text {
   line-height: 1;
@@ -529,27 +582,6 @@ function openModelsAndProbe() {
   margin: 0;
   font-size: 11px;
   color: var(--text-muted);
-}
-.params-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.chip {
-  height: 26px;
-  padding: 0 8px;
-  border: var(--border-width) solid var(--border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-.chip.on {
-  background: var(--primary-soft);
-  color: var(--primary);
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
 }
 .params-range {
   width: 100%;

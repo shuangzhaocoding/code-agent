@@ -374,6 +374,16 @@ function showDiff(path: string, before: string, after: string) {
   })
 }
 
+async function onEditorSave() {
+  if (review.value || showFilePreview.value) return
+  const path = store.activePath
+  const file = store.openFile
+  if (!path || !file || file.readonly) return
+  const model = editor?.getModel()
+  if (model) store.updateOpenContent(path, model.getValue())
+  await store.saveOpenFile()
+}
+
 onMounted(async () => {
   monacoMod = await import('monaco-editor')
   const { default: editorWorker } = await import('monaco-editor/editor/editor.worker.js?worker')
@@ -387,6 +397,9 @@ onMounted(async () => {
     language: 'plaintext',
     theme: 'ca-editor',
     ...editorOptions,
+  })
+  editor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
+    void onEditorSave()
   })
   host.value.addEventListener('copy', onEditorCopy)
   showPath(store.activePath)
@@ -619,7 +632,9 @@ async function onTabMenuSelect(id: string) {
           <FileTreeIcon kind="file" :path="file.path" :size="16" />
           <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
           <span v-if="store.pendingReviewCount(file.path)" class="mark">diff</span>
-          <span class="x" title="关闭" @click.stop="store.closeFile(file.path)">×</span>
+          <button type="button" class="ghost-icon-btn ftab-close" title="关闭" @click.stop="store.closeFile(file.path)">
+            <AppIcon name="close" :size="12" :stroke-width="1.75" />
+          </button>
         </button>
       </div>
       <div v-if="canMarkdownPreview" class="md-toggle" role="group" aria-label="Markdown 预览">
@@ -633,7 +648,9 @@ async function onTabMenuSelect(id: string) {
     </header>
     <div v-if="store.fileNotice" class="file-notice" role="status">
       <span>{{ store.fileNotice }}</span>
-      <button type="button" class="notice-x" @click="store.clearFileNotice()">×</button>
+      <button type="button" class="ghost-icon-btn notice-x" @click="store.clearFileNotice()">
+        <AppIcon name="close" :size="14" :stroke-width="1.75" />
+      </button>
     </div>
     <div v-if="pendingCount" class="review-bar">
       <div class="review-nav" role="navigation" :aria-label="t('editor.reviewNav')">
@@ -645,7 +662,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.prevDiff')"
             @click="cycleDiff(-1)"
           >
-            <AppIcon name="chevron-up" :size="14" />
+            <AppIcon name="chevron-up" :size="16" :stroke-width="1.75" />
           </button>
           <span class="nav-label">{{ t('editor.diffNav', { i: fileReviewIndex, n: Math.max(fileReviewCount, 1) }) }}</span>
           <button
@@ -655,7 +672,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.nextDiff')"
             @click="cycleDiff(1)"
           >
-            <AppIcon name="chevron-down" :size="14" />
+            <AppIcon name="chevron-down" :size="16" :stroke-width="1.75" />
           </button>
         </div>
         <span class="review-nav-sep" aria-hidden="true" />
@@ -667,7 +684,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.prevFile')"
             @click="cycleFile(-1)"
           >
-            <AppIcon name="chevron-left" :size="14" />
+            <AppIcon name="chevron-left" :size="16" :stroke-width="1.75" />
           </button>
           <span class="nav-label nav-label-long">{{ t('editor.fileNav', { i: filePathIndex || 1, n: filePendingPathCount }) }}</span>
           <span class="nav-label nav-label-short">{{ filePathIndex || 1 }}/{{ filePendingPathCount }}</span>
@@ -678,7 +695,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.nextFile')"
             @click="cycleFile(1)"
           >
-            <AppIcon name="chevron-right" :size="14" />
+            <AppIcon name="chevron-right" :size="16" :stroke-width="1.75" />
           </button>
         </div>
       </div>
@@ -690,7 +707,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.reject')"
             @click="store.rejectReview(review.path)"
           >
-            <AppIcon name="close" :size="14" />
+            <AppIcon name="close" :size="16" :stroke-width="1.75" />
             <span class="action-label">{{ t('editor.reject') }}</span>
           </button>
           <button
@@ -699,7 +716,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.accept')"
             @click="store.acceptReview(review.path)"
           >
-            <AppIcon name="check" :size="14" />
+            <AppIcon name="check" :size="16" :stroke-width="1.75" />
             <span class="action-label">{{ t('editor.accept') }}</span>
           </button>
         </div>
@@ -711,7 +728,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.rejectAll')"
             @click="openBulkConfirm('reject')"
           >
-            <AppIcon name="close-all" :size="14" />
+            <AppIcon name="close-all" :size="16" :stroke-width="1.75" />
             <span class="action-label">{{ t('editor.rejectAll') }}</span>
           </button>
           <button
@@ -721,7 +738,7 @@ async function onTabMenuSelect(id: string) {
             :title="t('editor.acceptAll')"
             @click="openBulkConfirm('accept')"
           >
-            <AppIcon name="check" :size="14" />
+            <AppIcon name="check" :size="16" :stroke-width="1.75" />
             <span class="action-label">{{ t('editor.acceptAll') }}</span>
           </button>
           <div
@@ -732,24 +749,26 @@ async function onTabMenuSelect(id: string) {
             :aria-label="bulkConfirm === 'accept' ? t('confirm.acceptAllReviewsTitle') : t('confirm.rejectAllReviewsTitle')"
             @mousedown.stop
           >
-            <p class="bulk-confirm-text">
-              {{
-                bulkConfirm === 'accept'
-                  ? t('confirm.acceptAllReviewsSummary', { n: pendingCount })
-                  : t('confirm.rejectAllReviewsSummary', { n: pendingCount })
-              }}
-            </p>
-            <div class="bulk-confirm-actions">
-              <button type="button" class="bulk-btn ghost" @click="closeBulkConfirm">{{ t('common.cancel') }}</button>
-              <button
-                type="button"
-                class="bulk-btn"
-                :class="bulkConfirm === 'reject' ? 'danger' : 'primary'"
-                @click="confirmBulk"
-              >
-                {{ t('confirm.confirm') }}
-              </button>
-            </div>
+            <span class="bulk-confirm-count">{{ pendingCount }}</span>
+            <button
+              type="button"
+              class="ghost-icon-btn bulk-btn"
+              :title="t('common.cancel')"
+              :aria-label="t('common.cancel')"
+              @click="closeBulkConfirm"
+            >
+              <AppIcon name="close" :size="16" :stroke-width="1.75" />
+            </button>
+            <button
+              type="button"
+              class="ghost-icon-btn bulk-btn"
+              :class="bulkConfirm === 'reject' ? 'is-danger' : 'is-primary'"
+              :title="t('confirm.confirm')"
+              :aria-label="t('confirm.confirm')"
+              @click="confirmBulk"
+            >
+              <AppIcon name="check" :size="16" :stroke-width="1.75" />
+            </button>
           </div>
         </div>
       </div>
@@ -811,12 +830,7 @@ async function onTabMenuSelect(id: string) {
   min-width: 0;
 }
 .notice-x {
-  border: 0;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: 16px;
-  line-height: 1;
+  flex-shrink: 0;
 }
 .tabs {
   flex: 1;
@@ -841,11 +855,23 @@ async function onTabMenuSelect(id: string) {
   max-width: 200px;
   flex-shrink: 0;
 }
-.ftab:hover { background: var(--bg-muted); color: var(--text); }
+.ftab:hover { background: transparent; color: var(--text-h); opacity: var(--ghost-hover-opacity); }
 .ftab.active {
   background: var(--editor-bg);
-  color: var(--text);
+  color: var(--text-h);
+  opacity: 1;
   box-shadow: inset 0 -2px 0 var(--primary);
+}
+.ftab-close {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.ftab:hover .ftab-close,
+.ftab.active .ftab-close {
+  opacity: var(--ghost-hover-opacity);
+}
+.ftab-close:hover {
+  opacity: 1 !important;
 }
 .name {
   overflow: hidden;
@@ -865,29 +891,36 @@ async function onTabMenuSelect(id: string) {
 .md-toggle {
   display: inline-flex;
   align-items: center;
-  height: 28px;
-  padding: 2px;
-  border: var(--border-width) solid var(--border);
-  border-radius: 8px;
-  background: var(--code-bg);
+  height: var(--ghost-btn-height);
+  padding: 0;
+  border: 0;
+  border-radius: var(--ghost-btn-radius);
+  background: transparent;
   flex-shrink: 0;
+  gap: 2px;
 }
 .md-toggle-btn {
-  height: 22px;
-  padding: 0 10px;
+  height: var(--ghost-btn-height);
+  padding: 0 8px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text);
+  color: var(--text-h);
   font: inherit;
-  font-size: 12px;
-  line-height: 22px;
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+.md-toggle-btn:hover {
+  opacity: var(--ghost-hover-opacity);
 }
 .md-toggle-btn.is-on {
-  background: var(--panel-bg);
-  color: var(--text-h);
+  background: transparent;
+  color: var(--primary);
+  opacity: 1;
 }
 .review-bar {
   container-type: inline-size;
@@ -909,11 +942,11 @@ async function onTabMenuSelect(id: string) {
   align-items: stretch;
   flex-shrink: 1;
   min-width: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  overflow: hidden;
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
+  box-shadow: none;
 }
 .review-nav-group {
   display: inline-flex;
@@ -931,18 +964,21 @@ async function onTabMenuSelect(id: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: auto;
+  min-width: var(--ghost-btn-height);
+  height: var(--ghost-btn-height);
+  padding: var(--ghost-btn-padding);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-h);
   cursor: pointer;
   flex-shrink: 0;
+  transition: opacity 0.15s ease;
 }
 .nav-btn:hover:not(:disabled) {
-  background: var(--bg-muted);
-  color: var(--text-h);
+  background: transparent;
+  opacity: var(--ghost-hover-opacity);
 }
 .nav-btn:disabled {
   opacity: 0.28;
@@ -977,136 +1013,101 @@ async function onTabMenuSelect(id: string) {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 4%, transparent);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .bulk-group {
   position: relative;
   overflow: visible;
 }
 .action-btn.is-active {
-  background: var(--bg-muted);
+  opacity: var(--ghost-hover-opacity);
 }
 .action-btn.is-active.is-accept {
-  background: color-mix(in srgb, var(--primary) 14%, var(--bg-muted));
+  color: var(--primary);
+  opacity: 1;
 }
 .bulk-confirm {
   position: absolute;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
   right: 0;
   z-index: 30;
-  width: max-content;
-  max-width: min(200px, 68vw);
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-elevated);
-  box-shadow: 0 4px 16px color-mix(in srgb, #000 12%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: var(--dropdown-shadow);
 }
 .bulk-confirm::before {
-  content: '';
-  position: absolute;
-  top: -4px;
-  right: 16px;
-  width: 7px;
-  height: 7px;
-  border-top: 1px solid var(--border);
-  border-left: 1px solid var(--border);
-  background: var(--bg-elevated);
-  transform: rotate(45deg);
+  display: none;
 }
 .bulk-confirm.is-danger {
-  border-color: color-mix(in srgb, #dc2626 28%, var(--border));
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
 }
-.bulk-confirm-text {
-  margin: 0 0 6px;
+.bulk-confirm-count {
+  min-width: 14px;
+  padding: 0 4px;
   font-size: 11px;
-  line-height: 1.35;
+  font-weight: 600;
+  line-height: 1;
   color: var(--text-secondary);
+  text-align: center;
 }
-.bulk-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 4px;
-}
-.bulk-btn {
-  height: 22px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--bg);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.bulk-btn:hover {
-  background: var(--bg-muted);
-  color: var(--text-h);
-}
-.bulk-btn.ghost {
-  background: transparent;
-}
-.bulk-btn.primary {
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg-elevated));
+.bulk-btn.is-primary {
   color: var(--primary);
 }
-.bulk-btn.primary:hover {
-  background: color-mix(in srgb, var(--primary) 20%, var(--bg-elevated));
-}
-.bulk-btn.danger {
-  border-color: color-mix(in srgb, #dc2626 35%, var(--border));
-  background: color-mix(in srgb, #dc2626 10%, var(--bg-elevated));
-  color: #dc2626;
-}
-.bulk-btn.danger:hover {
-  background: color-mix(in srgb, #dc2626 16%, var(--bg-elevated));
+.bulk-btn.is-danger {
+  color: var(--danger);
 }
 .action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 10px;
+  height: var(--ghost-btn-height);
+  padding: 0 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-h);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ghost-btn-font-size);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition: opacity 0.15s ease, color 0.12s ease;
 }
 .action-btn:hover {
-  background: var(--bg-muted);
-  color: var(--text-h);
+  background: transparent;
+  opacity: var(--ghost-hover-opacity);
 }
 .action-btn.is-reject:hover {
-  background: color-mix(in srgb, #dc2626 10%, var(--bg-muted));
-  color: #dc2626;
+  background: transparent;
+  color: var(--danger);
+  opacity: 1;
 }
 .action-btn.is-accept {
   color: var(--primary);
 }
 .action-btn.is-accept:hover {
-  background: color-mix(in srgb, var(--primary) 12%, var(--bg-muted));
+  background: transparent;
   color: var(--primary);
+  opacity: var(--ghost-hover-opacity);
 }
 .action-btn.is-strong {
-  background: color-mix(in srgb, var(--primary) 14%, var(--bg-elevated));
+  color: var(--primary);
+  opacity: 1;
 }
 .action-btn.is-strong:hover {
-  background: color-mix(in srgb, var(--primary) 24%, var(--bg-elevated));
+  background: transparent;
+  opacity: var(--ghost-hover-opacity);
 }
 @container review-bar (max-width: 640px) {
   .action-label {
@@ -1153,20 +1154,6 @@ async function onTabMenuSelect(id: string) {
   }
 }
 .spacer { flex: 1; }
-.x {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  font-size: 14px;
-  line-height: 1;
-}
-.ftab:hover .x,
-.ftab.active .x { opacity: 0.55; }
-.x:hover { opacity: 1 !important; background: var(--bg-muted); }
 .btn {
   height: auto;
   margin: 4px 8px;

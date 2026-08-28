@@ -45,7 +45,7 @@ const recents = computed(() => store.recentWorkspaces)
     <div class="workspace-body">
       <p class="lead">选择本地目录，或从最近工作空间进入。</p>
       <div class="search-box compact">
-        <AppIcon class="search-box-icon" name="folder" :size="16" />
+        <AppIcon class="search-box-icon" name="folder" :size="16" :stroke-width="1.75" />
         <input v-model="path" placeholder="/path/to/project" @keydown.enter="openPath" />
         <button type="button" class="search-box-btn" @click="openPath">打开</button>
       </div>

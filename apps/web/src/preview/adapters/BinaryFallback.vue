@@ -42,7 +42,7 @@ const fileName = computed(() => props.path.split('/').pop() || props.path)
           <dd>{{ sizeLabel }}</dd>
         </div>
       </dl>
-      <a class="btn" :href="previewUrl" target="_blank" rel="noopener noreferrer">在新标签打开 / 下载</a>
+      <a class="btn btn-primary" :href="previewUrl" target="_blank" rel="noopener noreferrer">在新标签打开 / 下载</a>
     </div>
   </div>
 </template>
@@ -97,17 +97,5 @@ dd {
   margin: 0;
   color: var(--text-h);
   font-family: var(--mono);
-}
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 8px;
-  background: var(--primary);
-  color: #fff;
-  text-decoration: none;
-  font-size: 13px;
 }
 </style>

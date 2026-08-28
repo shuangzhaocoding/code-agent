@@ -17,40 +17,16 @@ const { t } = useI18n()
 <template>
   <button
     type="button"
-    class="history-trigger"
+    class="ghost-icon-btn"
     :class="{ active }"
     :aria-pressed="active"
     :title="t('chat.userHistory')"
     :disabled="disabled"
     @click="$emit('toggle')"
   >
-    <AppIcon name="history" :size="15" />
+    <AppIcon name="history" :size="16" :stroke-width="1.75" />
   </button>
 </template>
 
 <style scoped>
-.history-trigger {
-  width: 30px;
-  height: 30px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-.history-trigger:hover:not(:disabled) {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.history-trigger.active {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.history-trigger:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
 </style>

@@ -251,7 +251,7 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
             :title="t('preview.prevImage')"
             @click="showPrev"
           >
-            <AppIcon name="arrow-left" :size="20" />
+            <AppIcon name="arrow-left" :size="20" :stroke-width="1.75" />
           </button>
           <button
             v-if="hasGallery && currentIndex < galleryItems.length - 1"
@@ -260,7 +260,7 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
             :title="t('preview.nextImage')"
             @click="showNext"
           >
-            <AppIcon name="chevron-right" :size="20" />
+            <AppIcon name="chevron-right" :size="20" :stroke-width="1.75" />
           </button>
           <div
             ref="viewportRef"
@@ -295,7 +295,7 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
                   :disabled="currentIndex <= 0"
                   @click="showPrev"
                 >
-                  <AppIcon name="arrow-left" :size="16" />
+                  <AppIcon name="arrow-left" :size="16" :stroke-width="1.75" />
                 </button>
                 <button
                   type="button"
@@ -304,19 +304,19 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
                   :disabled="currentIndex >= galleryItems.length - 1"
                   @click="showNext"
                 >
-                  <AppIcon name="chevron-right" :size="16" />
+                  <AppIcon name="chevron-right" :size="16" :stroke-width="1.75" />
                 </button>
                 <span class="viewer-actions-sep" aria-hidden="true" />
               </template>
               <button type="button" class="viewer-btn" :title="t('preview.zoomOut')" @click="zoomOut">
-                <AppIcon name="minus" :size="16" />
+                <AppIcon name="minus" :size="16" :stroke-width="1.75" />
               </button>
               <span class="viewer-zoom">{{ zoomLabel }}</span>
               <button type="button" class="viewer-btn" :title="t('preview.zoomIn')" @click="zoomIn">
-                <AppIcon name="plus" :size="16" />
+                <AppIcon name="plus" :size="16" :stroke-width="1.75" />
               </button>
               <button type="button" class="viewer-btn" :title="t('preview.fitWindow')" @click="fitImage">
-                <AppIcon name="expand-all" :size="16" />
+                <AppIcon name="expand-all" :size="16" :stroke-width="1.75" />
               </button>
               <button type="button" class="viewer-btn" :title="t('preview.actualSize')" @click="resetActualSize">1:1</button>
               <a
@@ -327,10 +327,10 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
                 rel="noopener noreferrer"
                 :title="t('common.open')"
               >
-                <AppIcon name="globe" :size="16" />
+                <AppIcon name="globe" :size="16" :stroke-width="1.75" />
               </a>
               <button type="button" class="viewer-btn" :title="t('common.close')" @click="close">
-                <AppIcon name="close" :size="16" />
+                <AppIcon name="close" :size="16" :stroke-width="1.75" />
               </button>
             </div>
           </footer>
@@ -372,7 +372,7 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
             :disabled="currentIndex <= 0"
             @click="showPrev"
           >
-            <AppIcon name="arrow-left" :size="16" />
+            <AppIcon name="arrow-left" :size="16" :stroke-width="1.75" />
           </button>
           <button
             type="button"
@@ -381,19 +381,19 @@ defineExpose({ fitImage, resetActualSize, zoomIn, zoomOut })
             :disabled="currentIndex >= galleryItems.length - 1"
             @click="showNext"
           >
-            <AppIcon name="chevron-right" :size="16" />
+            <AppIcon name="chevron-right" :size="16" :stroke-width="1.75" />
           </button>
           <span class="viewer-actions-sep" aria-hidden="true" />
         </template>
         <button type="button" class="viewer-btn" :title="t('preview.zoomOut')" @click="zoomOut">
-          <AppIcon name="minus" :size="16" />
+          <AppIcon name="minus" :size="16" :stroke-width="1.75" />
         </button>
         <span class="viewer-zoom">{{ zoomLabel }}</span>
         <button type="button" class="viewer-btn" :title="t('preview.zoomIn')" @click="zoomIn">
-          <AppIcon name="plus" :size="16" />
+          <AppIcon name="plus" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="viewer-btn" :title="t('preview.fitWindow')" @click="fitImage">
-          <AppIcon name="expand-all" :size="16" />
+          <AppIcon name="expand-all" :size="16" :stroke-width="1.75" />
         </button>
         <button type="button" class="viewer-btn" :title="t('preview.actualSize')" @click="resetActualSize">1:1</button>
       </div>

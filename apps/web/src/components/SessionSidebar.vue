@@ -57,8 +57,8 @@ function open(id: string, component: string, title: string) {
         <span class="brand-title">Code Agent</span>
         <span class="brand-ws" :title="store.workspace?.root_path">{{ workspaceLabel }}</span>
       </div>
-      <button type="button" class="sidebar-icon-btn collapse-btn" :title="collapsed ? t('sidebar.expand') : t('sidebar.collapse')" @click="emit('toggleCollapse')">
-        <AppIcon :name="collapsed ? 'chevron-right' : 'panel-left'" :size="15" />
+      <button type="button" class="ghost-icon-btn collapse-btn" :title="collapsed ? t('sidebar.expand') : t('sidebar.collapse')" @click="emit('toggleCollapse')">
+        <AppIcon :name="collapsed ? 'chevron-right' : 'panel-left'" :size="16" :stroke-width="1.75" />
       </button>
     </div>
 
@@ -72,7 +72,7 @@ function open(id: string, component: string, title: string) {
         :title="item.label"
         @click="open(item.id, item.component, item.title)"
       >
-        <AppIcon :name="item.icon" :size="16" />
+        <AppIcon :name="item.icon" :size="16" :stroke-width="1.75" />
         <span v-if="!collapsed">{{ item.label }}</span>
       </button>
     </nav>
@@ -87,11 +87,11 @@ function open(id: string, component: string, title: string) {
         :title="item.label"
         @click="open(item.id, item.component, item.title)"
       >
-        <AppIcon :name="item.icon" :size="16" />
+        <AppIcon :name="item.icon" :size="16" :stroke-width="1.75" />
         <span v-if="!collapsed">{{ item.label }}</span>
       </button>
       <button type="button" class="sidebar-nav-item" :title="t('theme.toggle')" @click="emit('toggleTheme')">
-        <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
+        <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" :stroke-width="1.75" />
         <span v-if="!collapsed">{{ theme === 'dark' ? t('theme.light') : t('theme.dark') }}</span>
       </button>
       <button
@@ -100,7 +100,7 @@ function open(id: string, component: string, title: string) {
         :title="t('sidebar.openWorkspace')"
         @click="open('workspace', 'workspace', t('panels.workspace'))"
       >
-        <AppIcon name="home" :size="16" />
+        <AppIcon name="home" :size="16" :stroke-width="1.75" />
         <span v-if="!collapsed">{{ t('sidebar.workspace') }}</span>
       </button>
     </div>
@@ -158,22 +158,6 @@ function open(id: string, component: string, title: string) {
 .collapsed .collapse-btn {
   margin-left: 0;
 }
-.sidebar-icon-btn {
-  width: 32px;
-  height: 32px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-}
-.sidebar-icon-btn:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
-}
 .sidebar-nav {
   display: flex;
   flex-direction: column;
@@ -196,7 +180,7 @@ function open(id: string, component: string, title: string) {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 36px;
+  min-height: 34px;
   padding: 0 10px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -206,11 +190,12 @@ function open(id: string, component: string, title: string) {
   font-weight: 500;
   cursor: pointer;
   text-align: left;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 .collapsed .sidebar-nav-item {
   justify-content: center;
   padding: 0;
-  width: 36px;
+  width: var(--ghost-btn-height);
   margin: 0 auto;
 }
 .sidebar-nav-item:hover {
@@ -218,8 +203,8 @@ function open(id: string, component: string, title: string) {
   color: var(--text-h);
 }
 .sidebar-nav-item.active {
-  background: var(--primary-soft);
+  background: var(--code-bg);
   color: var(--primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, shallowRef, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { TrAttachments, TrSender, UploadButton, VoiceButton } from '@opentiny/tiny-robot'
+import { TrAttachments, TrSender } from '@opentiny/tiny-robot'
 import type { Attachment } from '@opentiny/tiny-robot'
 import { useAppStore } from '@/stores/app'
 import { rendererFor } from '@/renderers'
@@ -11,13 +11,18 @@ import AppIcon from '@/components/AppIcon.vue'
 import ConversationSwitcher from '@/components/ConversationSwitcher.vue'
 import UserMessageHistoryMenu from '@/components/UserMessageHistoryMenu.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
-import ChatContextUsageButton from '@/components/ChatContextUsageButton.vue'
+import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
-import { scrollToBottom, scrollToTop } from '@/utils/smoothScroll'
+import { scrollToTop } from '@/utils/smoothScroll'
 import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
+import { provideSenderFooterLayout } from '@/composables/useSenderLayoutWidth'
+import {
+  chatInputToolbarOverflowKey,
+  type ChatInputToolbarOverflowApi,
+} from '@/composables/chatInputToolbarOverflow'
 import { paletteShortcutLabel } from '@/utils/relativeTime'
 import {
   attachmentFileMatchers,
@@ -261,6 +266,10 @@ const sender = ref<{
   focus?: () => void
   editor?: SenderEditor | { value?: SenderEditor }
 } | null>(null)
+const senderWrap = ref<HTMLElement | null>(null)
+provideSenderFooterLayout(senderWrap)
+const toolbarOverflowRef = shallowRef<ChatInputToolbarOverflowApi | null>(null)
+provide(chatInputToolbarOverflowKey, toolbarOverflowRef)
 const draft = ref('')
 
 const quickPrompts = computed(() => [
@@ -834,24 +843,23 @@ function pauseFollow() {
   }
 }
 
+function applyScrollTop(el: HTMLElement, behavior: ScrollBehavior) {
+  const top = Math.max(0, el.scrollHeight - el.clientHeight)
+  if (behavior === 'auto') el.scrollTop = top
+  else el.scrollTo({ top, behavior })
+  virtualList.onScroll()
+}
+
 function jumpToEnd(behavior: ScrollBehavior = 'smooth') {
   if (!stick.value && !forcePinning.value) return
   const el = scroller.value
   if (!el) return
-  const token = followGen
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
   if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) return
   locking = true
-  scrollToTop(el, top, behavior)
+  applyScrollTop(el, behavior)
   requestAnimationFrame(() => {
-    if (token !== followGen || (!stick.value && !forcePinning.value)) {
-      locking = false
-      return
-    }
-    scrollToBottom(el, behavior)
-    requestAnimationFrame(() => {
-      locking = false
-    })
+    locking = false
   })
 }
 
@@ -884,10 +892,12 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function scheduleStickScroll() {
+  if (locking) return
   if (!stick.value && !forcePinning.value) return
   if (pinRaf) return
   pinRaf = requestAnimationFrame(() => {
     pinRaf = 0
+    if (locking) return
     if (!stick.value && !forcePinning.value) return
     if (virtualList.enabled.value) virtualList.scrollToEnd('auto')
     else jumpToEnd('auto')
@@ -898,7 +908,7 @@ function raf() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 }
 
-/** Wait until the scroll container has layout and message content height. */
+/** Wait until the scroll container has layout and tail messages can be measured. */
 async function waitForScrollerReady(maxMs = 4000) {
   const start = Date.now()
   while (Date.now() - start < maxMs) {
@@ -909,63 +919,52 @@ async function waitForScrollerReady(maxMs = 4000) {
       continue
     }
     if (!store.messages.length) return true
-    if (el.scrollHeight > el.clientHeight + 4) return true
-    if (virtualList.enabled.value && virtualList.totalHeight.value > el.clientHeight) return true
+
+    if (virtualList.enabled.value) {
+      virtualList.scrollToIndex(store.messages.length - 1, 'auto')
+      await nextTick()
+      await raf()
+    }
+
     const lastId = store.messages.at(-1)?.id
-    if (lastId && document.getElementById(`msg-${lastId}`)) return true
+    const lastInDom = lastId ? Boolean(document.getElementById(`msg-${lastId}`)) : false
+    const scrollable = el.scrollHeight > el.clientHeight + 1
+    if (scrollable && (lastInDom || !virtualList.enabled.value)) return true
     await raf()
   }
-  return Boolean(scroller.value && scroller.value.clientHeight > 0)
+  return Boolean(scroller.value?.clientHeight)
 }
 
 function scrollMessagesToEnd(behavior: ScrollBehavior = 'auto') {
   if (!stick.value && !forcePinning.value) return
   const el = scroller.value
   if (!el) return
-  if (virtualList.enabled.value) {
-    virtualList.scrollToEnd(behavior)
-    return
-  }
-  jumpToEnd(behavior)
+  if (virtualList.enabled.value) virtualList.scrollToEnd(behavior)
+  else applyScrollTop(el, behavior)
 }
 
-function revealLastMessage(behavior: ScrollBehavior = 'auto') {
-  const lastId = store.messages.at(-1)?.id
-  if (!lastId) return
-  document.getElementById(`msg-${lastId}`)?.scrollIntoView({ block: 'end', behavior })
-}
-
-/** Force pin to bottom (conversation switch / initial load). */
+/** Force pin to bottom (conversation switch / initial load / jump button). */
 async function pinToBottom() {
   stick.value = true
   followGen += 1
   const token = followGen
   forcePinning.value = true
-  scroller.value?.classList.add('is-pinning')
-
-  const attempt = (behavior: ScrollBehavior = 'auto') => {
-    if (token !== followGen) return
-    scrollMessagesToEnd(behavior)
-    revealLastMessage(behavior)
-  }
+  locking = true
 
   try {
     await waitForScrollerReady()
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 20; i++) {
       if (token !== followGen) return
-      attempt('auto')
+      scrollMessagesToEnd('auto')
       await nextTick()
       await raf()
-      if (i > 2) {
-        const el = scroller.value
-        if (el && distanceToBottom(el) <= 16) break
-      }
-      if (i < 15) await new Promise<void>((resolve) => window.setTimeout(resolve, 60))
+      const el = scroller.value
+      if (el && distanceToBottom(el) <= 2) break
     }
   } finally {
+    locking = false
     if (token === followGen) {
       forcePinning.value = false
-      scroller.value?.classList.remove('is-pinning')
       const el = scroller.value
       if (el && distanceToBottom(el) <= 16) stick.value = true
     }
@@ -973,7 +972,11 @@ async function pinToBottom() {
 }
 
 function onMessagesLoaded() {
-  if (store.messages.length) void pinToBottom()
+  if (!store.messages.length) return
+  void pinToBottom()
+  requestAnimationFrame(() => {
+    if (store.messages.length) void pinToBottom()
+  })
 }
 
 onMounted(() => {
@@ -983,7 +986,7 @@ onMounted(() => {
     })
     resizeObs.observe(timelineInner.value)
   }
-  if (store.messages.length) void pinToBottom()
+  onMessagesLoaded()
   window.addEventListener('ca-add-chat-mention', onAddChatMention)
   window.addEventListener('ca-messages-loaded', onMessagesLoaded)
   window.addEventListener('ca-layout-ready', onMessagesLoaded)
@@ -1039,6 +1042,13 @@ watch(
     if (enabled && wasEnabled === false && stick.value && store.messages.length) {
       void pinToBottom()
     }
+  },
+)
+
+watch(
+  () => virtualList.totalHeight.value,
+  () => {
+    if (stick.value && store.messages.length) scheduleStickScroll()
   },
 )
 
@@ -1258,10 +1268,10 @@ function openContextUsageDialog() {
             </span>
             <div class="msg-actions">
               <button v-if="row.item.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(row.item)">
-                <AppIcon name="pencil" :size="14" />
+                <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
               </button>
               <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(row.item)">
-                <AppIcon name="copy" :size="14" />
+                <AppIcon name="copy" :size="16" :stroke-width="1.75" />
               </button>
             </div>
           </div>
@@ -1318,16 +1328,16 @@ function openContextUsageDialog() {
                 @mouseenter="mentionActiveIdx = i"
                 @mousedown.prevent="mentionSelect(item)"
               >
-                <AppIcon :name="item.is_dir ? 'folder' : 'file'" :size="14" />
+                <AppIcon :name="item.is_dir ? 'folder' : 'file'" :size="16" :stroke-width="1.75" />
                 <span class="mention-name">{{ item.name }}</span>
                 <button
                   v-if="item.is_dir"
                   type="button"
-                  class="mention-arrow"
+                  class="ghost-icon-btn mention-arrow"
                   :title="t('workspace.browse')"
                   @mousedown.prevent.stop="mentionEnterDir(item)"
                 >
-                  ›
+                  <AppIcon name="chevron-right" :size="16" :stroke-width="1.75" />
                 </button>
               </li>
             </ul>
@@ -1344,7 +1354,7 @@ function openContextUsageDialog() {
                 @mouseenter="mentionActiveIdx = i"
                 @mousedown.prevent="mentionSelectSkill(skill)"
               >
-                <AppIcon name="book" :size="14" />
+                <AppIcon name="book" :size="16" :stroke-width="1.75" />
                 <span class="mention-skill-copy">
                   <span class="mention-name">{{ skill.name }}</span>
                   <span class="mention-skill-desc">{{ skill.description || t('chat.mentionSkillNoDesc') }}</span>
@@ -1392,6 +1402,7 @@ function openContextUsageDialog() {
         </Transition>
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
+        ref="senderWrap"
         class="agent-sender-wrap"
         @pointerdown.capture="onSenderBlankPointerDown"
         @keydown.capture="onSenderCaptureKeydown"
@@ -1429,33 +1440,21 @@ function openContextUsageDialog() {
           </template>
 
           <template #footer-right>
-            <div class="agent-sender-actions">
-              <ChatContextUsageButton
-                :percent="contextUsageRingPercent"
-                :level="contextUsageRingLevel"
-                :loading="contextUsagePreviewLoading"
-                :disabled="!store.conversationId"
-                @click="openContextUsageDialog"
-              />
-              <UploadButton
-                :tooltip="t('chat.uploadImage')"
-                tooltip-placement="top"
-                multiple
-                :max-size="UPLOAD_MAX_SIZE_MB"
-                :max-count="UPLOAD_MAX_COUNT"
-                :accept="UPLOAD_ACCEPT"
-                :disabled="inputBlocked"
-                @select="handleFileSelect"
-                @error="handleUploadError"
-              />
-              <VoiceButton
-                :tooltip="t('chat.voiceInput')"
-                tooltip-placement="top"
-                :speech-config="speechConfig"
-                :disabled="inputBlocked"
-                @speech-error="handleSpeechError"
-              />
-            </div>
+            <AgentSenderActions
+              :context-percent="contextUsageRingPercent"
+              :context-level="contextUsageRingLevel"
+              :context-loading="contextUsagePreviewLoading"
+              :context-disabled="!store.conversationId"
+              :input-blocked="inputBlocked"
+              :speech-config="speechConfig"
+              :upload-accept="UPLOAD_ACCEPT"
+              :upload-max-size="UPLOAD_MAX_SIZE_MB"
+              :upload-max-count="UPLOAD_MAX_COUNT"
+              @context-click="openContextUsageDialog"
+              @file-select="handleFileSelect"
+              @upload-error="handleUploadError"
+              @speech-error="handleSpeechError"
+            />
           </template>
         </TrSender>
       </div>
@@ -1676,29 +1675,35 @@ article.msg-wrap:focus-within .msg-bar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: auto;
+  min-width: var(--ghost-btn-height);
+  height: var(--ghost-btn-height);
+  padding: var(--ghost-btn-padding);
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-h);
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
-.msg-icon-btn:hover { background: var(--bg-muted); color: var(--text-h); }
+.msg-icon-btn:hover { background: transparent; opacity: var(--ghost-hover-opacity); }
 .msg-act-btn {
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  font-size: 11.5px;
-  padding: 2px 7px;
-  border: var(--border-width) solid var(--border);
-  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  height: var(--ghost-btn-height);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-h);
   cursor: pointer;
   white-space: nowrap;
+  transition: opacity 0.15s ease;
 }
-.msg-act-btn:hover { background: var(--bg-muted); color: var(--text-h); }
+.msg-act-btn:hover { background: transparent; opacity: var(--ghost-hover-opacity); }
 .msg-act-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
 .msg-act-primary:hover { opacity: 0.85; }
 
@@ -2051,22 +2056,6 @@ html[data-theme='dark'] .agent-sender-wrap {
   align-items: flex-start;
 }
 
-.agent-sender-actions {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 4px;
-}
-
-.agent-sender-actions :deep(.tr-action-button) {
-  color: var(--text);
-}
-
-.agent-sender-actions :deep(.tr-action-button:hover:not(:disabled)) {
-  color: var(--text-h);
-  background: var(--tr-sender-button-hover-bg);
-}
-
 .agent-attachments {
   padding: 8px 10px 0;
 }
@@ -2109,10 +2098,10 @@ html[data-theme='dark'] .copy-toast {
   width: 320px;
   max-width: calc(100% - 24px);
   z-index: 200;
-  background: var(--bg-elevated);
+  background: var(--panel-bg);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-md);
+  box-shadow: var(--dropdown-shadow);
   overflow: hidden;
   max-height: 300px;
   display: flex;
@@ -2120,29 +2109,29 @@ html[data-theme='dark'] .copy-toast {
 }
 .mention-tabs {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   padding: 6px 6px 0;
   border-bottom: var(--border-width) solid var(--border);
   flex-shrink: 0;
 }
 .mention-tab {
   flex: 1;
-  height: 28px;
+  height: var(--ghost-btn-height);
   border: 0;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--text-h);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 0.15s ease;
 }
 .mention-tab:hover {
-  color: var(--text-h);
-  background: var(--bg-muted);
+  opacity: var(--ghost-hover-opacity);
 }
 .mention-tab.active {
   color: var(--primary);
-  background: var(--primary-soft);
+  opacity: 1;
 }
 .mention-empty {
   margin: 0;
@@ -2172,23 +2161,26 @@ html[data-theme='dark'] .copy-toast {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
+  padding: 4px 8px;
   border-bottom: var(--border-width) solid var(--border);
-  background: var(--bg-muted);
+  background: transparent;
 }
 .mention-back-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 11.5px;
-  color: var(--text-secondary);
+  gap: 4px;
+  height: var(--ghost-btn-height);
+  padding: 0 6px;
   border: 0;
+  border-radius: var(--ghost-btn-radius);
   background: transparent;
+  color: var(--text-h);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
-  padding: 2px 4px;
-  border-radius: 4px;
+  transition: opacity 0.15s ease;
 }
-.mention-back-btn:hover { background: var(--border); color: var(--text-h); }
+.mention-back-btn:hover { background: transparent; opacity: var(--ghost-hover-opacity); }
 .mention-dir-label {
   flex: 1;
   min-width: 0;
@@ -2202,46 +2194,34 @@ html[data-theme='dark'] .copy-toast {
 .mention-list {
   list-style: none;
   margin: 0;
-  padding: 4px;
+  padding: 6px;
   overflow-y: auto;
   flex: 1;
 }
 .mention-item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  color: var(--text);
+  color: var(--text-h);
   font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.12s ease;
 }
 .mention-skill-item {
   align-items: flex-start;
 }
-.mention-item.active { background: var(--primary-soft); color: var(--primary); }
-.mention-item.pinned { border-left: 2px solid var(--primary); padding-left: 8px; }
-.mention-item:hover { background: var(--bg-muted); }
-.mention-item.active:hover { background: var(--primary-soft); }
+.mention-item.active { background: var(--code-bg); color: var(--primary); }
+.mention-item.pinned { border-left: 2px solid var(--primary); padding-left: 6px; }
+.mention-item:hover { background: var(--code-bg); }
+.mention-item.active:hover { background: var(--code-bg); }
 .mention-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mention-arrow {
   flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
   color: var(--text-secondary);
-  font-size: 16px;
-  cursor: pointer;
-}
-.mention-arrow:hover {
-  background: var(--border);
-  color: var(--text);
 }
 .mention-fade-enter-active, .mention-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
 .mention-fade-enter-from, .mention-fade-leave-to { opacity: 0; transform: translateY(4px); }

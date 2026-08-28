@@ -107,7 +107,7 @@ async function save() {
           <p class="page-lead">{{ t('settings.lead') }}</p>
         </div>
         <button type="button" class="btn btn-primary" :class="{ saved }" @click="save">
-          <AppIcon :name="saved ? 'check' : 'save'" :size="14" />
+          <AppIcon :name="saved ? 'check' : 'save'" :size="16" :stroke-width="1.75" />
           {{ saved ? t('common.saved') : t('settings.save') }}
         </button>
       </header>
@@ -119,7 +119,7 @@ async function save() {
             :class="{ active: activeGroup === 'appearance' }"
             @click="jump('appearance')"
           >
-            <AppIcon name="sliders" :size="14" />
+            <AppIcon name="sliders" :size="16" :stroke-width="1.75" />
             {{ t('settings.groups.appearance') }}
           </button>
           <button
@@ -129,7 +129,7 @@ async function save() {
             :class="{ active: activeGroup === group.id }"
             @click="jump(group.id)"
           >
-            <AppIcon :name="group.icon" :size="14" />
+            <AppIcon :name="group.icon" :size="16" :stroke-width="1.75" />
             {{ group.title }}
           </button>
         </nav>
@@ -232,9 +232,6 @@ async function save() {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
-  height: 30px;
-  padding: 0 12px;
-  font-size: 12px;
 }
 .page-head .btn.saved {
   background: color-mix(in srgb, var(--primary) 80%, #059669);

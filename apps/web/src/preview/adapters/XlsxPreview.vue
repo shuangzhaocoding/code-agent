@@ -74,7 +74,7 @@ watch(
           v-for="name in sheetNames"
           :key="name"
           type="button"
-          class="sheet-btn"
+          class="chip sheet-btn"
           :class="{ on: name === activeSheet }"
           @click="onSelectSheet(name)"
         >
@@ -113,19 +113,25 @@ watch(
   flex-shrink: 0;
 }
 .sheet-btn {
-  border: 1px solid var(--border);
-  background: var(--bg);
-  color: var(--text);
-  border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--ghost-btn-radius);
+  padding: 0 8px;
+  height: var(--ghost-btn-height);
+  font-size: var(--ghost-btn-font-size);
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
+  transition: opacity 0.15s ease, color 0.12s ease;
+}
+.sheet-btn:hover:not(.on) {
+  opacity: var(--ghost-hover-opacity);
+  color: var(--text-h);
 }
 .sheet-btn.on {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #fff;
+  color: var(--primary);
+  opacity: 1;
 }
 .table-wrap {
   flex: 1;

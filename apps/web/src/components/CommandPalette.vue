@@ -287,19 +287,27 @@ onUnmounted(() => {
 .palette-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  padding: 8px 10px;
+  min-height: 34px;
+  padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-h);
+  font-size: 13px;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.palette-item:hover,
+.palette-item.active {
+  background: var(--code-bg);
+  color: var(--text-h);
 }
 .palette-item.active {
-  background: var(--primary-soft);
-  color: var(--primary);
+  font-weight: 500;
 }
 .palette-copy {
   min-width: 0;
@@ -319,7 +327,7 @@ onUnmounted(() => {
   font-weight: 400;
 }
 .palette-item.active .palette-copy small {
-  color: color-mix(in srgb, var(--primary) 70%, var(--text-muted));
+  color: var(--text-muted);
 }
 .palette-empty {
   margin: 24px 8px;
