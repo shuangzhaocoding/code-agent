@@ -13,7 +13,7 @@ from code_agent.config import settings
 from code_agent.plugins.base import registry
 from code_agent.tools.context import get_run_id, get_workspace
 from code_agent.tools.paths import read_text_file, resolve_in_workspace, walk_files
-from code_agent.policy.engine import command_needs_confirm, is_command_blocked, is_protected
+from code_agent.policy.engine import is_command_blocked, is_protected
 from code_agent.tools.approval import request_approval
 
 
@@ -142,6 +142,8 @@ async def write_file(path: str, content: str) -> str:
     """Create or overwrite a UTF-8 text file. Path may be workspace-relative or absolute (incl. ~)."""
     if is_protected(path):
         return f"ERROR: protected file, cannot write: {path}"
+    if not await request_approval("write_file", f"写入 {path}", {"path": path}, kind="write"):
+        return "ERROR: user denied this operation"
     file_path = resolve_in_workspace(_root(), path)
     def _write() -> tuple[str, str, str]:
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -184,6 +186,13 @@ async def search_replace(path: str, old_string: str, new_string: str) -> str:
     """Replace the first exact occurrence of old_string with new_string. Path may be relative or absolute."""
     if is_protected(path):
         return f"ERROR: protected file: {path}"
+    if not await request_approval(
+        "search_replace",
+        f"编辑 {path}",
+        {"path": path},
+        kind="write",
+    ):
+        return "ERROR: user denied this operation"
     file_path = resolve_in_workspace(_root(), path)
     if not file_path.is_file():
         return f"ERROR: file not found: {path}"
@@ -252,15 +261,13 @@ async def run_command(command: str, cwd: str = ".") -> str:
     """Run a shell command. cwd may be workspace-relative or absolute (incl. ~)."""
     if is_command_blocked(command):
         return f"ERROR: command blocked by policy: {command}"
-    if command_needs_confirm(command):
-        ok = await request_approval(
-            "run_command",
-            f"运行命令：{command}",
-            {"command": command, "cwd": cwd},
-            kind="command",
-        )
-        if not ok:
-            return "ERROR: user denied this operation"
+    if not await request_approval(
+        "run_command",
+        f"运行命令：{command}",
+        {"command": command, "cwd": cwd},
+        kind="command",
+    ):
+        return "ERROR: user denied this operation"
     work = resolve_in_workspace(_root(), cwd)
     if not work.is_dir():
         work = resolve_in_workspace(_root(), ".")

@@ -26,6 +26,8 @@ uploads:
 
 agent:
   max_steps: 80
+  # Max LangGraph runs executing at once (others stay queued until a slot frees).
+  max_concurrent_runs: 2
   tool_timeout_sec: 90
   run_timeout_sec: 900
   max_tool_output_chars: 12000
@@ -34,6 +36,12 @@ agent:
   sliding_window_size: 12
   compress_threshold_tokens: 90000
   use_legacy_react: false
+  checkpoint_cleanup:
+    enabled: true
+    # delete: drop thread checkpoints when a run ends (UI history stays in Message DB)
+    on_run_end: delete
+    orphan_on_startup: true
+    vacuum_after_bulk: true
   memory:
     enabled: true
     max_inject: 10
@@ -85,6 +93,23 @@ workspace:
 policy:
   auto_run: sandbox
   deny_network: false
+  # Sandbox auto_run: commands matching these globs run without approval.
+  command_whitelist:
+    - pwd
+    - ls
+    - ls *
+    - cat *
+    - npm run *
+    - npm test
+    - npm test *
+    - npx *
+    - python *
+    - python3 *
+    - pytest *
+    - make *
+    - git status*
+    - git diff*
+    - git log*
   command_blacklist:
     - rm -rf /
     - sudo
@@ -117,3 +142,28 @@ ui:
   theme: dark
   font_size: 13
   send_on_enter: true
+
+# Phase 2 — multi-process runtime (split = default)
+runtime:
+  profile: split  # monolith | split
+  agent_worker:
+    mode: auto  # auto | inline | external — external when profile=split
+    host: 127.0.0.1
+    port: 4064
+  terminal:
+    mode: standalone  # inline | standalone
+    host: 127.0.0.1
+    port: 4062
+  preview:
+    mode: standalone  # inline | standalone
+    host: 127.0.0.1
+    port: 4063
+
+# Phase 3 — storage backends (user configurable)
+storage:
+  database: sqlite  # sqlite | postgres
+  postgres_url: ""  # postgres://user:pass@127.0.0.1:5432/code_agent
+  events: sqlite  # sqlite (DB poll) | redis (pub/sub, lower latency in split mode)
+  redis_url: ""  # 例：redis://127.0.0.1:6379/0
+  checkpoint: sqlite  # sqlite | postgres
+  checkpoint_postgres_url: ""  # defaults to postgres_url when empty

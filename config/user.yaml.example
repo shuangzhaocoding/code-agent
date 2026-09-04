@@ -1,0 +1,23 @@
+# Code Agent 用户配置 (~/.code-agent/config.yaml)
+# 首次 `make up` 或服务启动时自动生成。修改后需重启服务（make down && make up）。
+#
+# 优先级：config/default.yaml → 本文件 → 工作区 .code-agent/config.yaml → 设置页
+
+runtime:
+  profile: split  # monolith | split
+  terminal:
+    mode: standalone  # inline | standalone
+    host: 127.0.0.1
+    port: 4062
+  preview:
+    mode: standalone  # inline | standalone
+    host: 127.0.0.1
+    port: 4063
+
+storage:
+  database: sqlite  # sqlite | postgres
+  events: sqlite  # sqlite | redis（split 模式建议 redis）
+  checkpoint: sqlite  # sqlite | postgres
+  postgres_url: ""
+  redis_url: ""  # 例：redis://127.0.0.1:6379/0
+  checkpoint_postgres_url: ""

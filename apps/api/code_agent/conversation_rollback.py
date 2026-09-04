@@ -78,6 +78,11 @@ async def rollback_conversation_to_message(conversation_id: str, message_id: str
     conv.active_run_id = None
     await conv.save()
 
+    from code_agent.agent.checkpoint_cleanup import schedule_cleanup_after_run
+    from code_agent.agent.checkpointer import graph_thread_id
+
+    schedule_cleanup_after_run(graph_thread_id(str(ws.id), conversation_id))
+
     return {
         "ok": True,
         "mode": mode,

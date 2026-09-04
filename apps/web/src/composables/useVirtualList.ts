@@ -165,7 +165,7 @@ export function useVirtualList<T extends { id: string }>(
   )
 
   watch(scrollElement, (el, prev) => {
-    prev?.removeEventListener('scroll', onScroll, { passive: true })
+    prev?.removeEventListener('scroll', onScroll)
     el?.addEventListener('scroll', onScroll, { passive: true })
     if (el) {
       viewportHeight.value = el.clientHeight

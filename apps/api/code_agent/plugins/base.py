@@ -219,6 +219,30 @@ class PluginRegistry:
                 spec.enabled = enabled
         return info
 
+    def unload_by_origin(self, origin: str) -> list[str]:
+        """Remove plugins, tools, providers, and presets contributed by *origin*."""
+        removed_ids = [pid for pid, info in list(self.plugins.items()) if info.origin == origin]
+        if not removed_ids:
+            return []
+
+        removed_set = set(removed_ids)
+        for pid in removed_ids:
+            self.plugins.pop(pid, None)
+
+        for name, spec in list(self.tools.items()):
+            if spec.plugin_id in removed_set:
+                del self.tools[name]
+
+        for kind, spec in list(self.providers.items()):
+            if spec.plugin_id in removed_set:
+                del self.providers[kind]
+
+        for kind, preset in list(self.presets.items()):
+            if str(preset.get("plugin_id") or "") in removed_set:
+                del self.presets[kind]
+
+        return removed_ids
+
     def plugin_public(self, info: PluginInfo) -> dict[str, Any]:
         from code_agent.plugins.meta import plugin_meta_public
 

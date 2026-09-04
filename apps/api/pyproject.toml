@@ -23,6 +23,16 @@ dependencies = [
   "websockets>=13.0",
 ]
 
+[project.optional-dependencies]
+postgres = ["asyncpg>=0.29.0"]
+redis = ["redis>=5.0.0"]
+checkpoint-postgres = ["langgraph-checkpoint-postgres>=2.0.0", "psycopg[binary]>=3.1.0"]
+split = ["asyncpg>=0.29.0", "redis>=5.0.0"]
+all = ["asyncpg>=0.29.0", "redis>=5.0.0", "langgraph-checkpoint-postgres>=2.0.0", "psycopg[binary]>=3.1.0"]
+
+[project.scripts]
+code-agent = "code_agent.cli:main"
+
 [build-system]
 requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"

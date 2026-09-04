@@ -121,9 +121,21 @@
       "terminal": "Terminal",
       "llm": "Models",
       "ui": "Interface",
-      "appearance": "Appearance"
+      "appearance": "Appearance",
+      "storage": "Storage"
     },
     "languageLead": "Switch the UI language. Takes effect immediately.",
+    "storage": {
+      "restartHint": "Storage changes are written to ~/.code-agent/config.yaml and take effect after restarting the server (make down && make up).",
+      "activeDatabase": "Active database",
+      "activeEvents": "Active events",
+      "activeCheckpoint": "Active checkpoint"
+    },
+    "placeholders": {
+      "storage.postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent",
+      "storage.redis_url": "redis://127.0.0.1:6379/0",
+      "storage.checkpoint_postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints"
+    },
     "fields": {
       "agent": {
         "max_steps": "Agent max steps",
@@ -145,6 +157,14 @@
         "theme": "Theme",
         "font_size": "UI font size",
         "send_on_enter": "Enter to send"
+      },
+      "storage": {
+        "database": "Main database",
+        "events": "Event bus",
+        "checkpoint": "Checkpoint storage",
+        "postgres_url": "PostgreSQL URL",
+        "redis_url": "Redis URL",
+        "checkpoint_postgres_url": "Checkpoint PostgreSQL URL (optional)"
       }
     },
     "enums": {
@@ -166,6 +186,20 @@
         "theme": {
           "dark": "Dark",
           "light": "Light"
+        }
+      },
+      "storage": {
+        "database": {
+          "sqlite": "SQLite (local)",
+          "postgres": "PostgreSQL"
+        },
+        "events": {
+          "sqlite": "SQLite poll",
+          "redis": "Redis pub/sub"
+        },
+        "checkpoint": {
+          "sqlite": "SQLite",
+          "postgres": "PostgreSQL"
         }
       }
     }

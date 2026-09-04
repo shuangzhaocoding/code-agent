@@ -105,20 +105,30 @@ async def add_workspace(body: WorkspaceIn):
     existing = await _find_workspace_by_root(str(root))
     if existing:
         await existing.save()
-        return _ws(existing)
+        plugins = await _activate_workspace_plugins(existing)
+        return {**_ws(existing), "plugins": plugins}
     row = await Workspace.create(
         name=body.name or root.name,
         root_path=str(root),
         ignore_globs=body.ignore_globs,
     )
-    return _ws(row)
+    plugins = await _activate_workspace_plugins(row)
+    return {**_ws(row), "plugins": plugins}
 
 
 @router.post("/{workspace_id}/open")
 async def open_workspace(workspace_id: str):
     row = await _get_ws(workspace_id)
     await row.save()
-    return _ws(row)
+    plugins = await _activate_workspace_plugins(row)
+    return {**_ws(row), "plugins": plugins}
+
+
+@router.post("/{workspace_id}/plugins/reload")
+async def reload_workspace_plugins(workspace_id: str):
+    row = await _get_ws(workspace_id)
+    plugins = await _activate_workspace_plugins(row)
+    return {"ok": True, **plugins}
 
 
 @router.delete("/{workspace_id}")
@@ -126,8 +136,14 @@ async def remove_workspace(workspace_id: str):
     row = await Workspace.get_or_none(id=workspace_id)
     if not row:
         raise HTTPException(status_code=404, detail={"code": "workspace.not_found"})
+    from code_agent.plugins.loader import active_workspace_root, unload_workspace_plugins
+
+    normalized = _normalize_root_path(row.root_path)
+    removed_plugins: list[str] = []
+    if active_workspace_root() == normalized:
+        removed_plugins = unload_workspace_plugins()
     await row.delete()
-    return {"ok": True}
+    return {"ok": True, "plugins_removed": removed_plugins}
 
 
 @router.get("/{workspace_id}/tree")
@@ -339,6 +355,13 @@ def _browse_dir(p: Path) -> list[dict]:
         if len(items) >= 400:
             break
     return items
+
+
+async def _activate_workspace_plugins(row: Workspace) -> list[dict]:
+    from code_agent.plugins.loader import activate_workspace_plugins
+
+    result = await activate_workspace_plugins(row.root_path)
+    return result.get("plugins") or []
 
 
 def _ws(row: Workspace) -> dict:

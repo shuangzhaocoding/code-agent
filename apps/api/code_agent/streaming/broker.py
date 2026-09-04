@@ -7,6 +7,7 @@ from typing import Any, AsyncIterator
 from uuid import uuid4
 
 from code_agent.db.models import Conversation, Message, Run, RunEvent
+from code_agent.storage.events import events_use_redis, publish_run_event
 
 
 def _utcnow() -> str:
@@ -41,6 +42,7 @@ class EventBroker:
                 self._assistant_cache.pop(rid, None)
                 self._run_seq.pop(rid, None)
         self._broadcast(rid, envelope)
+        await publish_run_event(rid, envelope)
         return envelope
 
     async def _alloc_seq(self, run_id: str, run: Run) -> int:
@@ -76,6 +78,7 @@ class EventBroker:
             self._schedule_run_flush(run_id)
 
         self._broadcast(run_id, envelope)
+        await publish_run_event(run_id, envelope)
         return envelope
 
     def _schedule_run_flush(self, run_id: str) -> None:
@@ -287,33 +290,82 @@ class EventBroker:
             for r in rows
         ]
 
+    async def _poll_new_events(self, run_id: str, seen: set[str]) -> list[dict[str, Any]]:
+        async with self._lock(str(run_id)):
+            await self._flush_run_buffers(str(run_id))
+        last_seq = 0
+        if seen:
+            row = await RunEvent.filter(run_id=run_id, event_id__in=list(seen)).order_by("-seq").first()
+            if row:
+                last_seq = row.seq
+        rows = await RunEvent.filter(run_id=run_id, seq__gt=last_seq).order_by("seq")
+        out = []
+        for r in rows:
+            if r.event_id in seen:
+                continue
+            out.append(
+                {
+                    "v": 1,
+                    "event_id": r.event_id,
+                    "run_id": str(run_id),
+                    "ts": r.created_at.isoformat() if r.created_at else _utcnow(),
+                    "type": r.type,
+                    "seq": r.seq,
+                    "payload": r.payload,
+                }
+            )
+        return out
+
+    async def _run_is_terminal(self, run_id: str) -> bool:
+        run = await Run.get_or_none(id=run_id)
+        return run is not None and run.status in {"completed", "failed", "cancelled"}
+
     async def tail(self, run_id: str, last_event_id: str | None) -> AsyncIterator[dict[str, Any]]:
+        from code_agent.runtime.profile import agent_execution_external
+
         queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
         self._subs[str(run_id)].append(queue)
         seen: set[str] = set()
+        remote = agent_execution_external() or events_use_redis()
+        redis_task: asyncio.Task | None = None
+
+        if remote and events_use_redis():
+            from code_agent.storage.events import subscribe_run_events
+
+            async def _redis_pump() -> None:
+                try:
+                    async for event in subscribe_run_events(run_id):
+                        await queue.put(event)
+                except asyncio.CancelledError:
+                    return
+
+            redis_task = asyncio.create_task(_redis_pump())
+
         try:
             for event in await self.replay(run_id, last_event_id):
                 seen.add(event["event_id"])
                 yield event
             while True:
                 try:
-                    event = queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
+                    event = await asyncio.wait_for(queue.get(), timeout=0.35)
+                except asyncio.TimeoutError:
+                    if remote:
+                        for item in await self._poll_new_events(run_id, seen):
+                            seen.add(item["event_id"])
+                            yield item
+                        if await self._run_is_terminal(run_id):
+                            break
+                    continue
                 if event is None:
                     return
                 if event["event_id"] not in seen:
                     seen.add(event["event_id"])
                     yield event
-            while True:
-                event = await queue.get()
-                if event is None:
+                if event.get("type") in {"run.completed", "run.failed", "run.cancelled"}:
                     return
-                if event["event_id"] in seen:
-                    continue
-                seen.add(event["event_id"])
-                yield event
         finally:
+            if redis_task is not None:
+                redis_task.cancel()
             subs = self._subs.get(str(run_id), [])
             if queue in subs:
                 subs.remove(queue)

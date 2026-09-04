@@ -9,7 +9,9 @@ from code_agent.db.models import Conversation, Message, Run, Setting, Workspace
 from code_agent.llm.hub import resolve_chat_model
 from code_agent.llm.thinking import normalize_thinking_level
 from code_agent.protocol.events import new_id
+from code_agent.runtime.profile import agent_execution_external
 from code_agent.streaming.broker import broker
+from code_agent.streaming.run_capacity import RunCapacity
 from code_agent.tools.context import set_tool_context
 from code_agent.tools.host import register_builtin_tools
 
@@ -78,9 +80,10 @@ async def start_run(
     conv.mode = mode
     conv.model_id = model_id
     await conv.save()
-    task = asyncio.create_task(_execute(str(run.id)))
-    _tasks.add(task)
-    task.add_done_callback(_tasks.discard)
+    if not agent_execution_external():
+        task = asyncio.create_task(_execute(str(run.id)))
+        _tasks.add(task)
+        task.add_done_callback(_tasks.discard)
     return run
 
 
@@ -102,6 +105,7 @@ async def cancel_run(run_id: str) -> None:
 
 async def _execute(run_id: str) -> None:
     _cancel[run_id] = asyncio.Event()
+    watch = asyncio.create_task(_watch_cancel(run_id, _cancel[run_id]))
     run = await Run.get(id=run_id)
     recursion_limit = int(settings.get("agent.max_steps") or 80)
     stored_limit = await Setting.get_or_none(key="agent.max_steps")
@@ -110,6 +114,26 @@ async def _execute(run_id: str) -> None:
             recursion_limit = int(stored_limit.value_json)
         except (TypeError, ValueError):
             pass
+    async with RunCapacity():
+        RunCapacity.mark_started(run_id)
+        try:
+            await _execute_run(run_id, run, recursion_limit)
+        finally:
+            RunCapacity.mark_finished(run_id)
+            watch.cancel()
+            broker.close_run(run_id)
+            _cancel.pop(run_id, None)
+            try:
+                finished = await Run.get_or_none(id=run_id)
+                if finished and finished.graph_thread_id:
+                    from code_agent.agent.checkpoint_cleanup import schedule_cleanup_after_run
+
+                    schedule_cleanup_after_run(finished.graph_thread_id)
+            except Exception:
+                pass
+
+
+async def _execute_run(run_id: str, run: Run, recursion_limit: int) -> None:
     try:
         run.status = "running"
         await run.save(update_fields=["status"])
@@ -161,9 +185,6 @@ async def _execute(run_id: str) -> None:
             await _fail(run_id, code, messages.get(code, code))
             return
         await _fail(run_id, "run.error", str(exc))
-    finally:
-        broker.close_run(run_id)
-        _cancel.pop(run_id, None)
 
 
 async def _execute_legacy(run_id: str, recursion_limit: int) -> None:
@@ -227,6 +248,15 @@ async def _execute_legacy(run_id: str, recursion_limit: int) -> None:
         thinking_level=thinking_level,
         cancel_event=_cancel[run_id],
     )
+
+
+async def _watch_cancel(run_id: str, event: asyncio.Event) -> None:
+    while not event.is_set():
+        row = await Run.get_or_none(id=run_id)
+        if row and row.status == "cancelled":
+            event.set()
+            return
+        await asyncio.sleep(0.4)
 
 
 async def _fail(run_id: str, code: str, message: str) -> None:

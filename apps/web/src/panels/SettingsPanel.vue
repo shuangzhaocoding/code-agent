@@ -14,6 +14,8 @@ type SchemaSpec = {
   minimum?: number
   maximum?: number
   default?: unknown
+  requires_restart?: boolean
+  example?: string
 }
 
 const { t, te } = useI18n()
@@ -32,6 +34,7 @@ const groups = computed(() => {
     terminal: { titleKey: 'settings.groups.terminal', icon: 'terminal' },
     llm: { titleKey: 'settings.groups.llm', icon: 'chip' },
     ui: { titleKey: 'settings.groups.ui', icon: 'sliders' },
+    storage: { titleKey: 'settings.groups.storage', icon: 'gear' },
   }
   for (const key of Object.keys(schema.value)) {
     const prefix = key.split('.')[0] || 'other'
@@ -54,13 +57,13 @@ watch(groups, (list) => {
 
 onMounted(async () => {
   await store.loadSettings()
-  Object.assign(local, store.settings?.values || {})
+  applySettingsValues(store.settings?.values || {})
 })
 
 watch(
   () => store.settings,
   (s) => {
-    if (s) Object.assign(local, s.values)
+    if (s) applySettingsValues(s.values)
   },
 )
 
@@ -90,6 +93,37 @@ function enumOptions(key: string) {
     label: enumLabel(key, value),
   }))
 }
+
+function fieldPlaceholder(key: string) {
+  const i18nKey = `settings.placeholders.${key}`
+  if (te(i18nKey)) return t(i18nKey)
+  const example = specFor(key).example
+  return typeof example === 'string' ? example : ''
+}
+
+const STORAGE_URL_KEYS = new Set([
+  'storage.postgres_url',
+  'storage.redis_url',
+  'storage.checkpoint_postgres_url',
+])
+
+function valueForDisplay(key: string, value: unknown) {
+  if (!STORAGE_URL_KEYS.has(key)) return value
+  if (typeof value !== 'string' || !value.trim()) return ''
+  const ph = fieldPlaceholder(key)
+  if (ph && value.trim() === ph) return ''
+  return value
+}
+
+function applySettingsValues(values: Record<string, unknown>) {
+  const next = { ...values }
+  for (const key of STORAGE_URL_KEYS) {
+    if (key in next) next[key] = valueForDisplay(key, next[key])
+  }
+  Object.assign(local, next)
+}
+
+const storageStatus = computed(() => (store.settings as { storage?: Record<string, unknown> } | null)?.storage || null)
 
 async function save() {
   await store.saveSettings({ ...local })
@@ -191,8 +225,16 @@ async function save() {
               step="any"
             />
 
-            <input v-else :id="key" v-model="local[key]" class="field-control setting-input" />
+            <input v-else-if="specFor(key).format === 'password'" :id="key" v-model="local[key]" class="field-control setting-input" type="password" autocomplete="off" :placeholder="fieldPlaceholder(key)" />
+
+            <input v-else :id="key" v-model="local[key]" class="field-control setting-input" :placeholder="fieldPlaceholder(key)" />
           </div>
+          <p v-if="group.id === 'storage'" class="storage-note">{{ t('settings.storage.restartHint') }}</p>
+          <dl v-if="group.id === 'storage' && storageStatus" class="storage-status">
+            <div><dt>{{ t('settings.storage.activeDatabase') }}</dt><dd>{{ storageStatus.database }}</dd></div>
+            <div><dt>{{ t('settings.storage.activeEvents') }}</dt><dd>{{ storageStatus.events }}</dd></div>
+            <div><dt>{{ t('settings.storage.activeCheckpoint') }}</dt><dd>{{ storageStatus.checkpoint }}</dd></div>
+          </dl>
         </section>
         </div>
       </div>
@@ -396,4 +438,37 @@ async function save() {
 .toggle input:checked + .toggle-track::after {
   transform: translateX(18px);
   background: var(--primary);
+}
+.storage-note {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary) 8%, var(--panel-bg));
+  border: var(--border-width) solid color-mix(in srgb, var(--primary) 20%, var(--border));
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.storage-status {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--code-bg);
+  font-size: 11px;
+}
+.storage-status div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.storage-status dt {
+  margin: 0;
+  color: var(--text-muted);
+}
+.storage-status dd {
+  margin: 0;
+  font-family: var(--mono);
+  color: var(--text-h);
 }</style>

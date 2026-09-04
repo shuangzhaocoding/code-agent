@@ -117,6 +117,9 @@ async def delete_conversation(conversation_id: str):
     row = await Conversation.get_or_none(id=conversation_id)
     if not row:
         raise HTTPException(status_code=404, detail={"code": "conversation.not_found"})
+    from code_agent.agent.checkpoint_cleanup import delete_conversation_checkpoint
+
+    await delete_conversation_checkpoint(str(row.workspace_id), conversation_id)
     runs = await Run.filter(conversation_id=conversation_id)
     run_ids = [r.id for r in runs]
     if run_ids:

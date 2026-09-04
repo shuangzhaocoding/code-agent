@@ -121,9 +121,21 @@
       "terminal": "终端",
       "llm": "模型",
       "ui": "界面",
-      "appearance": "外观"
+      "appearance": "外观",
+      "storage": "存储"
     },
     "languageLead": "切换界面语言，立即生效。",
+    "storage": {
+      "restartHint": "存储配置会写入 ~/.code-agent/config.yaml，修改后需重启服务（make down && make up）后生效。",
+      "activeDatabase": "当前数据库",
+      "activeEvents": "当前事件总线",
+      "activeCheckpoint": "当前 Checkpoint"
+    },
+    "placeholders": {
+      "storage.postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent",
+      "storage.redis_url": "redis://127.0.0.1:6379/0",
+      "storage.checkpoint_postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints"
+    },
     "fields": {
       "agent": {
         "max_steps": "Agent 最大步数",
@@ -145,6 +157,14 @@
         "theme": "主题",
         "font_size": "界面字号",
         "send_on_enter": "Enter 发送"
+      },
+      "storage": {
+        "database": "主数据库",
+        "events": "事件总线",
+        "checkpoint": "Checkpoint 存储",
+        "postgres_url": "PostgreSQL 连接 URL",
+        "redis_url": "Redis 连接 URL",
+        "checkpoint_postgres_url": "Checkpoint PostgreSQL URL（可选）"
       }
     },
     "enums": {
@@ -166,6 +186,20 @@
         "theme": {
           "dark": "深色",
           "light": "浅色"
+        }
+      },
+      "storage": {
+        "database": {
+          "sqlite": "SQLite（本地）",
+          "postgres": "PostgreSQL"
+        },
+        "events": {
+          "sqlite": "SQLite 轮询",
+          "redis": "Redis pub/sub"
+        },
+        "checkpoint": {
+          "sqlite": "SQLite",
+          "postgres": "PostgreSQL"
         }
       }
     }

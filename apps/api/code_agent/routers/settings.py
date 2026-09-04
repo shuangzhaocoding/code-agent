@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from code_agent.config import SETTINGS_SCHEMA, settings
+from code_agent.config import SETTINGS_SCHEMA, STORAGE_SETTING_KEYS, merge_user_config, settings
 from code_agent.db.models import Setting
 from code_agent.plugins.base import registry
 
@@ -14,15 +14,30 @@ router = APIRouter(prefix="/api", tags=["settings"])
 
 @router.get("/settings")
 async def get_settings():
+    from code_agent.runtime.profile import runtime_public
+    from code_agent.storage.backends import storage_public
+
     stored = {s.key: s.value_json for s in await Setting.all()}
     values = {}
     for key, spec in SETTINGS_SCHEMA["properties"].items():
-        values[key] = stored[key] if key in stored else spec.get("default")
-    return {"schema": SETTINGS_SCHEMA, "values": values, "config": settings.raw()}
+        if key in stored:
+            values[key] = stored[key]
+        elif settings.get(key) is not None:
+            values[key] = settings.get(key)
+        else:
+            values[key] = spec.get("default")
+    return {
+        "schema": SETTINGS_SCHEMA,
+        "values": values,
+        "config": settings.raw(),
+        "runtime": runtime_public(),
+        "storage": storage_public(),
+    }
 
 
 @router.patch("/settings")
 async def patch_settings(body: dict[str, Any]):
+    storage_patch: dict[str, Any] = {}
     for key, value in body.items():
         if key not in SETTINGS_SCHEMA["properties"]:
             continue
@@ -37,6 +52,10 @@ async def patch_settings(body: dict[str, Any]):
         if len(parts) == 2:
             bucket = settings._cfg.setdefault(parts[0], {})
             bucket[parts[1]] = value
+        if key in STORAGE_SETTING_KEYS and len(parts) == 2:
+            storage_patch[parts[1]] = value
+    if storage_patch:
+        merge_user_config("storage", storage_patch)
     return await get_settings()
 
 

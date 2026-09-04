@@ -17,11 +17,17 @@ async def request_approval(
 ) -> bool:
     """Pause a tool until the user approves or denies it in the UI.
 
-    Returns True when not inside an agent run (REST / UI already confirmed).
+    Returns True when not inside an agent run (REST / UI already confirmed),
+    or when ``policy.auto_run`` allows the operation without confirmation.
     """
     try:
         run_id = get_run_id()
     except RuntimeError:
+        return True
+
+    from code_agent.policy.engine import tool_needs_approval
+
+    if not await tool_needs_approval(tool, kind=kind, details=details or {}):
         return True
 
     from code_agent.streaming.broker import broker

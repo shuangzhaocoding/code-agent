@@ -1,0 +1,1935 @@
+import { defineStore } from 'pinia'
+import { computed, ref, watch } from 'vue'
+import { api, subscribeRun, type StreamEnvelope } from '@/api/http'
+import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
+import type { ThinkingLevel } from '@/types/thinking'
+import { loadThinkingLevel } from '@/types/thinking'
+import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
+import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
+import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
+import { t } from '@/i18n'
+
+export type Workspace = {
+  id: string
+  name: string
+  root_path: string
+  last_opened_at?: string | null
+}
+export type Conversation = {
+  id: string
+  title: string
+  mode: string
+  model_id: string | null
+  active_run_id: string | null
+  turn_count?: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export type FsItem = { name: string; path: string; is_dir: boolean }
+export type FileTreeMark = {
+  show: boolean
+  title: string
+  kind: GitMarkKind | ''
+  letter?: string
+}
+export type OpenFile = {
+  path: string
+  kind: OpenFileKind
+  content: string
+  previewUrl?: string
+  mime?: string
+  dirty: boolean
+  readonly?: boolean
+}
+export type FileReview = {
+  path: string
+  action: string
+  before: string
+  after: string
+  status: 'pending' | 'accepted' | 'rejected'
+  blockId: string
+}
+
+export type QueuedSend = {
+  id: string
+  conversationId: string
+  text: string
+  references: { type: string; path: string }[]
+  files: { name: string; url: string; size: number; type: string }[]
+  mode: 'ask' | 'agent' | 'plan'
+  modelId: string | null
+  thinkingLevel: ThinkingLevel
+  skillName?: string | null
+}
+
+const SEND_QUEUE_KEY = 'ca.send_queue'
+
+function loadSendQueue(): QueuedSend[] {
+  try {
+    const raw = localStorage.getItem(SEND_QUEUE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is QueuedSend => {
+      if (!item || typeof item !== 'object') return false
+      const row = item as Partial<QueuedSend>
+      return typeof row.id === 'string' && typeof row.conversationId === 'string' && typeof row.text === 'string'
+    })
+  } catch {
+    return []
+  }
+}
+
+function persistSendQueue(queue: QueuedSend[]) {
+  try {
+    localStorage.setItem(SEND_QUEUE_KEY, JSON.stringify(queue))
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export const useAppStore = defineStore('app', () => {
+  const workspaces = ref<Workspace[]>([])
+  const workspaceId = ref<string | null>(localStorage.getItem('ca.workspace'))
+  const conversations = ref<Conversation[]>([])
+  const conversationId = ref<string | null>(null)
+  const messages = ref<ChatMessage[]>([])
+  const runStatus = ref<string>('idle')
+  const lastEventId = ref<string | null>(null)
+  const applied = ref<Set<string>>(new Set())
+  const mode = ref<'ask' | 'agent' | 'plan'>('agent')
+  const modelId = ref<string | null>(null)
+  const thinkingLevel = ref<ThinkingLevel>(loadThinkingLevel())
+  watch(thinkingLevel, (level) => {
+    localStorage.setItem('ca.thinking_level', level)
+    localStorage.setItem('ca.thinking', level === 'off' ? '0' : '1')
+  })
+  const thinking = computed(() => thinkingLevel.value !== 'off')
+  const sampling = ref<{ temperature: number | null }>({ temperature: null })
+  const fileTree = ref<FsItem[]>([])
+  const childrenMap = ref<Record<string, FsItem[]>>({})
+  const expanded = ref<Set<string>>(new Set())
+  const treePath = ref('')
+  const openFiles = ref<OpenFile[]>([])
+  const suppressEditorPersist = ref(false)
+  const activePath = ref<string | null>(null)
+  const openFile = computed(() => openFiles.value.find((f) => f.path === activePath.value) || null)
+  const editorCopyContext = ref<{
+    path: string
+    text: string
+    startLine: number
+    endLine: number
+  } | null>(null)
+  const fileNotice = ref<string | null>(null)
+  const pendingReveal = ref<{
+    path: string
+    line: number
+    query?: string
+    caseSensitive?: boolean
+  } | null>(null)
+  const searchIntent = ref<{
+    seq: number
+    include?: string | null
+    addExclude?: string
+    clearInclude?: boolean
+  }>({ seq: 0 })
+
+  function openSearch(opts?: { include?: string | null; addExclude?: string; clearInclude?: boolean }) {
+    searchIntent.value = { seq: searchIntent.value.seq + 1, ...opts }
+    window.dispatchEvent(new CustomEvent('ca-open-search'))
+  }
+
+  function openExplorerPanel() {
+    activity.value = 'explorer'
+    window.dispatchEvent(new CustomEvent('ca-open-explorer'))
+  }
+
+  const skillFocusIntent = ref<{ seq: number; name?: string }>({ seq: 0 })
+
+  function openSkill(name?: string) {
+    const skillName = name?.trim()
+    activity.value = 'skills'
+    window.dispatchEvent(new CustomEvent('ca-open-skills'))
+    queueMicrotask(() => {
+      skillFocusIntent.value = {
+        seq: skillFocusIntent.value.seq + 1,
+        ...(skillName ? { name: skillName } : {}),
+      }
+    })
+  }
+
+  const reviews = ref<Record<string, FileReview[]>>({})
+  const activeReviewIndex = ref<Record<string, number>>({})
+  const confirmDialog = ref<{
+    title: string
+    summary: string
+    details?: string
+    confirmLabel?: string
+    cancelLabel?: string
+    danger?: boolean
+  } | null>(null)
+  const activeRunId = ref<string | null>(null)
+  const sendQueue = ref<QueuedSend[]>(loadSendQueue())
+  watch(
+    sendQueue,
+    (queue) => {
+      persistSendQueue(queue)
+    },
+    { deep: true },
+  )
+  let queueFlushing = false
+  let suppressQueueFlush = false
+  let stopStream: (() => void) | null = null
+  let confirmResolver: ((ok: boolean) => void) | null = null
+  /** Coalesce block.delta to one Vue update per animation frame. */
+  let pendingDeltas: StreamEnvelope[] = []
+  let deltaRaf = 0
+  /** Hold non-thinking blocks until the active thinking card finishes. */
+  let heldEvents: StreamEnvelope[] = []
+  const providers = ref<any[]>([])
+  const skills = ref<any[]>([])
+  const conversationSkills = ref<Record<string, string>>({})
+  const settings = ref<{ schema: any; values: Record<string, unknown> } | null>(null)
+  const activity = ref('agent')
+  const pendingModelProbe = ref(false)
+  const gitChangedPaths = ref<Record<string, GitPathMark>>({})
+  const gitRepoOk = ref(false)
+  const sessionTreeMarks = ref<Record<string, string>>({})
+  const ackedTreeMarks = ref<Record<string, true>>({})
+  let treeTimer: ReturnType<typeof setTimeout> | null = null
+  const pendingTreePaths = new Set<string>()
+
+  const workspace = computed(() => workspaces.value.find((w) => w.id === workspaceId.value) || null)
+
+  const recentWorkspaces = computed(() =>
+    [...workspaces.value].sort((a, b) => {
+      const ta = a.last_opened_at ? Date.parse(a.last_opened_at) : 0
+      const tb = b.last_opened_at ? Date.parse(b.last_opened_at) : 0
+      return tb - ta
+    }),
+  )
+
+  async function loadWorkspaces() {
+    workspaces.value = await api('/api/workspaces')
+    if (workspaceId.value && !workspaces.value.some((w) => w.id === workspaceId.value)) {
+      workspaceId.value = workspaces.value[0]?.id ?? null
+    }
+  }
+
+  async function addWorkspace(root_path: string, name?: string) {
+    const ws = await api<Workspace>('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ root_path, name }),
+    })
+    await loadWorkspaces()
+    await selectWorkspace(ws.id)
+  }
+
+  function clearWorkspace() {
+    detachRun()
+    workspaceId.value = null
+    localStorage.removeItem('ca.workspace')
+    conversationId.value = null
+    messages.value = []
+    conversations.value = []
+    openFiles.value = []
+    activePath.value = null
+    reviews.value = {}
+    activeReviewIndex.value = {}
+    confirmDialog.value = null
+    fileTree.value = []
+    childrenMap.value = {}
+    expanded.value = new Set()
+    treePath.value = ''
+    gitChangedPaths.value = {}
+    gitRepoOk.value = false
+    sessionTreeMarks.value = {}
+    ackedTreeMarks.value = {}
+  }
+
+  function conversationStorageKey(wsId: string) {
+    return `ca.conversation.${wsId}`
+  }
+
+  function expandedStorageKey(wsId: string) {
+    return `ca.tree.expanded.${wsId}`
+  }
+
+  function readExpanded(wsId: string) {
+    try {
+      const raw = localStorage.getItem(expandedStorageKey(wsId))
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+    } catch {
+      return []
+    }
+  }
+
+  function persistExpanded() {
+    const ws = workspaceId.value
+    if (!ws) return
+    localStorage.setItem(expandedStorageKey(ws), JSON.stringify([...expanded.value].slice(0, 500)))
+  }
+
+  function setExpanded(next: Set<string>) {
+    expanded.value = next
+    persistExpanded()
+  }
+
+  function rememberConversation(id: string | null) {
+    const ws = workspaceId.value
+    if (!ws) return
+    const key = conversationStorageKey(ws)
+    if (id) localStorage.setItem(key, id)
+    else localStorage.removeItem(key)
+  }
+
+  function editorTabsStorageKey(wsId: string) {
+    return `ca.editor.tabs.${wsId}`
+  }
+
+  function editorActiveStorageKey(wsId: string) {
+    return `ca.editor.active.${wsId}`
+  }
+
+  function readEditorTabs(wsId: string) {
+    try {
+      const raw = localStorage.getItem(editorTabsStorageKey(wsId))
+      const parsed = raw ? JSON.parse(raw) : []
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string' && item.length > 0) : []
+    } catch {
+      return []
+    }
+  }
+
+  function persistEditorState() {
+    if (suppressEditorPersist.value) return
+    const ws = workspaceId.value
+    if (!ws) return
+    const paths = openFiles.value.map((f) => f.path)
+    localStorage.setItem(editorTabsStorageKey(ws), JSON.stringify(paths.slice(0, 40)))
+    if (activePath.value) localStorage.setItem(editorActiveStorageKey(ws), activePath.value)
+    else localStorage.removeItem(editorActiveStorageKey(ws))
+  }
+
+  async function restoreEditorState() {
+    const ws = workspaceId.value
+    if (!ws) return
+    const tabs = readEditorTabs(ws)
+    if (!tabs.length) return
+    const savedActive = localStorage.getItem(editorActiveStorageKey(ws))
+    for (const path of tabs) {
+      if (openFiles.value.some((f) => f.path === path)) continue
+      try {
+        await openPath(path, false)
+      } catch {
+        /* file removed */
+      }
+    }
+    if (savedActive && openFiles.value.some((f) => f.path === savedActive)) {
+      activePath.value = savedActive
+    } else if (openFiles.value.length) {
+      activePath.value = openFiles.value[openFiles.value.length - 1].path
+    }
+    if (activePath.value) window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
+  async function selectWorkspace(id: string) {
+    await api(`/api/workspaces/${id}/open`, { method: 'POST' })
+    workspaceId.value = id
+    localStorage.setItem('ca.workspace', id)
+    suppressEditorPersist.value = true
+    openFiles.value = []
+    activePath.value = null
+    const savedExpanded = readExpanded(id)
+    treePath.value = ''
+    childrenMap.value = {}
+    expanded.value = new Set()
+    gitChangedPaths.value = {}
+    gitRepoOk.value = false
+    sessionTreeMarks.value = {}
+    ackedTreeMarks.value = {}
+    await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
+    await restoreExpandedDirs(savedExpanded)
+    const saved = localStorage.getItem(conversationStorageKey(id))
+    const restore =
+      (saved && conversations.value.some((c) => c.id === saved) && saved) ||
+      conversations.value[0]?.id ||
+      null
+    if (restore) {
+      await openConversation(restore)
+    } else {
+      await newChat()
+    }
+    await restoreEditorState()
+    suppressEditorPersist.value = false
+    persistEditorState()
+    openExplorerPanel()
+    await loadWorkspaces()
+  }
+
+  async function loadTree(path = '') {
+    if (!workspaceId.value) return
+    const ws = workspaceId.value
+    const data = await api<{ items: typeof fileTree.value }>(
+      `/api/workspaces/${workspaceId.value}/tree?path=${encodeURIComponent(path)}`,
+    )
+    if (workspaceId.value !== ws) return
+    const next = childrenMap.value
+    next[path] = data.items
+    childrenMap.value = { ...next }
+    if (!path) fileTree.value = data.items
+    treePath.value = path
+  }
+
+  function isExpanded(path: string) {
+    return expanded.value.has(path)
+  }
+
+  function depthOf(path: string) {
+    return path.split('/').filter(Boolean).length
+  }
+
+  async function restoreExpandedDirs(paths: string[]) {
+    const sorted = [...new Set(paths)].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
+    const kept = new Set<string>()
+    for (const path of sorted) {
+      const parent = parentPath(path)
+      if (parent && !kept.has(parent)) continue
+      try {
+        await loadTree(path)
+      } catch {
+        continue
+      }
+      if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
+    }
+    setExpanded(kept)
+  }
+
+  async function toggleDir(path: string) {
+    const next = new Set(expanded.value)
+    if (next.has(path)) {
+      next.delete(path)
+      setExpanded(next)
+      return
+    }
+    next.add(path)
+    setExpanded(next)
+    await loadTree(path)
+  }
+
+  async function expandDir(path: string) {
+    if (!path) return
+    if (!expanded.value.has(path)) {
+      setExpanded(new Set([...expanded.value, path]))
+    }
+    await loadTree(path)
+  }
+
+  async function refreshTree() {
+    const open = [...expanded.value].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
+    await Promise.all([loadTree(''), loadGitChangedPaths()])
+    const kept = new Set<string>()
+    for (const path of open) {
+      const parent = parentPath(path)
+      if (parent && !kept.has(parent)) continue
+      try {
+        await loadTree(path)
+      } catch {
+        continue
+      }
+      if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
+    }
+    setExpanded(kept)
+  }
+
+  function collapseAllDirs() {
+    setExpanded(new Set())
+  }
+
+  const EXPAND_SKIP_DIRS = new Set([
+    'node_modules',
+    'bower_components',
+    'vendor',
+    'venv',
+    '.venv',
+    'dist',
+    'build',
+    'out',
+    'target',
+    '__pycache__',
+    '.git',
+    '.next',
+    '.nuxt',
+    '.output',
+    '.turbo',
+    '.cache',
+    'coverage',
+    'Pods',
+  ])
+
+  function shouldSkipExpand(item: FsItem) {
+    if (EXPAND_SKIP_DIRS.has(item.name)) return true
+    return item.path.split('/').some((part) => EXPAND_SKIP_DIRS.has(part))
+  }
+
+  async function expandAllDirs() {
+    const next = new Set<string>()
+    let layer = ['']
+    while (layer.length) {
+      await Promise.all(layer.map((dir) => loadTree(dir)))
+      const childDirs: string[] = []
+      for (const dir of layer) {
+        for (const item of childrenOf(dir)) {
+          if (!item.is_dir || shouldSkipExpand(item)) continue
+          next.add(item.path)
+          childDirs.push(item.path)
+        }
+      }
+      layer = childDirs
+    }
+    setExpanded(next)
+  }
+
+  async function loadGitChangedPaths() {
+    if (!workspaceId.value) {
+      gitChangedPaths.value = {}
+      gitRepoOk.value = false
+      return
+    }
+    try {
+      const status = await api<{ ok: boolean; files: { path: string; code: string }[] }>(
+        `/api/workspaces/${workspaceId.value}/git/status`,
+      )
+      if (!status.ok) {
+        gitChangedPaths.value = {}
+        gitRepoOk.value = false
+        return
+      }
+      gitRepoOk.value = true
+      const next: Record<string, GitPathMark> = {}
+      for (const file of status.files) {
+        next[file.path] = { kind: gitMarkKind(file.code), code: file.code.trim() }
+      }
+      const prev = gitChangedPaths.value
+      const same =
+        Object.keys(next).length === Object.keys(prev).length &&
+        Object.keys(next).every((path) => {
+          const mark = prev[path]
+          return mark && mark.kind === next[path].kind && mark.code === next[path].code
+        })
+      if (!same) gitChangedPaths.value = next
+      if (Object.keys(next).length) {
+        const session = { ...sessionTreeMarks.value }
+        for (const path of Object.keys(next)) delete session[path]
+        sessionTreeMarks.value = session
+      }
+    } catch {
+      gitChangedPaths.value = {}
+      gitRepoOk.value = false
+    }
+  }
+
+  async function revealInTree(relPath: string) {
+    if (!relPath) return
+    const parts = relPath.split('/').filter(Boolean)
+    const next = new Set(expanded.value)
+    let acc = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      acc = acc ? `${acc}/${parts[i]}` : parts[i]
+      next.add(acc)
+      await loadTree(acc)
+    }
+    expanded.value = next
+    persistExpanded()
+    await loadTree(parentPath(relPath) || '')
+  }
+
+  function scheduleTreeRefresh(relPath?: string) {
+    if (relPath) pendingTreePaths.add(relPath)
+    // Trailing debounce: wait until writes settle (tool.call often fires before the file exists)
+    if (treeTimer) clearTimeout(treeTimer)
+    treeTimer = setTimeout(async () => {
+      treeTimer = null
+      const paths = [...pendingTreePaths]
+      pendingTreePaths.clear()
+      try {
+        if (!paths.length) {
+          await refreshTree()
+          return
+        }
+        for (const path of paths) {
+          await revealInTree(path)
+          const parent = parentPath(path)
+          if (parent) await loadTree(parent)
+        }
+        await loadTree('')
+        await loadGitChangedPaths()
+      } catch (err) {
+        console.error(err)
+      }
+    }, 350)
+  }
+
+  function childrenOf(path: string) {
+    return childrenMap.value[path] || []
+  }
+
+  function parentPath(path: string) {
+    const i = path.lastIndexOf('/')
+    return i <= 0 ? '' : path.slice(0, i)
+  }
+
+  function joinPath(dir: string, name: string) {
+    return dir ? `${dir.replace(/\/$/, '')}/${name}` : name
+  }
+
+  async function createEntry(relPath: string, kind: 'file' | 'dir') {
+    if (!workspaceId.value) return
+    await api(`/api/workspaces/${workspaceId.value}/entries`, {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, kind }),
+    })
+    await loadTree(parentPath(relPath) || '')
+    if (kind === 'dir') {
+      setExpanded(new Set([...expanded.value, parentPath(relPath) || '', relPath].filter(Boolean)))
+      await loadTree(relPath)
+    } else if (parentPath(relPath)) {
+      setExpanded(new Set([...expanded.value, parentPath(relPath)]))
+    }
+    if (kind === 'file') {
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [relPath]: 'added' }
+      await openPath(relPath, false)
+    }
+    void loadGitChangedPaths()
+  }
+
+  async function renameEntry(from: string, to: string) {
+    if (!workspaceId.value) return
+    await api(`/api/workspaces/${workspaceId.value}/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ path: from, new_path: to }),
+    })
+    if (openFiles.value.some((f) => f.path === from)) {
+      openFiles.value = openFiles.value.map((f) => {
+        if (f.path !== from) return f
+        const next: typeof f = { ...f, path: to }
+        if (isPreviewKind(f.kind) && workspaceId.value) {
+          next.previewUrl = rawFileUrl(workspaceId.value, to)
+        }
+        return next
+      })
+      if (activePath.value === from) activePath.value = to
+    }
+    const session = { ...sessionTreeMarks.value }
+    if (session[from]) {
+      session[to] = session[from]
+      delete session[from]
+      sessionTreeMarks.value = session
+    }
+    await loadTree(parentPath(to) || '')
+    void loadGitChangedPaths()
+  }
+
+  async function deleteEntry(relPath: string) {
+    if (!workspaceId.value) return
+    await api(`/api/workspaces/${workspaceId.value}/entries?path=${encodeURIComponent(relPath)}`, {
+      method: 'DELETE',
+    })
+    openFiles.value = openFiles.value.filter((f) => f.path !== relPath && !f.path.startsWith(`${relPath}/`))
+    if (activePath.value === relPath || activePath.value?.startsWith(`${relPath}/`)) {
+      activePath.value = openFiles.value.at(-1)?.path ?? null
+    }
+    const parent = parentPath(relPath)
+    if (expanded.value.has(relPath)) {
+      const next = new Set(expanded.value)
+      next.delete(relPath)
+      setExpanded(next)
+    }
+    await loadTree(parent)
+    const session = { ...sessionTreeMarks.value }
+    delete session[relPath]
+    for (const key of Object.keys(session)) {
+      if (key.startsWith(`${relPath}/`)) delete session[key]
+    }
+    sessionTreeMarks.value = session
+    void loadGitChangedPaths()
+  }
+
+  async function openPath(path: string, isDir: boolean) {
+    if (isDir) {
+      await toggleDir(path)
+      return
+    }
+    const existing = openFiles.value.find((f) => f.path === path)
+    const activeReview = pendingReview(path)
+    const kind = classifyOpenKind(path)
+
+    if (existing) {
+      if (!existing.dirty && workspaceId.value) {
+        if (existing.kind === 'html') {
+          existing.previewUrl = rawFileUrl(workspaceId.value, path)
+          try {
+            const data = await api<{ path: string; content: string }>(
+              `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+            )
+            existing.content = data.content
+            window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+          } catch {
+            /* keep previous content */
+          }
+        } else if (isPreviewKind(existing.kind)) {
+          existing.previewUrl = rawFileUrl(workspaceId.value, path)
+        } else {
+          try {
+            const data = await api<{ path: string; content: string }>(
+              `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+            )
+            existing.content = data.content
+            window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+          } catch {
+            if (activeReview) {
+              existing.content = activeReview.after
+              window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: activeReview.after } }))
+            }
+          }
+        }
+      }
+      activePath.value = path
+      window.dispatchEvent(new Event('ca-focus-editor'))
+      return
+    }
+
+    if (!workspaceId.value) return
+    const ws = workspaceId.value
+
+    if (kind === 'html') {
+      try {
+        const data = await api<{ path: string; content: string }>(
+          `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
+        )
+        openFiles.value = [
+          ...openFiles.value,
+          {
+            path: data.path,
+            kind: 'html',
+            content: data.content,
+            previewUrl: rawFileUrl(ws, data.path),
+            dirty: false,
+          },
+        ]
+        activePath.value = data.path
+        window.dispatchEvent(new Event('ca-focus-editor'))
+        return
+      } catch (err) {
+        fileNotice.value = err instanceof Error ? err.message : String(err)
+        return
+      }
+    }
+
+    if (isPreviewKind(kind)) {
+      const url = rawFileUrl(ws, path)
+      openFiles.value = [
+        ...openFiles.value,
+        { path, kind, content: '', previewUrl: url, dirty: false },
+      ]
+      activePath.value = path
+      window.dispatchEvent(new Event('ca-focus-editor'))
+      return
+    }
+
+    try {
+      const data = await api<{ path: string; content: string }>(
+        `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
+      )
+      openFiles.value = [...openFiles.value, { path: data.path, kind: 'text', content: data.content, dirty: false }]
+      activePath.value = data.path
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // Unknown/binary: fall back to binary preview tab
+      if (msg.includes('file.binary') || msg.includes('Binary file')) {
+        try {
+          const url = rawFileUrl(ws, path)
+          openFiles.value = [
+            ...openFiles.value,
+            { path, kind: 'binary', content: '', previewUrl: url, dirty: false },
+          ]
+          activePath.value = path
+        } catch (fallbackErr) {
+          fileNotice.value = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+          return
+        }
+      } else if (activeReview) {
+        openFiles.value = [...openFiles.value, { path, kind: 'text', content: activeReview.after, dirty: false }]
+        activePath.value = path
+      } else {
+        fileNotice.value = msg || t('file.openFailed')
+        return
+      }
+    }
+    window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
+  function clearFileNotice() {
+    fileNotice.value = null
+  }
+
+  function setEditorCopyContext(ctx: { path: string; text: string; startLine: number; endLine: number }) {
+    editorCopyContext.value = ctx
+  }
+
+  function clearEditorCopyContext() {
+    editorCopyContext.value = null
+  }
+
+  async function openAgentFile(path: string) {
+    if (!path) return
+    activity.value = 'explorer'
+    await revealInTree(path)
+    await openPath(path, false)
+  }
+
+  async function openRevisionFile(relPath: string, rev = 'HEAD') {
+    if (!workspaceId.value || !relPath) return
+    const tabPath = `${rev}:${relPath}`
+    const kind = classifyOpenKind(relPath)
+    try {
+      const data = await api<{ path: string; content: string }>(
+        `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(relPath)}&rev=${encodeURIComponent(rev)}`,
+      )
+      const existing = openFiles.value.find((f) => f.path === tabPath)
+      if (existing) {
+        existing.content = data.content
+        existing.dirty = false
+        existing.readonly = true
+        activePath.value = tabPath
+      } else {
+        openFiles.value = [
+          ...openFiles.value,
+          {
+            path: tabPath,
+            kind: isPreviewKind(kind) ? 'text' : kind,
+            content: data.content,
+            dirty: false,
+            readonly: true,
+          },
+        ]
+        activePath.value = tabPath
+      }
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: tabPath, content: data.content } }))
+      window.dispatchEvent(new Event('ca-focus-editor'))
+    } catch (err) {
+      fileNotice.value = err instanceof Error ? err.message : String(err)
+    }
+  }
+
+  async function openPathAtLine(
+    path: string,
+    line: number,
+    opts?: { query?: string; caseSensitive?: boolean },
+  ) {
+    pendingReveal.value = {
+      path,
+      line: Math.max(1, line),
+      query: opts?.query?.trim() || undefined,
+      caseSensitive: Boolean(opts?.caseSensitive),
+    }
+    await openPath(path, false)
+  }
+
+  function reviewsForPath(path: string) {
+    return reviews.value[path] || []
+  }
+
+  function pendingReviewsForPath(path: string) {
+    return reviewsForPath(path).filter((r) => r.status === 'pending')
+  }
+
+  function pendingReviewCount(path: string | null | undefined) {
+    if (!path) return 0
+    return pendingReviewsForPath(path).length
+  }
+
+  function activeReviewIndexFor(path: string | null | undefined) {
+    if (!path) return 0
+    const list = pendingReviewsForPath(path)
+    if (!list.length) return 0
+    return Math.min(activeReviewIndex.value[path] ?? 0, list.length - 1)
+  }
+
+  function clampReviewIndex(path: string) {
+    const list = pendingReviewsForPath(path)
+    if (!list.length) {
+      if (path in activeReviewIndex.value) {
+        const next = { ...activeReviewIndex.value }
+        delete next[path]
+        activeReviewIndex.value = next
+      }
+      return
+    }
+    const cur = activeReviewIndex.value[path] ?? 0
+    activeReviewIndex.value = { ...activeReviewIndex.value, [path]: Math.min(cur, list.length - 1) }
+  }
+
+  function pendingReview(path: string | null | undefined) {
+    if (!path) return null
+    const list = pendingReviewsForPath(path)
+    if (!list.length) return null
+    return list[activeReviewIndexFor(path)] ?? null
+  }
+
+  const pendingReviews = computed(() => {
+    const out: FileReview[] = []
+    for (const list of Object.values(reviews.value)) {
+      for (const review of list) {
+        if (review.status === 'pending') out.push(review)
+      }
+    }
+    return out
+  })
+
+  const pendingReviewPaths = computed(() => [...new Set(pendingReviews.value.map((r) => r.path))])
+
+  function cycleFileReview(path: string, delta: number) {
+    const list = pendingReviewsForPath(path)
+    if (list.length < 2) return
+    const cur = activeReviewIndexFor(path)
+    const next = (cur + delta + list.length) % list.length
+    activeReviewIndex.value = { ...activeReviewIndex.value, [path]: next }
+  }
+
+  async function acceptAllReviews() {
+    const items = pendingReviews.value
+    if (!items.length) return
+    for (const item of [...pendingReviews.value]) await acceptReview(item.path, item.blockId)
+  }
+
+  async function rejectAllReviews() {
+    const items = pendingReviews.value
+    if (!items.length) return
+    for (const item of [...pendingReviews.value]) await rejectReview(item.path, item.blockId)
+  }
+
+  async function cycleReviewPath(delta: number) {
+    const path = activePath.value
+    const paths = pendingReviewPaths.value
+    if (paths.length < 2) return
+    const i = paths.indexOf(path || '')
+    const start = i < 0 ? (delta > 0 ? -1 : 0) : i
+    const next = paths[(start + delta + paths.length) % paths.length]
+    await openAgentFile(next)
+  }
+
+  function ackedReviewStorageKey() {
+    const ws = workspaceId.value
+    return ws ? `ca.review.acked.${ws}` : ''
+  }
+
+  function readAckedReviewIds() {
+    const key = ackedReviewStorageKey()
+    if (!key) return new Set<string>()
+    try {
+      const raw = localStorage.getItem(key)
+      const parsed = raw ? JSON.parse(raw) : []
+      return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [])
+    } catch {
+      return new Set<string>()
+    }
+  }
+
+  function markReviewAcked(blockId: string) {
+    const key = ackedReviewStorageKey()
+    if (!key || !blockId) return
+    const set = readAckedReviewIds()
+    set.add(blockId)
+    localStorage.setItem(key, JSON.stringify([...set].slice(-2000)))
+  }
+
+  function rebuildReviewsFromMessages(msgs: ChatMessage[]) {
+    const acked = readAckedReviewIds()
+    const next: Record<string, FileReview[]> = {}
+    for (const msg of msgs) {
+      for (const block of msg.blocks || []) {
+        if (block.type !== 'file.diff' && block.type !== 'file.delete') continue
+        const path = String(block.meta?.path || '')
+        if (!path || acked.has(block.id)) continue
+        const before = typeof block.meta.before === 'string' ? block.meta.before : null
+        const after = typeof block.meta.after === 'string' ? block.meta.after : null
+        if (before === null && after === null) continue
+        const review: FileReview = {
+          path,
+          action: String(block.meta.action || (block.type === 'file.delete' ? 'delete' : 'edit')),
+          before: before ?? '',
+          after: after ?? '',
+          status: 'pending',
+          blockId: block.id,
+        }
+        const list = next[path] || []
+        if (!list.some((item) => item.blockId === block.id)) list.push(review)
+        next[path] = list
+      }
+    }
+    reviews.value = next
+    activeReviewIndex.value = {}
+  }
+
+  function upsertReview(block: { id: string; type: string; meta: Record<string, unknown> }) {
+    if (block.type !== 'file.diff' && block.type !== 'file.delete') return
+    const path = String(block.meta.path || '')
+    if (!path) return
+    const before = typeof block.meta.before === 'string' ? block.meta.before : null
+    const after = typeof block.meta.after === 'string' ? block.meta.after : null
+    if (before === null && after === null) return
+    const entry: FileReview = {
+      path,
+      action: String(block.meta.action || (block.type === 'file.delete' ? 'delete' : 'edit')),
+      before: before ?? '',
+      after: after ?? '',
+      status: 'pending',
+      blockId: block.id,
+    }
+    const list = reviewsForPath(path)
+    const i = list.findIndex((item) => item.blockId === block.id)
+    let nextList: FileReview[]
+    if (i >= 0) {
+      nextList = [...list]
+      nextList[i] = entry
+    } else {
+      nextList = [...list, entry]
+      const pendingCount = nextList.filter((item) => item.status === 'pending').length
+      activeReviewIndex.value = { ...activeReviewIndex.value, [path]: pendingCount - 1 }
+    }
+    reviews.value = { ...reviews.value, [path]: nextList }
+    const isNew = !before && after
+    if (isNew) {
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [path]: 'addedPending' }
+    }
+    if (ackedTreeMarks.value[path]) {
+      const acked = { ...ackedTreeMarks.value }
+      delete acked[path]
+      ackedTreeMarks.value = acked
+    }
+  }
+
+  async function syncOpenFile(path: string, content: string, dirty = false) {
+    const file = openFiles.value.find((f) => f.path === path)
+    if (file) {
+      file.content = content
+      file.dirty = dirty
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content } }))
+    }
+  }
+
+  function setReviewStatus(path: string, blockId: string, status: 'accepted' | 'rejected') {
+    reviews.value = {
+      ...reviews.value,
+      [path]: reviewsForPath(path).map((item) => (item.blockId === blockId ? { ...item, status } : item)),
+    }
+    clampReviewIndex(path)
+  }
+
+  async function acceptReview(path: string, blockId?: string) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
+    if (!review || review.status !== 'pending') return
+    setReviewStatus(path, review.blockId, 'accepted')
+    markReviewAcked(review.blockId)
+    await syncOpenFile(path, review.after, false)
+    if (!pendingReviewsForPath(path).length) {
+      const session = { ...sessionTreeMarks.value }
+      delete session[path]
+      sessionTreeMarks.value = session
+      ackedTreeMarks.value = { ...ackedTreeMarks.value, [path]: true }
+    }
+    void loadGitChangedPaths()
+  }
+
+  async function rejectReview(path: string, blockId?: string) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
+    if (!review || review.status !== 'pending' || !workspaceId.value) return
+    const created = review.action === 'create' || !review.before
+    if (review.action === 'delete') {
+      await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: review.before }),
+      })
+      await syncOpenFile(path, review.before, false)
+      await revealInTree(path)
+    } else if (created) {
+      try {
+        await api(`/api/workspaces/${workspaceId.value}/entries?path=${encodeURIComponent(path)}`, {
+          method: 'DELETE',
+        })
+      } catch {
+        /* already gone */
+      }
+      if (!pendingReviewsForPath(path).filter((item) => item.blockId !== review.blockId).length) {
+        closeFile(path)
+      }
+      await loadTree(parentPath(path) || '')
+    } else {
+      await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content: review.before }),
+      })
+      await syncOpenFile(path, review.before, false)
+    }
+    setReviewStatus(path, review.blockId, 'rejected')
+    markReviewAcked(review.blockId)
+    void loadGitChangedPaths()
+  }
+
+  function activateFile(path: string) {
+    if (openFiles.value.some((f) => f.path === path)) activePath.value = path
+  }
+
+  function closeFile(path: string) {
+    const i = openFiles.value.findIndex((f) => f.path === path)
+    if (i < 0) return
+    const next = openFiles.value.filter((f) => f.path !== path)
+    openFiles.value = next
+    if (activePath.value === path) {
+      const neighbor = next[i] || next[i - 1]
+      activePath.value = neighbor?.path ?? null
+    }
+  }
+
+  function closeOtherFiles(path: string) {
+    const keep = openFiles.value.find((f) => f.path === path)
+    if (!keep) return
+    openFiles.value = [keep]
+    activePath.value = path
+  }
+
+  function closeFilesToTheRight(path: string) {
+    const i = openFiles.value.findIndex((f) => f.path === path)
+    if (i < 0) return
+    openFiles.value = openFiles.value.slice(0, i + 1)
+    if (!openFiles.value.some((f) => f.path === activePath.value)) activePath.value = path
+  }
+
+  function closeAllFiles() {
+    openFiles.value = []
+    activePath.value = null
+  }
+
+  function updateOpenContent(path: string, content: string) {
+    const file = openFiles.value.find((f) => f.path === path)
+    if (!file || file.readonly || !isEditableKind(file.kind) || file.content === content) return
+    file.content = content
+    file.dirty = true
+    if (ackedTreeMarks.value[path]) {
+      const acked = { ...ackedTreeMarks.value }
+      delete acked[path]
+      ackedTreeMarks.value = acked
+    }
+  }
+
+  async function saveOpenFile() {
+    const file = openFile.value
+    if (!workspaceId.value || !file || file.readonly || !isEditableKind(file.kind)) return
+    await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(file.path)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content: file.content }),
+    })
+    file.dirty = false
+    if (file.kind === 'html') {
+      file.previewUrl = rawFileUrl(workspaceId.value, file.path)
+    }
+    void loadGitChangedPaths()
+  }
+
+  async function reloadOpenFile(path: string) {
+    if (!workspaceId.value) return
+    const file = openFiles.value.find((f) => f.path === path)
+    if (!file || !isEditableKind(file.kind)) return
+    try {
+      const head = path.match(/^(HEAD|[0-9a-fA-F]{7,40}):(.+)$/)
+      const data = head
+        ? await api<{ path: string; content: string }>(
+            `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(head[2])}&rev=${encodeURIComponent(head[1])}`,
+          )
+        : await api<{ path: string; content: string }>(
+            `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
+          )
+      file.content = data.content
+      file.dirty = false
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
+    } catch {
+      /* keep previous */
+    }
+  }
+
+  async function loadConversations() {
+    if (!workspaceId.value) return
+    conversations.value = await api(`/api/workspaces/${workspaceId.value}/conversations`)
+  }
+
+  async function newChat() {
+    if (!workspaceId.value) return
+    const conv = await api<Conversation>('/api/conversations', {
+      method: 'POST',
+      body: JSON.stringify({ workspace_id: workspaceId.value, mode: mode.value, model_id: modelId.value }),
+    })
+    await loadConversations()
+    await openConversation(conv.id)
+  }
+
+  function discardPendingDeltas() {
+    if (deltaRaf) {
+      cancelAnimationFrame(deltaRaf)
+      deltaRaf = 0
+    }
+    pendingDeltas = []
+    heldEvents = []
+  }
+
+  function hasStreamingThinking(runId?: string | null): boolean {
+    const rid = runId || activeRunId.value
+    if (!rid) return false
+    for (const m of messages.value) {
+      if (m.run_id !== rid && m.id !== `run-${rid}`) continue
+      if (m.blocks.some((b) => b.type === 'assistant.thinking' && b.status === 'streaming')) return true
+    }
+    return false
+  }
+
+  function heldBlockIds(): Set<string> {
+    const ids = new Set<string>()
+    for (const ev of heldEvents) {
+      if (ev.type === 'block.started' && ev.payload?.block_id) ids.add(String(ev.payload.block_id))
+    }
+    return ids
+  }
+
+  function releaseHeldEvents() {
+    if (!heldEvents.length) return
+    const batch = heldEvents
+    heldEvents = []
+    for (const ev of batch) applyIncomingEvent(ev)
+  }
+
+  function applyIncomingEvent(event: StreamEnvelope) {
+    messages.value = applyEvent(messages.value, event)
+    const payload = event.payload || {}
+    const blockId = payload.block_id != null ? String(payload.block_id) : ''
+    let type = String(payload.block_type || '')
+    let meta = (payload.meta as Record<string, unknown>) || {}
+    let path = eventPath(event)
+
+    // completed events often omit block_type/meta — recover from the applied block
+    if ((!type || !path) && blockId) {
+      for (const m of messages.value) {
+        const b = m.blocks.find((item) => item.id === blockId)
+        if (!b) continue
+        if (!type) type = b.type
+        if (!path && typeof b.meta.path === 'string') path = b.meta.path
+        if (!Object.keys(meta).length) meta = b.meta || {}
+        break
+      }
+    }
+
+    if (
+      (event.type === 'block.started' || event.type === 'block.completed') &&
+      (type === 'file.diff' || type === 'file.delete')
+    ) {
+      upsertReview({
+        id: blockId,
+        type,
+        meta,
+      })
+      const changedPath = String(meta.path || path || '')
+      if (changedPath && typeof meta.after === 'string') {
+        const file = openFiles.value.find((f) => f.path === changedPath)
+        if (file && !file.dirty) {
+          file.content = meta.after
+          window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: changedPath, content: meta.after } }))
+        }
+      }
+      if (type === 'file.diff' && (meta.action === 'create' || meta.action === 'overwrite') && changedPath) {
+        if (meta.action === 'create') {
+          sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: 'added' }
+        }
+      }
+    }
+    if (event.type === 'run.started') runStatus.value = 'running'
+    if (event.type === 'block.started' && type === 'approval') {
+      notifyApprovalRequired(String(meta.approval_id || blockId || ''))
+    }
+    if (event.type === 'run.completed') {
+      playTaskCompleteSound()
+    }
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+      runStatus.value = event.type.replace('run.', '')
+      const now = new Date().toISOString()
+      messages.value = messages.value.map((m) =>
+        m.run_id === event.run_id ? { ...m, ended_at: now } : m,
+      )
+      void refreshTree()
+      if (activeRunId.value === event.run_id) activeRunId.value = null
+      void flushSendQueue()
+    }
+    if (event.type === 'block.started' || event.type === 'block.completed') {
+      const name = String((meta as { name?: string }).name || '')
+      const fileOp =
+        type.startsWith('file.') ||
+        ['write_file', 'search_replace', 'delete_file', 'read_file'].includes(name)
+      if (fileOp) scheduleTreeRefresh(path || undefined)
+    }
+  }
+
+  function detachRun() {
+    discardPendingDeltas()
+    stopStream?.()
+    stopStream = null
+    activeRunId.value = null
+    runStatus.value = 'idle'
+    lastEventId.value = null
+  }
+
+  async function openConversation(id: string) {
+    // Leave the previous run stream behind so the new chat is not "busy"
+    detachRun()
+    conversationId.value = id
+    rememberConversation(id)
+    reviews.value = {}
+    activeReviewIndex.value = {}
+    messages.value = []
+    const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
+    // Ignore late responses if user already switched again
+    if (conversationId.value !== id) return
+    messages.value = data.messages || []
+    rebuildReviewsFromMessages(messages.value)
+    mode.value = (data.mode as typeof mode.value) || 'agent'
+    modelId.value = data.model_id
+    applied.value = new Set()
+    const active = data.active_run
+    if (active && ['queued', 'running'].includes(String(active.status))) {
+      lastEventId.value = active.last_event_id
+      attachRun(active.id, active.last_event_id)
+    } else {
+      runStatus.value = 'idle'
+      activeRunId.value = null
+      lastEventId.value = null
+    }
+    window.dispatchEvent(new Event('ca-messages-loaded'))
+  }
+
+  async function deleteConversation(id: string) {
+    await api(`/api/conversations/${id}`, { method: 'DELETE' })
+    conversations.value = conversations.value.filter((c) => c.id !== id)
+
+    if (conversationId.value !== id) return
+
+    detachRun()
+    messages.value = []
+    conversationId.value = null
+
+    if (conversations.value[0]) {
+      await openConversation(conversations.value[0].id)
+      return
+    }
+    await newChat()
+  }
+
+  async function renameConversation(id: string, title: string) {
+    const trimmed = title.trim()
+    if (!trimmed) return false
+    const row = conversations.value.find((c) => c.id === id)
+    if (!row || row.title === trimmed) return true
+
+    await api(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title: trimmed }),
+    })
+    conversations.value = conversations.value.map((c) =>
+      c.id === id ? { ...c, title: trimmed } : c,
+    )
+    return true
+  }
+
+  async function rollbackToMessage(messageId: string, mode: 'to' | 'before' = 'to') {
+    const id = conversationId.value
+    if (!id) return null
+    const result = await api<{
+      ok: boolean
+      messages_removed: number
+      files_reverted: number
+      reverted_paths: string[]
+      warnings: string[]
+    }>(`/api/conversations/${id}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ message_id: messageId, mode }),
+    })
+    detachRun()
+    const reverted = new Set(result.reverted_paths || [])
+    for (const file of [...openFiles.value]) {
+      if (!reverted.has(file.path)) continue
+      try {
+        await reloadOpenFile(file.path)
+      } catch {
+        closeFile(file.path)
+      }
+    }
+    reviews.value = {}
+    activeReviewIndex.value = {}
+    await openConversation(id)
+    await loadTree('')
+    await loadConversations()
+    await loadGitChangedPaths()
+    return result
+  }
+
+  function eventPath(event: StreamEnvelope): string | null {
+    const payload = event.payload || {}
+    const meta = (payload.meta || {}) as Record<string, unknown>
+    if (typeof meta.path === 'string' && meta.path) return meta.path
+    let args: unknown = meta.args
+    if (typeof args === 'string') {
+      try {
+        args = JSON.parse(args)
+      } catch {
+        args = null
+      }
+    }
+    if (args && typeof args === 'object' && typeof (args as { path?: unknown }).path === 'string') {
+      return (args as { path: string }).path
+    }
+    return null
+  }
+
+  function flushPendingDeltas() {
+    if (deltaRaf) {
+      cancelAnimationFrame(deltaRaf)
+      deltaRaf = 0
+    }
+    if (!pendingDeltas.length) return
+    const batch = pendingDeltas
+    pendingDeltas = []
+    let next = messages.value
+    for (const event of batch) {
+      next = applyEvent(next, event)
+    }
+    messages.value = next
+  }
+
+  function scheduleDeltaFlush() {
+    if (deltaRaf) return
+    deltaRaf = requestAnimationFrame(() => {
+      deltaRaf = 0
+      flushPendingDeltas()
+    })
+  }
+
+  function onEvent(event: StreamEnvelope) {
+    // Drop events from a run we already navigated away from
+    if (!activeRunId.value || event.run_id !== activeRunId.value) return
+    if (applied.value.has(event.event_id)) return
+    applied.value.add(event.event_id)
+    lastEventId.value = event.event_id
+
+    const payload = event.payload || {}
+    const blockId = payload.block_id != null ? String(payload.block_id) : ''
+    const blockType = String(payload.block_type || '')
+
+    // While thinking is still streaming, hold tool/file/markdown cards (and their follow-ups)
+    if (event.type === 'block.started' && blockType !== 'assistant.thinking' && hasStreamingThinking(event.run_id)) {
+      heldEvents.push(event)
+      return
+    }
+    if (
+      (event.type === 'block.delta' || event.type === 'block.completed') &&
+      blockId &&
+      heldBlockIds().has(blockId)
+    ) {
+      heldEvents.push(event)
+      return
+    }
+
+    // One paint per frame while streaming text/thinking
+    if (event.type === 'block.delta') {
+      pendingDeltas.push(event)
+      scheduleDeltaFlush()
+      return
+    }
+
+    flushPendingDeltas()
+    const completedThink =
+      event.type === 'block.completed' &&
+      (blockType === 'assistant.thinking' ||
+        messages.value.some((m) =>
+          m.blocks.some((b) => b.id === blockId && b.type === 'assistant.thinking'),
+        ))
+    applyIncomingEvent(event)
+
+    if (completedThink && !hasStreamingThinking(event.run_id)) {
+      releaseHeldEvents()
+    }
+    if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+      releaseHeldEvents()
+    }
+  }
+
+  function attachRun(runId: string, after?: string | null) {
+    discardPendingDeltas()
+    stopStream?.()
+    stopStream = null
+    activeRunId.value = runId
+    runStatus.value = 'running'
+    stopStream = subscribeRun(runId, after || null, onEvent, () => {
+      // Stream closed after we already switched conversations — ignore
+      if (activeRunId.value !== runId) return
+      discardPendingDeltas()
+      runStatus.value = runStatus.value === 'running' ? 'completed' : runStatus.value
+      activeRunId.value = null
+      loadConversations()
+      void flushSendQueue()
+    })
+  }
+
+  function isRunBusy() {
+    return runStatus.value === 'running' || runStatus.value === 'queued' || Boolean(activeRunId.value)
+  }
+
+  function conversationQueue() {
+    const cid = conversationId.value
+    if (!cid) return []
+    return sendQueue.value.filter((item) => item.conversationId === cid)
+  }
+
+  function conversationSkillName(cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return null
+    return conversationSkills.value[id] ?? null
+  }
+
+  function setConversationSkill(name: string | null, cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return
+    const next = { ...conversationSkills.value }
+    if (name) next[id] = name
+    else delete next[id]
+    conversationSkills.value = next
+  }
+
+  function enqueueSend(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) return
+    sendQueue.value = [
+      ...sendQueue.value,
+      {
+        id: `q-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        conversationId: conversationId.value,
+        text,
+        references,
+        files,
+        mode: mode.value,
+        modelId: modelId.value,
+        thinkingLevel: thinkingLevel.value,
+        skillName: conversationSkillName(),
+      },
+    ]
+  }
+
+  function removeQueuedSend(id: string) {
+    sendQueue.value = sendQueue.value.filter((item) => item.id !== id)
+  }
+
+  function clearConversationQueue(cid?: string | null) {
+    const id = cid ?? conversationId.value
+    if (!id) return
+    sendQueue.value = sendQueue.value.filter((item) => item.conversationId !== id)
+  }
+
+  async function waitUntilIdle(timeoutMs = 20000) {
+    const start = Date.now()
+    while (isRunBusy() && Date.now() - start < timeoutMs) {
+      await new Promise((resolve) => setTimeout(resolve, 120))
+    }
+  }
+
+  async function dispatchSend(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+    opts?: {
+      mode?: 'ask' | 'agent' | 'plan'
+      modelId?: string | null
+      thinkingLevel?: ThinkingLevel
+      skillName?: string | null
+    },
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    const sendMode = opts?.mode ?? mode.value
+    const sendModel = opts?.modelId ?? modelId.value
+    const sendThinking = opts?.thinkingLevel ?? thinkingLevel.value
+    const sendSkill = opts?.skillName !== undefined ? opts.skillName : conversationSkillName()
+    messages.value = [
+      ...messages.value,
+      {
+        id: `local-${Date.now()}`,
+        role: 'user',
+        created_at: new Date().toISOString(),
+        blocks: [
+          {
+            id: 'u',
+            type: 'user.text',
+            text,
+            meta: {
+              ...(files.length ? { files } : {}),
+              ...(sendSkill ? { skill: { name: sendSkill } } : {}),
+            },
+            status: 'ok',
+          },
+        ],
+      },
+    ]
+    const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        mode: sendMode,
+        model_id: sendModel,
+        thinking_level: sendThinking,
+        thinking: sendThinking !== 'off',
+        references,
+        files,
+        skill_name: sendSkill || undefined,
+      }),
+    })
+    lastEventId.value = null
+    attachRun(data.run_id, null)
+  }
+
+  async function flushSendQueue() {
+    if (suppressQueueFlush || queueFlushing || isRunBusy()) return
+    const cid = conversationId.value
+    if (!cid) return
+    const next = sendQueue.value.find((item) => item.conversationId === cid)
+    if (!next) return
+    queueFlushing = true
+    sendQueue.value = sendQueue.value.filter((item) => item.id !== next.id)
+    try {
+      await dispatchSend(next.text, next.references, next.files, {
+        mode: next.mode,
+        modelId: next.modelId,
+        thinkingLevel: next.thinkingLevel,
+        skillName: next.skillName ?? null,
+      })
+    } catch (err) {
+      sendQueue.value = [next, ...sendQueue.value]
+      console.error(err)
+    } finally {
+      queueFlushing = false
+    }
+  }
+
+  async function send(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    if (isRunBusy()) {
+      enqueueSend(text, references, files)
+      return
+    }
+    await dispatchSend(text, references, files)
+  }
+
+  async function sendNow(
+    text: string,
+    references: { type: string; path: string }[] = [],
+    files: { name: string; url: string; size: number; type: string }[] = [],
+  ) {
+    if (!conversationId.value) await newChat()
+    if (!conversationId.value) return
+    suppressQueueFlush = true
+    try {
+      if (isRunBusy()) {
+        await stop()
+        await waitUntilIdle()
+      }
+      await dispatchSend(text, references, files)
+    } finally {
+      suppressQueueFlush = false
+    }
+  }
+
+  async function sendQueuedNow(id: string) {
+    const item = sendQueue.value.find((q) => q.id === id)
+    if (!item) return
+    sendQueue.value = sendQueue.value.filter((q) => q.id !== id)
+    suppressQueueFlush = true
+    try {
+      if (isRunBusy()) {
+        await stop()
+        await waitUntilIdle()
+      }
+      await dispatchSend(item.text, item.references, item.files, {
+        mode: item.mode,
+        modelId: item.modelId,
+        thinkingLevel: item.thinkingLevel,
+        skillName: item.skillName ?? null,
+      })
+    } catch (err) {
+      sendQueue.value = [item, ...sendQueue.value]
+      console.error(err)
+    } finally {
+      suppressQueueFlush = false
+    }
+  }
+
+  async function stop() {
+    const conv = conversations.value.find((c) => c.id === conversationId.value)
+    const runId = activeRunId.value || conv?.active_run_id
+    if (!runId) return
+    await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
+  }
+
+  function askConfirm(req: {
+    title: string
+    summary: string
+    details?: string
+    confirmLabel?: string
+    cancelLabel?: string
+    danger?: boolean
+  }): Promise<boolean> {
+    confirmResolver?.(false)
+    confirmDialog.value = { danger: true, confirmLabel: t('common.confirm'), cancelLabel: t('common.cancel'), ...req }
+    return new Promise((resolve) => {
+      confirmResolver = resolve
+    })
+  }
+
+  function closeConfirm(ok: boolean) {
+    confirmDialog.value = null
+    const resolver = confirmResolver
+    confirmResolver = null
+    resolver?.(ok)
+  }
+
+  function decideApproval(approvalId: string, allowed: boolean) {
+    const runId = activeRunId.value
+    if (!runId) return
+    api(`/api/runs/${runId}/approvals/${approvalId}`, {
+      method: 'POST',
+      body: JSON.stringify({ allowed }),
+    }).catch(() => undefined)
+  }
+
+  async function loadProviders() {
+    providers.value = await api('/api/llm/providers')
+    const models = providers.value.flatMap((p) => p.models || [])
+    if (!models.length) {
+      modelId.value = ''
+      return
+    }
+    const available = models.filter((m: any) => m.availability?.ok === true)
+    const pool = available.length ? available : models
+    const current = models.find((m: any) => m.id === modelId.value)
+    const currentOk = current && (available.length ? current.availability?.ok === true : true)
+    if (!currentOk) {
+      const def = pool.find((m: any) => m.is_default) || pool[0]
+      if (def) modelId.value = def.id
+    } else if (!modelId.value) {
+      const def = pool.find((m: any) => m.is_default) || pool[0]
+      if (def) modelId.value = def.id
+    }
+  }
+
+  async function loadSkills() {
+    const q = workspaceId.value ? `?workspace_id=${workspaceId.value}` : ''
+    skills.value = await api(`/api/skills${q}`)
+  }
+
+  async function loadSettings() {
+    settings.value = await api('/api/settings')
+  }
+
+  async function saveSettings(patch: Record<string, unknown>) {
+    settings.value = await api('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) })
+  }
+
+  function isFileDirty(path: string) {
+    return openFiles.value.some((f) => f.path === path && f.dirty)
+  }
+
+  const gitMarkedAncestorPaths = computed(() => {
+    const out = new Set<string>()
+    if (!gitRepoOk.value) return out
+    const addAncestors = (path: string) => {
+      const parts = path.split('/').filter(Boolean)
+      let acc = ''
+      for (let i = 0; i < parts.length - 1; i++) {
+        acc = acc ? `${acc}/${parts[i]}` : parts[i]
+        out.add(acc)
+      }
+    }
+    for (const path of Object.keys(gitChangedPaths.value)) {
+      addAncestors(path)
+    }
+    return out
+  })
+
+  function fileTreeMark(path: string, isDir = false): FileTreeMark {
+    const empty: FileTreeMark = { show: false, title: '', kind: '' }
+
+    const markFromGit = (git: GitPathMark): FileTreeMark => {
+      const letter = gitMarkLetter(git.code)
+      return {
+        show: true,
+        title: gitMarkTitle(git, path),
+        kind: git.kind,
+        ...(letter ? { letter } : {}),
+      }
+    }
+
+    const dirtyMark = (): FileTreeMark | null => {
+      if (isDir || !isFileDirty(path)) return null
+      return { show: true, title: t('tree.unsaved'), kind: 'modified', letter: 'M' }
+    }
+
+    if (!gitRepoOk.value) return dirtyMark() ?? empty
+
+    if (isDir) {
+      const own = gitChangedPaths.value[path]
+      if (own) return markFromGit(own)
+      if (gitMarkedAncestorPaths.value.has(path)) {
+        return { show: true, title: t('tree.containsChanges'), kind: 'changed' }
+      }
+      return empty
+    }
+
+    const git = gitChangedPaths.value[path]
+    if (git) return markFromGit(git)
+    return dirtyMark() ?? empty
+  }
+
+  watch(
+    () => [workspaceId.value, openFiles.value.map((f) => f.path).join('\0'), activePath.value] as const,
+    () => persistEditorState(),
+  )
+
+  return {
+    workspaces,
+    recentWorkspaces,
+    workspaceId,
+    workspace,
+    conversations,
+    conversationId,
+    messages,
+    runStatus,
+    sendQueue,
+    mode,
+    modelId,
+    thinkingLevel,
+    thinking,
+    sampling,
+    fileTree,
+    childrenMap,
+    expanded,
+    treePath,
+    openFiles,
+    activePath,
+    openFile,
+    editorCopyContext,
+    setEditorCopyContext,
+    clearEditorCopyContext,
+    fileNotice,
+    clearFileNotice,
+    pendingReveal,
+    searchIntent,
+    openSearch,
+    openExplorerPanel,
+    skillFocusIntent,
+    openSkill,
+    reviews,
+    activeReviewIndex,
+    pendingReview,
+    pendingReviews,
+    pendingReviewPaths,
+    pendingReviewCount,
+    activeReviewIndexFor,
+    cycleFileReview,
+    acceptAllReviews,
+    rejectAllReviews,
+    cycleReviewPath,
+    confirmDialog,
+    askConfirm,
+    closeConfirm,
+    decideApproval,
+    providers,
+    skills,
+    conversationSkills,
+    settings,
+    activity,
+    pendingModelProbe,
+    loadWorkspaces,
+    addWorkspace,
+    clearWorkspace,
+    selectWorkspace,
+    loadTree,
+    refreshTree,
+    collapseAllDirs,
+    expandAllDirs,
+    revealInTree,
+    toggleDir,
+    expandDir,
+    isExpanded,
+    childrenOf,
+    parentPath,
+    joinPath,
+    createEntry,
+    renameEntry,
+    deleteEntry,
+    openPath,
+    openPathAtLine,
+    openAgentFile,
+    openRevisionFile,
+    acceptReview,
+    rejectReview,
+    activateFile,
+    closeFile,
+    closeOtherFiles,
+    closeFilesToTheRight,
+    closeAllFiles,
+    updateOpenContent,
+    saveOpenFile,
+    reloadOpenFile,
+    isFileDirty,
+    fileTreeMark,
+    gitRepoOk,
+    loadGitChangedPaths,
+    gitChangedPaths,
+    loadConversations,
+    newChat,
+    openConversation,
+    deleteConversation,
+    renameConversation,
+    rollbackToMessage,
+    send,
+    sendNow,
+    sendQueuedNow,
+    stop,
+    removeQueuedSend,
+    clearConversationQueue,
+    conversationQueue,
+    isRunBusy,
+    loadProviders,
+    loadSkills,
+    conversationSkillName,
+    setConversationSkill,
+    loadSettings,
+    saveSettings,
+  }
+})

@@ -53,6 +53,17 @@ def _apply_env(cfg: dict[str, Any]) -> dict[str, Any]:
     uploads_dir = os.environ.get("CODE_AGENT_UPLOADS_DIR")
     if uploads_dir:
         cfg.setdefault("uploads", {})["dir"] = uploads_dir
+    profile = os.environ.get("CODE_AGENT_RUNTIME_PROFILE")
+    if profile:
+        cfg.setdefault("runtime", {})["profile"] = profile
+    pg = os.environ.get("CODE_AGENT_POSTGRES_URL")
+    if pg:
+        cfg.setdefault("storage", {})["postgres_url"] = pg
+        cfg.setdefault("storage", {})["database"] = "postgres"
+    redis = os.environ.get("CODE_AGENT_REDIS_URL")
+    if redis:
+        cfg.setdefault("storage", {})["redis_url"] = redis
+        cfg.setdefault("storage", {})["events"] = "redis"
     return cfg
 
 
@@ -64,6 +75,65 @@ def _resolve_uploads_dir(cfg: dict[str, Any]) -> Path:
     return path
 
 
+def default_user_config_path() -> Path:
+    cfg = _load_yaml(DEFAULT_YAML)
+    return Path(cfg.get("paths", {}).get("user_config", "~/.code-agent/config.yaml")).expanduser()
+
+
+def user_config_template() -> str:
+    template = REPO_ROOT / "config" / "user.yaml.example"
+    if template.is_file():
+        return template.read_text(encoding="utf-8")
+    return (
+        "runtime:\n  profile: split\n  terminal:\n    mode: standalone\n  preview:\n    mode: standalone\n"
+        "storage:\n  database: sqlite\n  events: sqlite\n  checkpoint: sqlite\n"
+    )
+
+
+def describe_user_config(path: Path | None = None) -> dict[str, Any]:
+    target = path or default_user_config_path()
+    if not target.is_file():
+        return {"path": str(target), "exists": False}
+    cfg = _load_yaml(target)
+    runtime = cfg.get("runtime") if isinstance(cfg.get("runtime"), dict) else {}
+    storage = cfg.get("storage") if isinstance(cfg.get("storage"), dict) else {}
+    return {
+        "path": str(target),
+        "exists": True,
+        "profile": runtime.get("profile", "split"),
+        "terminal_mode": (runtime.get("terminal") or {}).get("mode", "standalone")
+        if isinstance(runtime.get("terminal"), dict)
+        else "standalone",
+        "preview_mode": (runtime.get("preview") or {}).get("mode", "standalone")
+        if isinstance(runtime.get("preview"), dict)
+        else "standalone",
+        "storage_database": storage.get("database", "sqlite"),
+        "storage_events": storage.get("events", "sqlite"),
+    }
+
+
+def ensure_user_config(
+    path: Path | None = None,
+    *,
+    quiet: bool = False,
+    force: bool = False,
+) -> tuple[Path, bool]:
+    """Create ~/.code-agent/config.yaml from template on first run. Returns (path, created)."""
+    target = path or default_user_config_path()
+    if target.is_file() and not force:
+        return target, False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file() and force:
+        backup = target.with_suffix(".yaml.bak")
+        backup.write_text(target.read_text(encoding="utf-8"), encoding="utf-8")
+        if not quiet:
+            print(f"Backed up existing config: {backup}")
+    target.write_text(user_config_template(), encoding="utf-8")
+    if not quiet:
+        print(f"{'Reset' if force else 'Created'} user config: {target}")
+    return target, True
+
+
 class Settings:
     def __init__(self) -> None:
         self.reload()
@@ -71,6 +141,7 @@ class Settings:
     def reload(self, workspace_root: str | None = None) -> None:
         cfg = _load_yaml(DEFAULT_YAML)
         user_path = Path(cfg.get("paths", {}).get("user_config", "~/.code-agent/config.yaml")).expanduser()
+        ensure_user_config(user_path, quiet=True)
         cfg = _deep_merge(cfg, _load_yaml(user_path))
         if workspace_root:
             ws = Path(workspace_root) / ".code-agent" / "config.yaml"
@@ -97,7 +168,9 @@ class Settings:
 
     @property
     def db_url(self) -> str:
-        return f"sqlite://{self.data_dir / 'code_agent.sqlite3'}"
+        from code_agent.storage.backends import resolve_database_url
+
+        return resolve_database_url()
 
     @property
     def repo_root(self) -> Path:
@@ -117,7 +190,40 @@ class Settings:
         return path if path.is_dir() else None
 
 
-settings = Settings()
+def user_config_path(cfg: dict[str, Any] | None = None) -> Path:
+    base = cfg if cfg is not None else settings._cfg
+    return Path(base.get("paths", {}).get("user_config", "~/.code-agent/config.yaml")).expanduser()
+
+
+def merge_user_config(section: str, values: dict[str, Any], *, cfg: dict[str, Any] | None = None) -> Path:
+    """Merge a config section into ~/.code-agent/config.yaml (creates file if missing)."""
+    path = user_config_path(cfg)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_yaml(path)
+    bucket = existing.setdefault(section, {})
+    if not isinstance(bucket, dict):
+        bucket = {}
+        existing[section] = bucket
+    for key, value in values.items():
+        if value is None or value == "":
+            bucket.pop(key, None)
+        else:
+            bucket[key] = value
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(existing, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    return path
+
+
+STORAGE_SETTING_KEYS = frozenset(
+    {
+        "storage.database",
+        "storage.events",
+        "storage.checkpoint",
+        "storage.postgres_url",
+        "storage.redis_url",
+        "storage.checkpoint_postgres_url",
+    }
+)
 
 SETTINGS_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -185,5 +291,53 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "title": "Enter 发送",
             "default": True,
         },
+        "storage.database": {
+            "type": "string",
+            "title": "主数据库",
+            "enum": ["sqlite", "postgres"],
+            "default": "sqlite",
+            "requires_restart": True,
+        },
+        "storage.events": {
+            "type": "string",
+            "title": "事件总线",
+            "enum": ["sqlite", "redis"],
+            "default": "sqlite",
+            "requires_restart": True,
+        },
+        "storage.checkpoint": {
+            "type": "string",
+            "title": "Checkpoint 存储",
+            "enum": ["sqlite", "postgres"],
+            "default": "sqlite",
+            "requires_restart": True,
+        },
+        "storage.postgres_url": {
+            "type": "string",
+            "title": "PostgreSQL 连接 URL",
+            "format": "password",
+            "default": "",
+            "example": "postgres://user:pass@127.0.0.1:5432/code_agent",
+            "requires_restart": True,
+        },
+        "storage.redis_url": {
+            "type": "string",
+            "title": "Redis 连接 URL",
+            "format": "password",
+            "default": "",
+            "example": "redis://127.0.0.1:6379/0",
+            "requires_restart": True,
+        },
+        "storage.checkpoint_postgres_url": {
+            "type": "string",
+            "title": "Checkpoint PostgreSQL URL（可选）",
+            "format": "password",
+            "default": "",
+            "example": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints",
+            "requires_restart": True,
+        },
     },
 }
+
+
+settings = Settings()
