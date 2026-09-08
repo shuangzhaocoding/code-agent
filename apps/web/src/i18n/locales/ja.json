@@ -107,7 +107,10 @@
     "folderName": "フォルダー名",
     "emptyRecent": "ワークスペースはまだありません",
     "invalidName": "名前が不正です",
-    "fallbackName": "ワークスペース"
+    "fallbackName": "ワークスペース",
+    "pickFolder": "フォルダーを選択",
+    "rootsLabel": "このPC",
+    "pickDriveFirst": "先にドライブまたはフォルダーを開いてください"
   },
   "settings": {
     "title": "設定",

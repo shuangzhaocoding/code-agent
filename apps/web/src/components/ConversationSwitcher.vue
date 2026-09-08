@@ -102,6 +102,7 @@ async function openMenu() {
   updateMenuPosition()
   ready.value = false
   open.value = true
+  void store.loadConversations()
   await nextTick()
   requestAnimationFrame(() => {
     updateMenuPosition()
@@ -201,6 +202,37 @@ function turnCount(item: (typeof filtered.value)[number]) {
   }
   return item.turn_count ?? 0
 }
+
+/** Live status for history rows: icons for 生成中 / 工具确认 / 排队中 */
+function sessionStatus(item: (typeof filtered.value)[number]): {
+  label: string
+  tone: string
+  icon: string
+} | null {
+  let label: string | null = null
+  if (item.id === store.conversationId) {
+    if (store.pendingApprovals.length) label = '工具确认'
+    else if (store.isRunBusy()) label = store.runStatus === 'queued' ? '排队中' : '生成中'
+  } else if (item.awaiting_approval) {
+    label = '工具确认'
+  } else if (item.active_run_id) {
+    if (item.run_status === 'queued') label = '排队中'
+    else if (!item.run_status || item.run_status === 'running') label = '生成中'
+  }
+  if (!label) return null
+  if (label === '工具确认') return { label, tone: 'confirm', icon: 'shield' }
+  if (label === '排队中') return { label, tone: 'queued', icon: 'clock' }
+  return { label, tone: 'running', icon: 'loader' }
+}
+
+const statusById = computed(() => {
+  const map = new Map<string, { label: string; tone: string; icon: string }>()
+  for (const item of filtered.value) {
+    const status = sessionStatus(item)
+    if (status) map.set(item.id, status)
+  }
+  return map
+})
 
 function onDocPointer(e: PointerEvent) {
   const target = e.target as Node
@@ -369,6 +401,17 @@ onBeforeUnmount(() => {
                   <span class="row-check-slot" aria-hidden="true">
                     <AppIcon v-if="item.id === store.conversationId" class="row-check" name="check" :size="16" :stroke-width="1.75" />
                   </span>
+                  <template v-for="st in [statusById.get(item.id)]" :key="`${item.id}-status`">
+                    <span
+                      v-if="st"
+                      class="row-status"
+                      :class="st.tone"
+                      :title="st.label"
+                      :aria-label="st.label"
+                    >
+                      <AppIcon :name="st.icon" :size="14" :stroke-width="1.75" />
+                    </span>
+                  </template>
                   <span class="row-turns">{{ turnCount(item) }}轮</span>
                 </span>
               </div>
@@ -492,6 +535,31 @@ onBeforeUnmount(() => {
   font-weight: 500;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+.row-status {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+}
+.row-status.running {
+  color: var(--primary);
+}
+.row-status.running :deep(svg) {
+  animation: row-status-spin 0.9s linear infinite;
+}
+.row-status.confirm {
+  color: var(--danger);
+}
+.row-status.queued {
+  color: var(--text-muted);
+}
+@keyframes row-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .row-actions {
   display: flex;

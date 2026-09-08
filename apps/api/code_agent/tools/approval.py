@@ -19,6 +19,22 @@ _pending: dict[str, dict[str, Any]] = {}
 _run_waiters: dict[str, asyncio.Future] = {}
 
 
+def runs_awaiting_approval(run_ids: list[str] | set[str] | None = None) -> set[str]:
+    """Return run ids that currently have an undecided in-memory approval."""
+    wanted = {str(rid) for rid in run_ids} if run_ids is not None else None
+    out: set[str] = set()
+    for item in _pending.values():
+        if item.get("decided"):
+            continue
+        rid = str(item.get("run_id") or "")
+        if not rid:
+            continue
+        if wanted is not None and rid not in wanted:
+            continue
+        out.add(rid)
+    return out
+
+
 def _resume_payload(batch_ids: list[str]) -> bool | dict[str, bool]:
     if len(batch_ids) == 1:
         item = _pending.get(batch_ids[0]) or {}

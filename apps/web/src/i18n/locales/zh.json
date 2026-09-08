@@ -108,7 +108,10 @@
     "folderName": "文件夹名",
     "emptyRecent": "还没有工作空间",
     "invalidName": "名称不合法",
-    "fallbackName": "工作空间"
+    "fallbackName": "工作空间",
+    "pickFolder": "选择文件夹",
+    "rootsLabel": "此电脑",
+    "pickDriveFirst": "请先进入一个磁盘或目录"
   },
   "settings": {
     "title": "设置",

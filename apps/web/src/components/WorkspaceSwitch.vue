@@ -9,7 +9,7 @@ import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 
 const emit = defineEmits<{ close: [] }>()
 const store = useAppStore()
-const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
+const { path, error, creating, createValue, createKey, dirs, displayPath, canGoParent, atRoots, browse, goParent, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
 
 onMounted(async () => {
   await store.loadWorkspaces()
@@ -53,9 +53,9 @@ const recents = computed(() => store.recentWorkspaces)
       <p v-if="error" class="err">{{ error }}</p>
       <div class="nested-list browse">
         <div class="crumbs">
-          <button type="button" class="btn btn-ghost" @click="browse(browsing?.parent || '~')">上级</button>
-          <button type="button" class="btn btn-ghost" @click="startCreate">新建文件夹</button>
-          <span>{{ browsing?.path }}</span>
+          <button type="button" class="btn btn-ghost" :disabled="!canGoParent" @click="goParent">上级</button>
+          <button type="button" class="btn btn-ghost" :disabled="atRoots" @click="startCreate">新建文件夹</button>
+          <span>{{ displayPath }}</span>
         </div>
         <ul class="dirs">
           <li v-if="creating">

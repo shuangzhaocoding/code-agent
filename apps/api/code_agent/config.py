@@ -55,7 +55,17 @@ def _apply_env(cfg: dict[str, Any]) -> dict[str, Any]:
         cfg.setdefault("uploads", {})["dir"] = uploads_dir
     profile = os.environ.get("CODE_AGENT_RUNTIME_PROFILE")
     if profile:
+        # Must override user.yaml — setdefault alone keeps a stale split profile.
         cfg.setdefault("runtime", {})["profile"] = profile
+    agent_worker = os.environ.get("CODE_AGENT_AGENT_WORKER")
+    if agent_worker:
+        cfg.setdefault("runtime", {}).setdefault("agent_worker", {})["mode"] = agent_worker
+    terminal_mode = os.environ.get("CODE_AGENT_TERMINAL_MODE")
+    if terminal_mode:
+        cfg.setdefault("runtime", {}).setdefault("terminal", {})["mode"] = terminal_mode
+    preview_mode = os.environ.get("CODE_AGENT_PREVIEW_MODE")
+    if preview_mode:
+        cfg.setdefault("runtime", {}).setdefault("preview", {})["mode"] = preview_mode
     pg = os.environ.get("CODE_AGENT_POSTGRES_URL")
     if pg:
         cfg.setdefault("storage", {})["postgres_url"] = pg

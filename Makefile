@@ -1,4 +1,4 @@
-.PHONY: api web install build prod start dev worker terminal-svc preview-svc split up down restart status
+.PHONY: api web install build prod start dev worker terminal-svc preview-svc split up down restart status desktop desktop-win
 
 API_PORT ?= 4060
 DEV_UI_PORT ?= 4061
@@ -78,3 +78,13 @@ restart:
 
 status:
 	cd apps/api && python3.11 -m code_agent status
+
+# Electron 桌面预览（需先 build 前端）
+desktop: build
+	cd apps/desktop && npm install && npm start
+
+# 交叉打包 Windows zip（内嵌 Python，目标机免安装）
+desktop-win: build
+	cd apps/desktop && npm install && npm run pack:win
+	@echo "Windows zip: apps/desktop/release/"
+	@ls -lah apps/desktop/release/ | sed -n '1,30p'

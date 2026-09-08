@@ -25,15 +25,31 @@ export function useWorkspaceBrowse(_initial = '~') {
   const createKey = ref(0)
 
   const dirs = computed(() => browsing.value?.items.filter((item) => item.is_dir) || [])
+  const atRoots = computed(() => browsing.value != null && browsing.value.path === '' && browsing.value.parent === '')
+  const canGoParent = computed(() => browsing.value != null && !atRoots.value)
+  const displayPath = computed(() => {
+    if (!browsing.value) return ''
+    if (atRoots.value) return t('workspace.rootsLabel')
+    return browsing.value.path
+  })
 
   async function browse(p: string) {
     error.value = ''
     creating.value = false
     browsing.value = await api<BrowseResult>(`/api/workspaces/browse?path=${encodeURIComponent(p)}`)
-    path.value = browsing.value?.path || p
+    path.value = browsing.value?.path || ''
+  }
+
+  function goParent() {
+    if (!canGoParent.value || !browsing.value) return
+    void browse(browsing.value.parent)
   }
 
   function startCreate() {
+    if (atRoots.value) {
+      error.value = t('workspace.pickDriveFirst')
+      return
+    }
     error.value = ''
     createValue.value = ''
     createKey.value += 1
@@ -55,7 +71,10 @@ export function useWorkspaceBrowse(_initial = '~') {
       return
     }
     const parent = browsing.value?.path || path.value
-    if (!parent) return
+    if (!parent) {
+      error.value = t('workspace.pickDriveFirst')
+      return
+    }
     try {
       const created = await api<{ path: string }>('/api/workspaces/mkdir', {
         method: 'POST',
@@ -78,7 +97,11 @@ export function useWorkspaceBrowse(_initial = '~') {
     createValue,
     createKey,
     dirs,
+    atRoots,
+    canGoParent,
+    displayPath,
     browse,
+    goParent,
     startCreate,
     cancelCreate,
     commitCreate,

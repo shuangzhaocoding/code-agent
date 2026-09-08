@@ -107,7 +107,10 @@
     "folderName": "Ordnername",
     "emptyRecent": "Noch keine Arbeitsbereiche",
     "invalidName": "Ungültiger Name",
-    "fallbackName": "Arbeitsbereich"
+    "fallbackName": "Arbeitsbereich",
+    "pickFolder": "Ordner wählen",
+    "rootsLabel": "Dieser PC",
+    "pickDriveFirst": "Zuerst ein Laufwerk oder einen Ordner öffnen"
   },
   "settings": {
     "title": "Einstellungen",

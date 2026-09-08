@@ -8,7 +8,7 @@ import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 
 const store = useAppStore()
-const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
+const { path, error, creating, createValue, createKey, dirs, displayPath, canGoParent, atRoots, browse, goParent, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse()
 
 onMounted(async () => {
   await store.loadWorkspaces()
@@ -53,9 +53,9 @@ const recents = computed(() => store.recentWorkspaces)
 
       <div class="nested-list browse">
         <div class="crumbs">
-          <button type="button" class="btn btn-ghost mini" @click="browse(browsing?.parent || '~')">上级</button>
-          <button type="button" class="btn btn-ghost mini" @click="startCreate">新建文件夹</button>
-          <span>{{ browsing?.path }}</span>
+          <button type="button" class="btn btn-ghost mini" :disabled="!canGoParent" @click="goParent">上级</button>
+          <button type="button" class="btn btn-ghost mini" :disabled="atRoots" @click="startCreate">新建文件夹</button>
+          <span>{{ displayPath }}</span>
         </div>
         <ul class="dirs">
           <li v-if="creating">

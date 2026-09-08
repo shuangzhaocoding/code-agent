@@ -14,7 +14,9 @@ import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
-const { browsing, path, error, creating, createValue, createKey, dirs, browse, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse('~')
+const { path, error, creating, createValue, createKey, dirs, displayPath, canGoParent, atRoots, browse, goParent, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse('~')
+
+const isDesktop = Boolean((window as Window & { codeAgentDesktop?: { isDesktop?: boolean; pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop?.isDesktop)
 
 onMounted(async () => {
   await store.loadWorkspaces()
@@ -26,6 +28,20 @@ async function open() {
   error.value = ''
   try {
     await store.addWorkspace(path.value)
+  } catch (err) {
+    error.value = errMessage(err)
+  }
+}
+
+async function pickNativeFolder() {
+  const desktop = (window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop
+  if (!desktop?.pickDirectory) return
+  error.value = ''
+  try {
+    const chosen = await desktop.pickDirectory()
+    if (!chosen) return
+    path.value = chosen
+    await browse(chosen)
   } catch (err) {
     error.value = errMessage(err)
   }
@@ -57,6 +73,7 @@ const recents = computed(() => store.recentWorkspaces)
       <div class="launch-path">
         <AppIcon name="folder" :size="15" />
         <input v-model="path" :placeholder="t('workspace.pathPlaceholder')" @keydown.enter="open" />
+        <button v-if="isDesktop" type="button" class="btn" @click="pickNativeFolder">{{ t('workspace.pickFolder') }}</button>
         <button type="button" class="btn btn-primary" @click="open">{{ t('common.open') }}</button>
       </div>
       <p v-if="error" class="launch-err">{{ error }}</p>
@@ -88,11 +105,11 @@ const recents = computed(() => store.recentWorkspaces)
           <div class="browse-head">
             <h2>{{ t('workspace.browse') }}</h2>
             <div class="browse-actions">
-              <button type="button" class="browse-up" @click="startCreate">{{ t('workspace.newFolder') }}</button>
-              <button type="button" class="browse-up" @click="browse(browsing?.parent || '~')">{{ t('common.parent') }}</button>
+              <button type="button" class="browse-up" :disabled="atRoots" @click="startCreate">{{ t('workspace.newFolder') }}</button>
+              <button type="button" class="browse-up" :disabled="!canGoParent" @click="goParent">{{ t('common.parent') }}</button>
             </div>
           </div>
-          <p class="browse-path" :title="browsing?.path">{{ browsing?.path }}</p>
+          <p class="browse-path" :title="displayPath">{{ displayPath }}</p>
           <ul class="dirs">
             <li v-if="creating">
               <WorkspaceMkdirRow
@@ -314,6 +331,10 @@ const recents = computed(() => store.recentWorkspaces)
   cursor: pointer;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
+}
+.browse-up:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 .browse-up:hover {
   background: var(--code-bg);

@@ -1,0 +1,75 @@
+{
+  "name": "code-agent-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Code Agent Electron shell with embedded Windows Python",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "bundle:python-win": "bash scripts/bundle-python-win.sh",
+    "pack:win": "npm run bundle:python-win && electron-builder --win zip --x64",
+    "pack:win:dir": "npm run bundle:python-win && electron-builder --win dir --x64",
+    "pack:linux": "electron-builder --linux dir --x64"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.codeagent.desktop",
+    "productName": "Code Agent",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../..",
+        "to": "code-agent",
+        "filter": [
+          "apps/api/**",
+          "apps/web/dist/**",
+          "config/**",
+          "plugins/**",
+          "skills/**",
+          "LICENSE",
+          "README.md",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/node_modules/**",
+          "!**/.venv/**",
+          "!**/*.egg-info/**",
+          "!**/tests/**",
+          "!**/.pytest_cache/**"
+        ]
+      },
+      {
+        "from": "runtime/python-win",
+        "to": "python-win"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "CodeAgent-${version}-win-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "artifactName": "CodeAgent-${version}-linux-${arch}.${ext}"
+    },
+    "asar": true,
+    "npmRebuild": false
+  }
+}

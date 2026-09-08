@@ -108,7 +108,10 @@
     "folderName": "Folder name",
     "emptyRecent": "No workspaces yet",
     "invalidName": "Invalid name",
-    "fallbackName": "Workspace"
+    "fallbackName": "Workspace",
+    "pickFolder": "Choose folder",
+    "rootsLabel": "This PC",
+    "pickDriveFirst": "Open a drive or folder first"
   },
   "settings": {
     "title": "Settings",

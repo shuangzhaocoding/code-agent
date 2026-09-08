@@ -34,6 +34,7 @@ export type AppIconName =
   | 'play'
   | 'eye'
   | 'refresh'
+  | 'loader'
   | 'copy'
   | 'close-others'
   | 'close-left'
@@ -167,6 +168,7 @@ const paths: Record<string, string[]> = {
     'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
   ],
   refresh: ['M21 12a9 9 0 1 1-2.6-6.2', 'M21 3v6h-6'],
+  loader: ['M12 3a9 9 0 1 1-9 9'],
   copy: [
     'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z',
     'M4 16V6a2 2 0 0 1 2-2h10',

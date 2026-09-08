@@ -9,6 +9,9 @@ dist/
 *.sqlite3
 .vite/
 apps/web/dist/
+apps/desktop/node_modules/
+apps/desktop/release/
+apps/desktop/runtime/
 apps/api/*.egg-info/
 *.egg-info/
 .python-version

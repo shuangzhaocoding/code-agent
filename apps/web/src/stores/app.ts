@@ -22,6 +22,8 @@ export type Conversation = {
   mode: string
   model_id: string | null
   active_run_id: string | null
+  run_status?: string | null
+  awaiting_approval?: boolean
   turn_count?: number
   created_at?: string | null
   updated_at?: string | null
@@ -1257,9 +1259,13 @@ export const useAppStore = defineStore('app', () => {
         }
       }
     }
-    if (event.type === 'run.started') runStatus.value = 'running'
+    if (event.type === 'run.started') {
+      runStatus.value = 'running'
+      syncCurrentConversationStatus({ awaiting_approval: false })
+    }
     if (event.type === 'block.started' && type === 'approval') {
       notifyApprovalRequired(String(meta.approval_id || blockId || ''))
+      syncCurrentConversationStatus({ awaiting_approval: true })
     }
     if (event.type === 'run.completed') {
       playTaskCompleteSound()
@@ -1272,6 +1278,7 @@ export const useAppStore = defineStore('app', () => {
       )
       void refreshTree()
       if (activeRunId.value === event.run_id) activeRunId.value = null
+      syncCurrentConversationStatus({ awaiting_approval: false })
       void flushSendQueue()
     }
     if (event.type === 'block.started' || event.type === 'block.completed') {
@@ -1281,6 +1288,28 @@ export const useAppStore = defineStore('app', () => {
         ['write_file', 'search_replace', 'delete_file', 'read_file'].includes(name)
       if (fileOp) scheduleTreeRefresh(path || undefined)
     }
+  }
+
+  function patchConversationStatus(
+    id: string | null | undefined,
+    patch: Partial<Pick<Conversation, 'active_run_id' | 'run_status' | 'awaiting_approval' | 'turn_count' | 'updated_at'>>,
+  ) {
+    if (!id) return
+    conversations.value = conversations.value.map((c) => (c.id === id ? { ...c, ...patch } : c))
+  }
+
+  function syncCurrentConversationStatus(extra?: Partial<Pick<Conversation, 'awaiting_approval'>>) {
+    const id = conversationId.value
+    if (!id) return
+    const busy = runStatus.value === 'running' || runStatus.value === 'queued' || Boolean(activeRunId.value)
+    const awaiting =
+      extra?.awaiting_approval ??
+      (busy && pendingApprovalsFromMessages(messages.value).length > 0)
+    patchConversationStatus(id, {
+      active_run_id: activeRunId.value,
+      run_status: busy ? runStatus.value || 'running' : null,
+      awaiting_approval: Boolean(awaiting),
+    })
   }
 
   function detachRun() {
@@ -1312,10 +1341,14 @@ export const useAppStore = defineStore('app', () => {
     if (active && ['queued', 'running'].includes(String(active.status))) {
       lastEventId.value = active.last_event_id
       attachRun(active.id, active.last_event_id)
+      syncCurrentConversationStatus({
+        awaiting_approval: pendingApprovalsFromMessages(messages.value).length > 0,
+      })
     } else {
       runStatus.value = 'idle'
       activeRunId.value = null
       lastEventId.value = null
+      syncCurrentConversationStatus({ awaiting_approval: false })
     }
     window.dispatchEvent(new Event('ca-messages-loaded'))
   }
@@ -1481,12 +1514,14 @@ export const useAppStore = defineStore('app', () => {
     stopStream = null
     activeRunId.value = runId
     runStatus.value = 'running'
+    syncCurrentConversationStatus({ awaiting_approval: false })
     stopStream = subscribeRun(runId, after || null, onEvent, () => {
       // Stream closed after we already switched conversations — ignore
       if (activeRunId.value !== runId) return
       discardPendingDeltas()
       runStatus.value = runStatus.value === 'running' ? 'completed' : runStatus.value
       activeRunId.value = null
+      syncCurrentConversationStatus({ awaiting_approval: false })
       loadConversations()
       void flushSendQueue()
     })
@@ -1738,6 +1773,7 @@ export const useAppStore = defineStore('app', () => {
       })
       return changed ? { ...msg, blocks } : msg
     })
+    syncCurrentConversationStatus()
     api(`/api/runs/${runId}/approvals/${approvalId}`, {
       method: 'POST',
       body: JSON.stringify({ allowed }),

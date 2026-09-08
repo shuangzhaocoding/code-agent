@@ -90,14 +90,12 @@ def create_app(role: ServiceRole = "monolith") -> FastAPI:
         _mount_gateway_proxies(app)
 
     if role == "monolith":
-        if service_mode("terminal") == "inline":
-            from code_agent.routers import terminals
+        # Process role wins: a monolith binary always hosts terminal/preview inline,
+        # even if ~/.code-agent/config.yaml still says profile=split.
+        from code_agent.routers import preview, terminals
 
-            app.include_router(terminals.router)
-        if service_mode("preview") == "inline":
-            from code_agent.routers import preview
-
-            app.include_router(preview.router)
+        app.include_router(terminals.router)
+        app.include_router(preview.router)
     elif role == "terminal":
         from code_agent.routers import terminals
 

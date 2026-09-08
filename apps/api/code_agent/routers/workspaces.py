@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 import shutil
 from pathlib import Path
 
@@ -28,7 +29,13 @@ RAW_FILE_MAX_BYTES = 80 * 1024 * 1024
 
 
 def _normalize_root_path(raw: str) -> str:
-    return str(Path(raw).expanduser().resolve())
+    try:
+        return str(Path(raw).expanduser().resolve())
+    except (OSError, RuntimeError, ValueError):
+        try:
+            return str(Path(raw).expanduser())
+        except (OSError, RuntimeError, ValueError):
+            return str(raw or "")
 
 
 async def _find_workspace_by_root(root: str) -> Workspace | None:
@@ -37,7 +44,7 @@ async def _find_workspace_by_root(root: str) -> Workspace | None:
         try:
             if _normalize_root_path(row.root_path) == target:
                 return row
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             continue
     return None
 
@@ -49,7 +56,7 @@ def _dedupe_workspaces(rows: list[Workspace]) -> list[Workspace]:
     for row in rows:
         try:
             key = _normalize_root_path(row.root_path)
-        except OSError:
+        except (OSError, RuntimeError, ValueError):
             key = row.root_path
         if key in seen:
             continue
@@ -138,7 +145,10 @@ async def remove_workspace(workspace_id: str):
         raise HTTPException(status_code=404, detail={"code": "workspace.not_found"})
     from code_agent.plugins.loader import active_workspace_root, unload_workspace_plugins
 
-    normalized = _normalize_root_path(row.root_path)
+    try:
+        normalized = _normalize_root_path(row.root_path)
+    except (OSError, RuntimeError, ValueError):
+        normalized = row.root_path
     removed_plugins: list[str] = []
     if active_workspace_root() == normalized:
         removed_plugins = unload_workspace_plugins()
@@ -285,13 +295,20 @@ async def delete_entry(workspace_id: str, path: str):
 
 @router.get("/browse")
 async def browse(path: str = "~"):
-    p = Path(path).expanduser().resolve()
+    raw = (path or "").strip()
+    # Empty / sentinel → filesystem roots (all drives on Windows, / + home on Unix).
+    if raw in {"", ".", "__roots__"}:
+        return await run_sync(_browse_roots)
+
+    p = Path(raw).expanduser().resolve()
     if not p.exists():
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
     if p.is_file():
         p = p.parent
     items = await run_sync(_browse_dir, p)
-    return {"path": str(p), "parent": str(p.parent), "items": items}
+    # At drive root (C:\) or FS root (/), parent walks up to the roots listing.
+    parent = "" if p.parent == p else str(p.parent)
+    return {"path": str(p), "parent": parent, "items": items}
 
 
 @router.post("/mkdir")
@@ -350,11 +367,37 @@ def _delete_entry_fs(target: Path) -> None:
 
 def _browse_dir(p: Path) -> list[dict]:
     items: list[dict] = []
-    for child in sorted(p.iterdir(), key=lambda x: (not x.is_dir(), x.name.lower())):
+    try:
+        children = list(p.iterdir())
+    except PermissionError:
+        return items
+    for child in sorted(children, key=lambda x: (not x.is_dir(), x.name.lower())):
         items.append({"name": child.name, "path": str(child), "is_dir": child.is_dir()})
         if len(items) >= 400:
             break
     return items
+
+
+def _browse_roots() -> dict:
+    """Synthetic listing so UI can leave the home folder / current drive."""
+    items: list[dict] = []
+    if os.name == "nt":
+        drives: list[str] = []
+        listdrives = getattr(os, "listdrives", None)
+        if callable(listdrives):
+            drives = list(listdrives())
+        else:
+            drives = [f"{letter}:\\" for letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ" if Path(f"{letter}:\\").exists()]
+        for drive in drives:
+            path = drive if drive.endswith(("\\", "/")) else f"{drive}\\"
+            label = path.rstrip("\\/") + "\\"
+            items.append({"name": label, "path": path, "is_dir": True})
+    else:
+        items.append({"name": "/", "path": "/", "is_dir": True})
+        home = str(Path.home())
+        if home and home != "/":
+            items.append({"name": "Home", "path": home, "is_dir": True})
+    return {"path": "", "parent": "", "items": items}
 
 
 async def _activate_workspace_plugins(row: Workspace) -> list[dict]:

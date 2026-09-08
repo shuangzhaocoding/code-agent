@@ -107,7 +107,10 @@
     "folderName": "폴더 이름",
     "emptyRecent": "작업 공간이 없습니다",
     "invalidName": "이름이 올바르지 않습니다",
-    "fallbackName": "작업 공간"
+    "fallbackName": "작업 공간",
+    "pickFolder": "폴더 선택",
+    "rootsLabel": "이 PC",
+    "pickDriveFirst": "먼저 드라이브 또는 폴더를 여세요"
   },
   "settings": {
     "title": "설정",

@@ -57,11 +57,52 @@ async def _user_turn_counts(conv_ids: list) -> dict[str, int]:
     return out
 
 
+async def _active_run_meta(run_ids: list[str]) -> tuple[dict[str, str], set[str]]:
+    """Return (run_id -> status, run_ids awaiting tool approval)."""
+    if not run_ids:
+        return {}, set()
+    runs = await Run.filter(id__in=run_ids)
+    statuses = {str(r.id): str(r.status) for r in runs}
+
+    from code_agent.tools.approval import runs_awaiting_approval
+
+    awaiting = runs_awaiting_approval(run_ids)
+    missing = [rid for rid in run_ids if rid not in awaiting]
+    if missing:
+        msgs = await Message.filter(run_id__in=missing, role="assistant")
+        for msg in msgs:
+            rid = str(msg.run_id or "")
+            if not rid or rid in awaiting:
+                continue
+            for block in msg.blocks or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "approval":
+                    continue
+                if block.get("status") != "streaming":
+                    continue
+                if (block.get("meta") or {}).get("decision"):
+                    continue
+                awaiting.add(rid)
+                break
+    return statuses, awaiting
+
+
 @router.get("/workspaces/{workspace_id}/conversations")
 async def list_conversations(workspace_id: str):
     rows = await Conversation.filter(workspace_id=workspace_id, archived=False).order_by("-updated_at")
     counts = await _user_turn_counts([r.id for r in rows])
-    return [_conv(r, turn_count=counts.get(str(r.id), 0)) for r in rows]
+    run_ids = [str(r.active_run_id) for r in rows if r.active_run_id]
+    statuses, awaiting = await _active_run_meta(run_ids)
+    return [
+        _conv(
+            r,
+            turn_count=counts.get(str(r.id), 0),
+            run_status=statuses.get(str(r.active_run_id)) if r.active_run_id else None,
+            awaiting_approval=bool(r.active_run_id and str(r.active_run_id) in awaiting),
+        )
+        for r in rows
+    ]
 
 
 @router.post("/conversations")
@@ -179,7 +220,13 @@ async def send_message(conversation_id: str, body: MessageIn):
     return {"run_id": str(run.id), "conversation_id": conversation_id}
 
 
-def _conv(row: Conversation, *, turn_count: int = 0) -> dict:
+def _conv(
+    row: Conversation,
+    *,
+    turn_count: int = 0,
+    run_status: str | None = None,
+    awaiting_approval: bool = False,
+) -> dict:
     return {
         "id": str(row.id),
         "workspace_id": str(row.workspace_id),
@@ -187,6 +234,8 @@ def _conv(row: Conversation, *, turn_count: int = 0) -> dict:
         "mode": row.mode,
         "model_id": row.model_id,
         "active_run_id": row.active_run_id,
+        "run_status": run_status,
+        "awaiting_approval": awaiting_approval,
         "turn_count": turn_count,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
