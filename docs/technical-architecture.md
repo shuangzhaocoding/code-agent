@@ -472,13 +472,13 @@ Block 类型：`assistant.markdown` · `assistant.thinking` · `tool.call` · `t
 
 ## 12. HITL 人机协同
 
-`tools/approval.py`：
+基于 LangGraph `interrupt()` + `Command(resume=...)`（`tools/approval.py` + `agent/stream_adapter.py`）：
 
-1. 工具调用 `request_approval(tool, summary, details, kind)`
-2. Broker 发布 `approval` block
-3. 前端展示确认 UI
-4. 用户 `POST /api/runs/{id}/approvals/{aid}` → approve/deny
-5. 工具 await Event，返回 True/False
+1. 工具调用 `request_approval(...)` → 策略放行则直接 True，否则 `interrupt({tool, summary, details, kind})`
+2. `astream_events` 结束后通过 `aget_state().interrupts` 检测暂停；用 Interrupt id 作为 `approval_id`，发布 `approval` block
+3. 前端展示确认 UI（协议不变）
+4. 用户 `POST /api/runs/{id}/approvals/{aid}` → `resolve_approval` → `Command(resume=allowed|mapping)`
+5. ToolNode 从节点开头重入；`interrupt()` 返回决策，工具继续或返回 deny 文案
 
 用于：`delete_file`、危险 `run_command`、`git_commit` / `git_push` 等。
 

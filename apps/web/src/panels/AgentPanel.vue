@@ -11,6 +11,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import ConversationSwitcher from '@/components/ConversationSwitcher.vue'
 import UserMessageHistoryMenu from '@/components/UserMessageHistoryMenu.vue'
 import AssistantMessageBody from '@/components/AssistantMessageBody.vue'
+import ApprovalActionBar from '@/components/ApprovalActionBar.vue'
 import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
@@ -1405,6 +1406,7 @@ function openContextUsageDialog() {
             <AppIcon name="chevron" :size="18" />
           </button>
         </Transition>
+        <ApprovalActionBar />
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
         ref="senderWrap"

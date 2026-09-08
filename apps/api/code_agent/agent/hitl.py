@@ -1,10 +1,22 @@
-"""HITL bridge: tool-layer approvals integrate with LangGraph interrupt (Phase 4).
+"""HITL bridge: LangGraph ``interrupt`` + ``Command(resume=...)``.
 
-Tools call ``request_approval()`` which pauses until the UI POSTs
-``/api/runs/{id}/approvals/{aid}``. Future: migrate high-risk tools to
-``interrupt_before=['tools']`` + ``Command(resume=...)`` on the compiled graph.
+Tools call ``request_approval()`` → ``interrupt()``. The stream adapter detects
+pending interrupts, publishes approval SSE cards, waits for
+``POST /api/runs/{id}/approvals/{aid}``, then continues with ``Command(resume=...)``.
 """
 
-from code_agent.tools.approval import request_approval, resolve_approval
+from __future__ import annotations
 
-__all__ = ["request_approval", "resolve_approval"]
+from code_agent.tools.approval import (
+    deny_run_approvals,
+    request_approval,
+    resolve_approval,
+    wait_for_approval_resume,
+)
+
+__all__ = [
+    "deny_run_approvals",
+    "request_approval",
+    "resolve_approval",
+    "wait_for_approval_resume",
+]

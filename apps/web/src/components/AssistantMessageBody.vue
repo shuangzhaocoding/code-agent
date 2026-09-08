@@ -2,8 +2,10 @@
 import { computed, ref, watch } from 'vue'
 import { rendererFor } from '@/renderers'
 import type { Block, ChatMessage } from '@/protocol/applyEvent'
+import { matchApprovalHint } from '@/utils/approvals'
 import { classifyBlock, isAnswerMarkdown, isConversationBlock } from '@/utils/trajectory'
 import AppIcon from '@/components/AppIcon.vue'
+import ApprovalInlineHint from '@/components/ApprovalInlineHint.vue'
 
 const props = defineProps<{
   msg: ChatMessage
@@ -18,24 +20,33 @@ const workExpanded = ref(false)
 const finished = computed(() => !props.streaming)
 
 const workBlocks = computed(() =>
-  props.msg.blocks.filter((b) => !isConversationBlock(b.type) && b.type !== 'error'),
+  props.msg.blocks.filter((b) => {
+    if (b.type === 'error') return false
+    // Approvals belong in work process after the run (and never in the final answer).
+    if (b.type === 'approval') return finished.value
+    return !isConversationBlock(b.type)
+  }),
 )
+
 const answerBlocks = computed(() => {
   const candidates = props.msg.blocks.filter(
     (b) => (b.type === 'assistant.markdown' && isAnswerMarkdown(b as Block)) || b.type === 'error',
   )
   if (!finished.value) {
-    return props.msg.blocks.filter((b) => isConversationBlock(b.type) || b.type === 'error')
+    return props.msg.blocks.filter(
+      (b) => b.type !== 'approval' && (isConversationBlock(b.type) || b.type === 'error'),
+    )
   }
   if (candidates.length <= 1) {
-    return props.msg.blocks.filter((b) => isConversationBlock(b.type) || b.type === 'error')
+    return props.msg.blocks.filter(
+      (b) => b.type !== 'approval' && (isConversationBlock(b.type) || b.type === 'error'),
+    )
   }
   const lastMd = candidates[candidates.length - 1]
   return props.msg.blocks.filter(
     (b) =>
       b.type === 'error' ||
       b.type === 'user.text' ||
-      b.type === 'approval' ||
       (b.type === 'assistant.markdown' && b === lastMd),
   )
 })
@@ -52,11 +63,26 @@ const hiddenWorkCount = computed(() => workBlocks.value.length + collapsedMarkdo
 
 const showCollapseChrome = computed(() => finished.value && hiddenWorkCount.value > 0)
 
-const visibleBlocks = computed(() => {
-  if (!showCollapseChrome.value || workExpanded.value) {
-    return props.msg.blocks
+type VisibleRow = {
+  key: string
+  block: Block
+  hint?: Block
+}
+
+const visibleRows = computed((): VisibleRow[] => {
+  if (!finished.value) {
+    const used = new Set<string>()
+    const rows: VisibleRow[] = []
+    for (const block of props.msg.blocks) {
+      if (block.type === 'approval') continue
+      const hint = matchApprovalHint(block, props.msg.blocks, used)
+      rows.push({ key: block.id, block, hint })
+    }
+    return rows
   }
-  return answerBlocks.value
+  const blocks =
+    !showCollapseChrome.value || workExpanded.value ? props.msg.blocks : answerBlocks.value
+  return blocks.map((block) => ({ key: block.id, block }))
 })
 
 watch(finished, (done) => {
@@ -73,8 +99,13 @@ function summaryLabel(): string {
   let think = 0
   let tools = 0
   let files = 0
+  let approvals = 0
   let other = 0
   for (const b of blocks) {
+    if (b.type === 'approval') {
+      approvals += 1
+      continue
+    }
     const kind = classifyBlock(b)
     if (kind === 'think') think += 1
     else if (kind === 'tool' || kind === 'context' || kind === 'terminal') tools += 1
@@ -85,6 +116,7 @@ function summaryLabel(): string {
   if (think) parts.push(`${think} 次思考`)
   if (tools) parts.push(`${tools} 次工具`)
   if (files) parts.push(`${files} 处变更`)
+  if (approvals) parts.push(`${approvals} 次确认`)
   if (!parts.length) parts.push(`${blocks.length || other} 步`)
   return parts.join(' · ')
 }
@@ -103,9 +135,12 @@ function summaryLabel(): string {
       <span class="work-label">{{ workExpanded ? '收起工作过程' : '工作过程' }}</span>
       <span class="work-meta">{{ summaryLabel() }}</span>
     </button>
-    <section v-for="block in visibleBlocks" :key="block.id" class="block">
-      <component :is="rendererFor(block.type)" :block="block as Block" />
-    </section>
+    <template v-for="row in visibleRows" :key="row.key">
+      <section class="block">
+        <component :is="rendererFor(row.block.type)" :block="row.block as Block" />
+      </section>
+      <ApprovalInlineHint v-if="row.hint" :block="row.hint" />
+    </template>
   </div>
 </template>
 

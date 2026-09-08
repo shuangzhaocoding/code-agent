@@ -7,6 +7,7 @@ import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
+import { pendingApprovalsFromMessages } from '@/utils/approvals'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -1721,11 +1722,29 @@ export const useAppStore = defineStore('app', () => {
   function decideApproval(approvalId: string, allowed: boolean) {
     const runId = activeRunId.value
     if (!runId) return
+    const decision = allowed ? 'approved' : 'denied'
+    messages.value = messages.value.map((msg) => {
+      if (msg.role !== 'assistant') return msg
+      let changed = false
+      const blocks = msg.blocks.map((block) => {
+        if (block.type !== 'approval') return block
+        if (String(block.meta.approval_id || '') !== approvalId) return block
+        changed = true
+        return {
+          ...block,
+          status: allowed ? 'ok' : 'error',
+          meta: { ...block.meta, decision },
+        }
+      })
+      return changed ? { ...msg, blocks } : msg
+    })
     api(`/api/runs/${runId}/approvals/${approvalId}`, {
       method: 'POST',
       body: JSON.stringify({ allowed }),
     }).catch(() => undefined)
   }
+
+  const pendingApprovals = computed(() => pendingApprovalsFromMessages(messages.value))
 
   async function loadProviders() {
     providers.value = await api('/api/llm/providers')
@@ -1868,6 +1887,7 @@ export const useAppStore = defineStore('app', () => {
     askConfirm,
     closeConfirm,
     decideApproval,
+    pendingApprovals,
     providers,
     skills,
     conversationSkills,

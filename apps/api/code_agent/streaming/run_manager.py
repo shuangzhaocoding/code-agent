@@ -88,7 +88,7 @@ async def start_run(
 
 
 async def cancel_run(run_id: str) -> None:
-    from code_agent.tools.approval import deny_run_approvals
+    from code_agent.agent.hitl import deny_run_approvals
 
     await deny_run_approvals(run_id)
     event = _cancel.get(run_id)

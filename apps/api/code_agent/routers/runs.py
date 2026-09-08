@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from code_agent.db.models import Run
 from code_agent.streaming.broker import broker
 from code_agent.streaming.run_manager import cancel_run
-from code_agent.tools.approval import resolve_approval
+from code_agent.agent.hitl import resolve_approval
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 

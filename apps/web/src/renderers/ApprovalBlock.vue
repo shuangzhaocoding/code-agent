@@ -2,51 +2,34 @@
 import { computed } from 'vue'
 import type { Block } from '@/protocol/applyEvent'
 import EventCard from '@/components/EventCard.vue'
-import { useAppStore } from '@/stores/app'
+import { formatApprovalDetails } from '@/utils/approvals'
 
 const props = defineProps<{ block: Block }>()
-const store = useAppStore()
 
-const approvalId = computed(() => String(props.block.meta.approval_id || ''))
 const summary = computed(() => String(props.block.meta.summary || '需要确认这次操作'))
 const tool = computed(() => String(props.block.meta.tool || 'tool'))
 const decision = computed(() => String(props.block.meta.decision || ''))
 const pending = computed(() => !decision.value && props.block.status === 'streaming')
-
-const details = computed(() => {
-  const raw = props.block.meta.details
-  if (!raw) return ''
-  if (typeof raw === 'string') return raw
-  try {
-    return JSON.stringify(raw, null, 2)
-  } catch {
-    return String(raw)
-  }
-})
-
-function decide(allowed: boolean) {
-  if (!approvalId.value) return
-  store.decideApproval(approvalId.value, allowed)
-}
+const details = computed(() => formatApprovalDetails(props.block.meta.details))
 </script>
 
 <template>
+  <!--
+    Work-process history card. Live actions live in ApprovalActionBar above the composer;
+    streaming inline context uses ApprovalInlineHint under the tool call.
+  -->
   <EventCard
     icon="alert"
-    title="需要确认"
+    title="操作确认"
     :subtitle="tool"
     tone="danger"
     :status="pending ? 'streaming' : decision === 'denied' ? 'error' : 'ok'"
-    :default-open="pending"
+    :default-open="false"
   >
     <p class="summary">{{ summary }}</p>
     <pre v-if="details" class="details">{{ details }}</pre>
-    <template v-if="pending || decision" #footer>
-      <div v-if="pending" class="actions">
-        <button type="button" class="btn btn-ghost" @click.stop="decide(false)">拒绝</button>
-        <button type="button" class="btn btn-primary" @click.stop="decide(true)">允许执行</button>
-      </div>
-      <p v-else class="done">{{ decision === 'approved' ? '已允许' : '已拒绝' }}</p>
+    <template v-if="decision" #footer>
+      <p class="done">{{ decision === 'approved' ? '已允许' : '已拒绝' }}</p>
     </template>
   </EventCard>
 </template>
@@ -66,7 +49,6 @@ function decide(allowed: boolean) {
   color: var(--text-secondary);
   white-space: pre-wrap;
 }
-.actions { display: flex; justify-content: flex-end; gap: 8px; }
 .done {
   margin: 0;
   font-size: 12px;
