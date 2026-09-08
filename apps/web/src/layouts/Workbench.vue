@@ -119,17 +119,60 @@ function onWorkbenchKey(e: KeyboardEvent) {
   store.openSearch()
 }
 
+const LAYOUT_SEED = 2
+
 function seed(apiRef: DockviewApi) {
+  // Center: Agent + Memory
   apiRef.addPanel({ id: 'agent', component: 'agent', title: panelTitle('agent') })
+  apiRef.addPanel({
+    id: 'memory',
+    component: 'memory',
+    title: panelTitle('memory'),
+    position: { referencePanel: 'agent', direction: 'within' },
+  })
+
+  // Left: Workspace / Explorer / Search
+  apiRef.addPanel({
+    id: 'workspace',
+    component: 'workspace',
+    title: panelTitle('workspace'),
+    position: { referencePanel: 'agent', direction: 'left' },
+  })
+  apiRef.addPanel({
+    id: 'explorer',
+    component: 'explorer',
+    title: panelTitle('explorer'),
+    position: { referencePanel: 'workspace', direction: 'within' },
+  })
+  apiRef.addPanel({
+    id: 'search',
+    component: 'search',
+    title: panelTitle('search'),
+    position: { referencePanel: 'workspace', direction: 'within' },
+  })
+
+  apiRef.getPanel('agent')?.api.setActive()
   store.activity = 'agent'
+}
+
+const LEFT_PANELS = ['workspace', 'explorer', 'search'] as const
+const CENTER_PANELS = ['agent', 'memory'] as const
+
+function findExisting(apiRef: DockviewApi, ids: readonly string[]) {
+  return ids.find((id) => apiRef.getPanel(id))
+}
+
+function layoutSeedKey() {
+  return `ca.layout.seed.${store.workspaceId || 'default'}`
 }
 
 async function onReady(event: DockviewReadyEvent) {
   dock.value = event.api
   let restored = false
+  const seedApplied = Number(localStorage.getItem(layoutSeedKey()) || 0) >= LAYOUT_SEED
   try {
     const data = await api<{ layout: unknown }>(`/api/layout?workspace_id=${store.workspaceId}`)
-    if (data.layout) {
+    if (data.layout && seedApplied) {
       event.api.fromJSON(data.layout as never)
       restored = true
     }
@@ -138,7 +181,7 @@ async function onReady(event: DockviewReadyEvent) {
   }
   if (!restored) {
     seed(event.api)
-    openExplorer()
+    localStorage.setItem(layoutSeedKey(), String(LAYOUT_SEED))
   } else {
     const active = event.api.activePanel
     if (active?.id) store.activity = active.id
@@ -156,23 +199,31 @@ async function onReady(event: DockviewReadyEvent) {
   })
 }
 
-const placements: Record<string, { referencePanel: string; direction: 'left' | 'right' | 'below' }> = {
-  workspace: { referencePanel: 'agent', direction: 'left' },
-  explorer: { referencePanel: 'agent', direction: 'left' },
-  search: { referencePanel: 'agent', direction: 'left' },
-  editor: { referencePanel: 'agent', direction: 'left' },
-  terminal: { referencePanel: 'agent', direction: 'below' },
-  agent: { referencePanel: 'agent', direction: 'right' },
-  chats: { referencePanel: 'agent', direction: 'left' },
-  git: { referencePanel: 'agent', direction: 'left' },
-  ports: { referencePanel: 'agent', direction: 'below' },
-  skills: { referencePanel: 'agent', direction: 'right' },
-  plugins: { referencePanel: 'agent', direction: 'right' },
-  models: { referencePanel: 'agent', direction: 'right' },
-  settings: { referencePanel: 'agent', direction: 'right' },
-  trajectory: { referencePanel: 'agent', direction: 'right' },
-}
+function panelPosition(
+  apiRef: DockviewApi,
+  id: string,
+): { referencePanel: string; direction: 'left' | 'right' | 'within' } | undefined {
+  if ((LEFT_PANELS as readonly string[]).includes(id)) {
+    const left = findExisting(apiRef, LEFT_PANELS)
+    if (left) return { referencePanel: left, direction: 'within' }
+    const center = findExisting(apiRef, CENTER_PANELS)
+    return center ? { referencePanel: center, direction: 'left' } : undefined
+  }
 
+  if ((CENTER_PANELS as readonly string[]).includes(id)) {
+    const center = findExisting(apiRef, CENTER_PANELS)
+    return center ? { referencePanel: center, direction: 'within' } : undefined
+  }
+
+  // Everything else opens on the right, tabbed together when possible.
+  const rightIds = Object.keys(components).filter(
+    (pid) => !(LEFT_PANELS as readonly string[]).includes(pid) && !(CENTER_PANELS as readonly string[]).includes(pid),
+  )
+  const right = findExisting(apiRef, rightIds)
+  if (right) return { referencePanel: right, direction: 'within' }
+  const center = findExisting(apiRef, CENTER_PANELS)
+  return center ? { referencePanel: center, direction: 'right' } : undefined
+}
 
 function retitlePanels() {
   const apiRef = dock.value
@@ -196,13 +247,12 @@ function openPanel(id: string, component: string, title: string) {
     store.activity = id
     return
   }
-  const place = placements[id]
-  const refId = place && apiRef.getPanel(place.referencePanel) ? place.referencePanel : undefined
+  const place = panelPosition(apiRef, id)
   apiRef.addPanel({
     id,
     component,
     title,
-    ...(refId ? { position: { referencePanel: refId, direction: place.direction } } : {}),
+    ...(place ? { position: place } : {}),
   })
   store.activity = id
 }
