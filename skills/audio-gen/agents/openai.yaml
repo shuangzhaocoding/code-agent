@@ -1,0 +1,4 @@
+interface:
+  display_name: "AudioGen"
+  short_description: "Generate speech (text-to-speech) via an OpenAI-compatible API (gpt-4o-mini-tt)"
+  default_prompt: "Use $audio-gen to synthesize speech from text via /v1/audio/speech with model gpt-4o-mini-tt."

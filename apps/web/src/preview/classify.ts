@@ -2,6 +2,7 @@ export type OpenFileKind =
   | 'text'
   | 'image'
   | 'video'
+  | 'audio'
   | 'html'
   | 'pdf'
   | 'docx'
@@ -11,6 +12,7 @@ export type OpenFileKind =
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'])
 const VIDEO_EXT = new Set(['mp4', 'webm', 'ogg', 'mov', 'm4v'])
+const AUDIO_EXT = new Set(['mp3', 'wav', 'oga', 'm4a', 'aac', 'flac', 'opus', 'weba'])
 const HTML_EXT = new Set(['html', 'htm'])
 const PDF_EXT = new Set(['pdf'])
 const DOCX_EXT = new Set(['docx'])
@@ -96,6 +98,7 @@ export function classifyOpenKind(path: string): OpenFileKind {
   const ext = extOf(path)
   if (IMAGE_EXT.has(ext)) return 'image'
   if (VIDEO_EXT.has(ext)) return 'video'
+  if (AUDIO_EXT.has(ext)) return 'audio'
   if (HTML_EXT.has(ext)) return 'html'
   if (PDF_EXT.has(ext)) return 'pdf'
   if (DOCX_EXT.has(ext)) return 'docx'

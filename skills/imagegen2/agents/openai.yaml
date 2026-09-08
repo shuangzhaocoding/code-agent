@@ -1,0 +1,4 @@
+interface:
+  display_name: "ImageGen2"
+  short_description: "Generate or edit images via an OpenAI-compatible API (gpt-image-2 / gpt-image-1.5 / gpt-image-1)"
+  default_prompt: "Use $imagegen2 to generate or edit an image (text-to-image via /v1/images/generations, or reference/edit images via /v1/images/edits)."

@@ -1397,6 +1397,7 @@ function openContextUsageDialog() {
             v-if="showScrollToBottom"
             type="button"
             class="scroll-to-bottom-btn"
+            :class="{ loading: running() }"
             :title="t('chat.scrollToBottom')"
             :aria-label="t('chat.scrollToBottom')"
             @click="resumeStickScroll"
@@ -1827,6 +1828,29 @@ html[data-theme='dark'] .scroll-to-bottom-btn {
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
   transform: translateX(-50%) translateY(-1px);
+}
+
+.scroll-to-bottom-btn.loading {
+  border-color: color-mix(in srgb, var(--primary) 24%, var(--border));
+}
+
+.scroll-to-bottom-btn.loading::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  padding: 2px;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0deg 210deg, color-mix(in srgb, var(--primary) 35%, transparent) 245deg, var(--primary) 300deg 350deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--primary) 70%, transparent));
+  pointer-events: none;
+  animation: scroll-to-bottom-border-spin 0.75s linear infinite;
+}
+
+@keyframes scroll-to-bottom-border-spin {
+  to { transform: rotate(360deg); }
 }
 
 .scroll-jump-fade-enter-active,
