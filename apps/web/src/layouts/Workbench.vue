@@ -136,8 +136,13 @@ async function onReady(event: DockviewReadyEvent) {
   } catch {
     restored = false
   }
-  if (!restored) seed(event.api)
-  openExplorer()
+  if (!restored) {
+    seed(event.api)
+    openExplorer()
+  } else {
+    const active = event.api.activePanel
+    if (active?.id) store.activity = active.id
+  }
   await nextTick()
   requestAnimationFrame(() => {
     window.dispatchEvent(new Event('ca-layout-ready'))

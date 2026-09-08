@@ -14,6 +14,7 @@ export type Workspace = {
   id: string
   name: string
   root_path: string
+  created_at?: string | null
   last_opened_at?: string | null
 }
 export type Conversation = {
@@ -207,8 +208,8 @@ export const useAppStore = defineStore('app', () => {
 
   const recentWorkspaces = computed(() =>
     [...workspaces.value].sort((a, b) => {
-      const ta = a.last_opened_at ? Date.parse(a.last_opened_at) : 0
-      const tb = b.last_opened_at ? Date.parse(b.last_opened_at) : 0
+      const ta = a.created_at ? Date.parse(a.created_at) : 0
+      const tb = b.created_at ? Date.parse(b.created_at) : 0
       return tb - ta
     }),
   )
@@ -338,7 +339,7 @@ export const useAppStore = defineStore('app', () => {
     if (activePath.value) window.dispatchEvent(new Event('ca-focus-editor'))
   }
 
-  async function selectWorkspace(id: string) {
+  async function selectWorkspace(id: string, opts?: { openExplorer?: boolean }) {
     await api(`/api/workspaces/${id}/open`, { method: 'POST' })
     workspaceId.value = id
     localStorage.setItem('ca.workspace', id)
@@ -368,7 +369,7 @@ export const useAppStore = defineStore('app', () => {
     await restoreEditorState()
     suppressEditorPersist.value = false
     persistEditorState()
-    openExplorerPanel()
+    if (opts?.openExplorer !== false) openExplorerPanel()
     await loadWorkspaces()
   }
 

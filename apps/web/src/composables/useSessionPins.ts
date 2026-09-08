@@ -37,11 +37,20 @@ export function useSessionPins() {
     return ids.value.includes(id)
   }
 
+  function isPinnedIn(workspaceId: string, id: string) {
+    return read(workspaceId).includes(id)
+  }
+
   function toggle(id: string) {
     const ws = store.workspaceId || ''
     if (!ws) return
-    const current = read(ws)
-    write(ws, current.includes(id) ? current.filter((x) => x !== id) : [id, ...current])
+    toggleIn(ws, id)
+  }
+
+  function toggleIn(workspaceId: string, id: string) {
+    if (!workspaceId) return
+    const current = read(workspaceId)
+    write(workspaceId, current.includes(id) ? current.filter((x) => x !== id) : [id, ...current])
   }
 
   function sortByPin<T extends { id: string }>(list: T[]): T[] {
@@ -56,5 +65,16 @@ export function useSessionPins() {
     })
   }
 
-  return { ids, isPinned, toggle, sortByPin }
+  function sortByPinIn<T extends { id: string }>(workspaceId: string, list: T[]): T[] {
+    const pinned = read(workspaceId)
+    return [...list].sort((a, b) => {
+      const pa = pinned.includes(a.id) ? 0 : 1
+      const pb = pinned.includes(b.id) ? 0 : 1
+      if (pa !== pb) return pa - pb
+      if (pa === 0 && pb === 0) return pinned.indexOf(a.id) - pinned.indexOf(b.id)
+      return 0
+    })
+  }
+
+  return { ids, isPinned, isPinnedIn, toggle, toggleIn, sortByPin, sortByPinIn }
 }

@@ -9,7 +9,7 @@ const store = useAppStore()
 onMounted(async () => {
   await store.loadWorkspaces()
   if (store.workspaceId) {
-    await store.selectWorkspace(store.workspaceId)
+    await store.selectWorkspace(store.workspaceId, { openExplorer: false })
   }
 })
 </script>

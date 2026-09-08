@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron')
 const { spawn } = require('child_process')
 const http = require('http')
 const path = require('path')
@@ -94,6 +94,7 @@ function createWindow() {
     minHeight: 700,
     title: 'Code Agent',
     backgroundColor: '#0f1115',
+    autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -260,7 +261,11 @@ if (!gotLock) {
     if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]
   })
-  app.whenReady().then(boot)
+  app.whenReady().then(() => {
+    // Hide File / Edit / View etc. native menu bar (packaged desktop UX).
+    Menu.setApplicationMenu(null)
+    return boot()
+  })
 }
 
 app.on('before-quit', () => {

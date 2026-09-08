@@ -100,7 +100,7 @@ class MkdirIn(BaseModel):
 
 @router.get("")
 async def list_workspaces():
-    rows = await Workspace.all().order_by("-last_opened_at")
+    rows = await Workspace.all().order_by("-created_at")
     return [_ws(r) for r in _dedupe_workspaces(rows)]
 
 
@@ -413,5 +413,6 @@ def _ws(row: Workspace) -> dict:
         "name": row.name,
         "root_path": row.root_path,
         "ignore_globs": row.ignore_globs,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
         "last_opened_at": row.last_opened_at.isoformat() if row.last_opened_at else None,
     }
