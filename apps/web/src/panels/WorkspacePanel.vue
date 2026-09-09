@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useAppStore, type Conversation, type Workspace } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceSwitch from '@/components/WorkspaceSwitch.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
-import { formatRelativeTime } from '@/utils/relativeTime'
+import { formatRelativeTime, formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 
 const PREVIEW_LIMIT = 5
 
@@ -20,13 +20,26 @@ const errors = reactive<Record<string, string>>({})
 const openingId = ref<string | null>(null)
 const switchingId = ref<string | null>(null)
 const creatingId = ref<string | null>(null)
+const removingId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const editingTitle = ref('')
 const pinTick = ref(0)
 
+const hoverId = ref<string | null>(null)
+const hoverReady = ref(false)
+const tipStyle = ref<Record<string, string>>({})
+const tipEl = ref<HTMLElement | null>(null)
+let hoverHideTimer = 0
+let tipRaf = 0
+
 onMounted(async () => {
   await store.loadWorkspaces()
   if (store.workspaceId) await setExpanded(store.workspaceId, true)
+})
+
+onBeforeUnmount(() => {
+  clearHoverHide()
+  if (tipRaf) cancelAnimationFrame(tipRaf)
 })
 
 watch(
@@ -48,6 +61,74 @@ function showsAll(id: string) {
 function basename(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/)
   return parts[parts.length - 1] || path
+}
+
+const hoverWorkspace = computed(() =>
+  store.recentWorkspaces.find((w) => w.id === hoverId.value) || null,
+)
+
+function clearHoverHide() {
+  if (hoverHideTimer) {
+    window.clearTimeout(hoverHideTimer)
+    hoverHideTimer = 0
+  }
+}
+
+function placeTip(anchor: DOMRect) {
+  const el = tipEl.value
+  const width = el?.offsetWidth || 280
+  const height = el?.offsetHeight || 120
+  const gap = 10
+  const margin = 8
+  let left = anchor.right + gap
+  if (left + width > window.innerWidth - margin) {
+    left = Math.max(margin, anchor.left - width - gap)
+  }
+  let top = anchor.top
+  if (top + height > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - height - margin)
+  }
+  tipStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    zIndex: '13000',
+  }
+  hoverReady.value = true
+}
+
+function showTip(ws: Workspace, e: MouseEvent) {
+  clearHoverHide()
+  const row = (e.currentTarget as HTMLElement | null)?.closest('.ws-row') as HTMLElement | null
+  const anchor = (row || (e.currentTarget as HTMLElement)).getBoundingClientRect()
+  hoverId.value = ws.id
+  hoverReady.value = false
+  void nextTick(() => {
+    if (tipRaf) cancelAnimationFrame(tipRaf)
+    tipRaf = requestAnimationFrame(() => {
+      tipRaf = 0
+      if (hoverId.value !== ws.id) return
+      placeTip(anchor)
+    })
+  })
+}
+
+function scheduleHideTip() {
+  clearHoverHide()
+  hoverHideTimer = window.setTimeout(() => {
+    hoverId.value = null
+    hoverReady.value = false
+    hoverHideTimer = 0
+  }, 120)
+}
+
+function keepTip() {
+  clearHoverHide()
+}
+
+function sessionCountLabel(wsId: string) {
+  if (!(wsId in convMap)) return null
+  return sortedConvs(wsId).length
 }
 
 async function setExpanded(id: string, open: boolean) {
@@ -112,6 +193,32 @@ async function openWorkspace(ws: Workspace, e: MouseEvent) {
     await setExpanded(ws.id, true)
   } finally {
     switchingId.value = null
+  }
+}
+
+async function removeWorkspace(ws: Workspace, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (removingId.value) return
+  const name = ws.name || basename(ws.root_path)
+  const ok = await store.askConfirm({
+    title: '移除工作空间',
+    summary: `确定移除「${name}」？不会删除磁盘上的文件。`,
+    confirmLabel: '移除',
+    danger: true,
+  })
+  if (!ok) return
+  removingId.value = ws.id
+  try {
+    await store.removeWorkspace(ws.id)
+    const next = new Set(expandedIds.value)
+    next.delete(ws.id)
+    expandedIds.value = next
+    delete convMap[ws.id]
+    delete loading[ws.id]
+    delete errors[ws.id]
+  } finally {
+    removingId.value = null
   }
 }
 
@@ -279,7 +386,11 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
           class="ws-group"
           :class="{ current: ws.id === store.workspaceId, open: isExpanded(ws.id) }"
         >
-          <div class="ws-row" :title="ws.root_path">
+          <div
+            class="ws-row"
+            @mouseenter="showTip(ws, $event)"
+            @mouseleave="scheduleHideTip"
+          >
             <button type="button" class="ws-main" @click="toggleExpand(ws.id)">
               <AppIcon
                 class="ws-chev"
@@ -287,6 +398,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 :size="12"
                 :stroke-width="2"
               />
+              <AppIcon class="ws-icon" name="folder" :size="14" :stroke-width="1.75" />
               <span class="ws-copy">
                 <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
               </span>
@@ -310,6 +422,15 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                   @click="openWorkspace(ws, $event)"
                 >
                   打开
+                </button>
+                <button
+                  type="button"
+                  class="ws-tool danger"
+                  title="移除工作空间"
+                  :disabled="removingId === ws.id"
+                  @click="removeWorkspace(ws, $event)"
+                >
+                  <AppIcon name="trash" :size="13" :stroke-width="1.75" />
                 </button>
               </div>
               <span v-if="ws.id === store.workspaceId" class="ws-dot" title="当前工作空间" />
@@ -408,6 +529,45 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       </ul>
     </div>
 
+    <Teleport to="body">
+      <div
+        v-if="hoverWorkspace"
+        ref="tipEl"
+        class="ws-tip"
+        :class="{ ready: hoverReady }"
+        :style="tipStyle"
+        role="tooltip"
+        @mouseenter="keepTip"
+        @mouseleave="scheduleHideTip"
+      >
+        <div class="ws-tip-head">
+          <AppIcon class="ws-tip-icon" name="folder" :size="15" :stroke-width="1.75" />
+          <div class="ws-tip-titles">
+            <strong>{{ hoverWorkspace.name || basename(hoverWorkspace.root_path) }}</strong>
+            <span v-if="hoverWorkspace.id === store.workspaceId" class="ws-tip-badge">当前</span>
+          </div>
+        </div>
+        <dl class="ws-tip-meta">
+          <div>
+            <dt>路径</dt>
+            <dd class="mono" :title="hoverWorkspace.root_path">{{ hoverWorkspace.root_path }}</dd>
+          </div>
+          <div v-if="hoverWorkspace.last_opened_at">
+            <dt>最近打开</dt>
+            <dd>{{ formatWorkspaceOpenedAt(hoverWorkspace.last_opened_at) }}</dd>
+          </div>
+          <div v-if="hoverWorkspace.created_at">
+            <dt>创建</dt>
+            <dd>{{ formatRelativeTime(hoverWorkspace.created_at) }}</dd>
+          </div>
+          <div v-if="sessionCountLabel(hoverWorkspace.id) != null">
+            <dt>会话</dt>
+            <dd>{{ sessionCountLabel(hoverWorkspace.id) }} 个</dd>
+          </div>
+        </dl>
+      </div>
+    </Teleport>
+
     <WorkspaceSwitch v-if="showOpen" @close="showOpen = false" />
   </div>
 </template>
@@ -495,8 +655,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   border-radius: 10px;
 }
 
-.ws-row:hover,
-.ws-group.current > .ws-row {
+.ws-row:hover {
   background: color-mix(in srgb, var(--text-h) 4.5%, transparent);
 }
 
@@ -521,6 +680,15 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   flex-shrink: 0;
   color: var(--text-muted);
   opacity: 0.85;
+}
+
+.ws-icon {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.ws-group.current .ws-icon {
+  color: var(--primary);
 }
 
 .ws-copy {
@@ -593,6 +761,11 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 .ws-tool:hover {
   background: var(--code-bg);
   color: var(--text-h);
+}
+
+.ws-tool.danger:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
 
 .ws-tool:disabled {
@@ -788,6 +961,94 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 
 .show-more:hover {
   background: color-mix(in srgb, var(--text-h) 4%, transparent);
+  color: var(--text-secondary);
+}
+</style>
+
+<style scoped>
+.ws-tip {
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: var(--dropdown-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.ws-tip.ready {
+  opacity: 1;
+  pointer-events: auto;
+}
+html[data-theme='dark'] .ws-tip {
+  box-shadow: var(--dropdown-shadow-dark);
+}
+.ws-tip-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ws-tip-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--primary);
+}
+.ws-tip-titles {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ws-tip-titles strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+.ws-tip-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 600;
+}
+.ws-tip-meta {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ws-tip-meta > div {
+  display: grid;
+  grid-template-columns: 4.5em minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.ws-tip-meta dt {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.ws-tip-meta dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.45;
+  word-break: break-all;
+}
+.ws-tip-meta dd.mono {
+  font-family: var(--mono);
+  font-size: 11px;
   color: var(--text-secondary);
 }
 </style>

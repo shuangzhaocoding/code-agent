@@ -230,6 +230,18 @@ export const useAppStore = defineStore('app', () => {
     await selectWorkspace(ws.id)
   }
 
+  async function removeWorkspace(id: string) {
+    await api(`/api/workspaces/${id}`, { method: 'DELETE' })
+    workspaces.value = workspaces.value.filter((w) => w.id !== id)
+    if (workspaceId.value !== id) return
+    const next = workspaces.value[0]
+    if (next) {
+      await selectWorkspace(next.id, { openExplorer: false })
+      return
+    }
+    clearWorkspace()
+  }
+
   function clearWorkspace() {
     detachRun()
     workspaceId.value = null
@@ -1933,6 +1945,7 @@ export const useAppStore = defineStore('app', () => {
     pendingModelProbe,
     loadWorkspaces,
     addWorkspace,
+    removeWorkspace,
     clearWorkspace,
     selectWorkspace,
     loadTree,
