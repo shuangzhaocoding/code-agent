@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -23,15 +25,39 @@ _MAX_FILES = 400
 _MAX_FILE_BYTES = 1_500_000
 _MAX_DEPTH = 10
 
+# Avoid wiping+re-downloading on every workspace switch / concurrent skills load.
+_DEFAULT_TTL_SEC = 120.0
+_synced_at: dict[str, float] = {}
+_locks: dict[str, asyncio.Lock] = {}
+
 
 def mirror_root(workspace_id: str) -> Path:
     return Path(settings.data_dir) / "ssh-mirror" / str(workspace_id)
 
 
 def clear_mirror(workspace_id: str) -> None:
-    root = mirror_root(workspace_id)
+    wid = str(workspace_id)
+    _synced_at.pop(wid, None)
+    root = mirror_root(wid)
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)
+
+
+def _ttl_sec() -> float:
+    raw = settings.get("ssh.mirror_ttl_sec")
+    try:
+        return max(0.0, float(raw if raw is not None else _DEFAULT_TTL_SEC))
+    except (TypeError, ValueError):
+        return _DEFAULT_TTL_SEC
+
+
+def _lock_for(workspace_id: str) -> asyncio.Lock:
+    wid = str(workspace_id)
+    lock = _locks.get(wid)
+    if lock is None:
+        lock = asyncio.Lock()
+        _locks[wid] = lock
+    return lock
 
 
 async def _sync_tree(
@@ -128,7 +154,35 @@ def local_assets_root(ws: Workspace | dict[str, Any]) -> str | None:
     return ws.root_path
 
 
-async def ensure_local_assets_root(ws: Workspace) -> str:
-    if workspace_is_ssh(ws):
-        return str(await sync_ssh_workspace_assets(ws))
-    return ws.root_path
+async def ensure_local_assets_root(ws: Workspace, *, force: bool = False) -> str:
+    """Return local root for plugins/skills; SSH mirrors are TTL-cached.
+
+    Concurrent callers for the same workspace share one sync (open + skills).
+    """
+    if not workspace_is_ssh(ws):
+        return ws.root_path
+
+    wid = str(ws.id)
+    root = mirror_root(wid)
+    ttl = _ttl_sec()
+    now = time.monotonic()
+    if (
+        not force
+        and ttl > 0
+        and root.exists()
+        and (now - _synced_at.get(wid, 0.0)) < ttl
+    ):
+        return str(root)
+
+    async with _lock_for(wid):
+        now = time.monotonic()
+        if (
+            not force
+            and ttl > 0
+            and root.exists()
+            and (now - _synced_at.get(wid, 0.0)) < ttl
+        ):
+            return str(root)
+        path = await sync_ssh_workspace_assets(ws)
+        _synced_at[wid] = time.monotonic()
+        return str(path)

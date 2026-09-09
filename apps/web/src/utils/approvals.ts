@@ -15,6 +15,36 @@ export function isPendingApprovalBlock(block: Block): boolean {
   return block.status === 'streaming'
 }
 
+/** Mark undecided approval cards as settled (run failed / cancelled / idle history). */
+export function settleUndecidedApprovals(
+  messages: ChatMessage[],
+  opts?: { runId?: string | null; decision?: 'denied' | 'cancelled' },
+): ChatMessage[] {
+  const runId = opts?.runId
+  const decision = opts?.decision || 'denied'
+  let touched = false
+  const next = messages.map((msg) => {
+    if (runId != null && runId !== '') {
+      const sameRun = msg.run_id === runId || msg.id === `run-${runId}`
+      if (!sameRun) return msg
+    }
+    let changed = false
+    const blocks = msg.blocks.map((block) => {
+      if (!isPendingApprovalBlock(block)) return block
+      changed = true
+      touched = true
+      return {
+        ...block,
+        status: 'error',
+        ended_at: block.ended_at || Date.now(),
+        meta: { ...block.meta, decision },
+      }
+    })
+    return changed ? { ...msg, blocks } : msg
+  })
+  return touched ? next : messages
+}
+
 export function formatApprovalDetails(raw: unknown): string {
   if (raw == null || raw === '') return ''
   if (typeof raw === 'string') return raw

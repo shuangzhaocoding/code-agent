@@ -1219,6 +1219,11 @@ function openContextUsageDialog() {
     <div class="agent-main">
       <div ref="scroller" class="timeline" :class="{ 'is-pinning': forcePinning }" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
         <div ref="timelineInner" class="timeline-inner">
+        <div v-if="store.switchLoading" class="switch-loading" role="status" aria-live="polite">
+          <span class="switch-spinner" aria-hidden="true" />
+          <p>{{ store.switchLoading }}</p>
+        </div>
+        <template v-else>
         <div v-if="!store.messages.length" class="empty">
           <div class="empty-icon" aria-hidden="true">
             <AppIcon name="atom" :size="32" />
@@ -1286,6 +1291,7 @@ function openContextUsageDialog() {
           <span class="dots"><i /><i /><i /></span>
           <button type="button" class="stop-inline" @click="store.stop()">{{ t('common.stop') }}</button>
         </div>
+        </template>
         </div>
       </div>
     </div>
@@ -1519,6 +1525,33 @@ function openContextUsageDialog() {
 .virtual-spacer {
   flex: none;
   width: 100%;
+}
+.switch-loading {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: min(100%, 420px);
+  min-height: 42vh;
+  padding: 40px 12px 24px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.switch-loading p {
+  margin: 0;
+}
+.switch-spinner {
+  width: 22px;
+  height: 22px;
+  border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: switch-spin 0.7s linear infinite;
+}
+@keyframes switch-spin {
+  to { transform: rotate(360deg); }
 }
 .empty {
   align-self: center;

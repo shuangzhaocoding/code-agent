@@ -10,7 +10,7 @@ const AUTO_CLOSE_SEC = 10
 const COMPACT_DELAY_MS = 700
 
 const { t } = useI18n()
-const { ports, markPortHighlighted } = usePortsWatch()
+const { ports, markPortHighlighted, autoRefresh } = usePortsWatch()
 const notices = ref<PortNotice[]>([])
 const known = ref<Set<number> | null>(null)
 let seq = 0
@@ -100,6 +100,7 @@ async function copyAddress(item: PortNotice) {
 watch(
   ports,
   (list) => {
+    if (!autoRefresh.value) return
     const interesting = list.filter(isInterestingPort)
     const next = new Set(interesting.map((p) => p.port))
     if (known.value === null) {

@@ -124,7 +124,8 @@
     "sshPathPlaceholder": "远程目录，如 /home/you/project",
     "sshConnect": "连接并浏览",
     "sshBrowse": "远程目录",
-    "sshLead": "通过 SSH 连接远程主机并选择目录作为工作空间。"
+    "sshLead": "通过 SSH 连接远程主机并选择目录作为工作空间。",
+    "switching": "正在切换工作空间…"
   },
   "settings": {
     "title": "设置",
@@ -313,6 +314,7 @@
     "promptBusy": "输出中也可输入；Enter 加入队列，Alt+Enter 立即发送",
     "emptyLead": "描述你想改的代码，或用 Skill / 自备模型开始。",
     "emptyHint": "打开命令面板",
+    "loadingConversation": "正在加载会话…",
     "copied": "已复制",
     "expandAll": "展开全部",
     "collapse": "收起",

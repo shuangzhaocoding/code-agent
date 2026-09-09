@@ -7,7 +7,7 @@ import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
-import { pendingApprovalsFromMessages } from '@/utils/approvals'
+import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/approvals'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -106,6 +106,9 @@ export const useAppStore = defineStore('app', () => {
   const conversations = ref<Conversation[]>([])
   const conversationId = ref<string | null>(null)
   const messages = ref<ChatMessage[]>([])
+  /** Non-null while switching conversation / workspace — shown as loading tip in Agent panel. */
+  const switchLoading = ref<string | null>(null)
+  let switchLoadGen = 0
   const runStatus = ref<string>('idle')
   const lastEventId = ref<string | null>(null)
   const applied = ref<Set<string>>(new Set())
@@ -404,37 +407,47 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function selectWorkspace(id: string, opts?: { openExplorer?: boolean }) {
-    await api(`/api/workspaces/${id}/open`, { method: 'POST' })
-    workspaceId.value = id
-    localStorage.setItem('ca.workspace', id)
-    suppressEditorPersist.value = true
-    openFiles.value = []
-    activePath.value = null
-    const savedExpanded = readExpanded(id)
-    treePath.value = ''
-    childrenMap.value = {}
-    expanded.value = new Set()
-    gitChangedPaths.value = {}
-    gitRepoOk.value = false
-    sessionTreeMarks.value = {}
-    ackedTreeMarks.value = {}
-    await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders(), loadGitChangedPaths()])
-    await restoreExpandedDirs(savedExpanded)
-    const saved = localStorage.getItem(conversationStorageKey(id))
-    const restore =
-      (saved && conversations.value.some((c) => c.id === saved) && saved) ||
-      conversations.value[0]?.id ||
-      null
-    if (restore) {
-      await openConversation(restore)
-    } else {
-      await newChat()
+    const gen = ++switchLoadGen
+    switchLoading.value = t('workspace.switching')
+    try {
+      await api(`/api/workspaces/${id}/open`, { method: 'POST' })
+      workspaceId.value = id
+      localStorage.setItem('ca.workspace', id)
+      suppressEditorPersist.value = true
+      openFiles.value = []
+      activePath.value = null
+      const savedExpanded = readExpanded(id)
+      treePath.value = ''
+      childrenMap.value = {}
+      expanded.value = new Set()
+      gitChangedPaths.value = {}
+      gitRepoOk.value = false
+      sessionTreeMarks.value = {}
+      ackedTreeMarks.value = {}
+      // Critical path first — git / editor restore are deferred so chat UI unlocks sooner.
+      await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders()])
+      void loadGitChangedPaths()
+      const expandTask = restoreExpandedDirs(savedExpanded)
+      const saved = localStorage.getItem(conversationStorageKey(id))
+      const restore =
+        (saved && conversations.value.some((c) => c.id === saved) && saved) ||
+        conversations.value[0]?.id ||
+        null
+      if (restore) {
+        await openConversation(restore, { loading: false })
+      } else {
+        await newChat()
+      }
+      await expandTask
+      void restoreEditorState().finally(() => {
+        suppressEditorPersist.value = false
+        persistEditorState()
+      })
+      if (opts?.openExplorer !== false) openExplorerPanel()
+      void loadWorkspaces()
+    } finally {
+      if (gen === switchLoadGen) switchLoading.value = null
     }
-    await restoreEditorState()
-    suppressEditorPersist.value = false
-    persistEditorState()
-    if (opts?.openExplorer !== false) openExplorerPanel()
-    await loadWorkspaces()
   }
 
   async function loadTree(path = '') {
@@ -444,9 +457,8 @@ export const useAppStore = defineStore('app', () => {
       `/api/workspaces/${workspaceId.value}/tree?path=${encodeURIComponent(path)}`,
     )
     if (workspaceId.value !== ws) return
-    const next = childrenMap.value
-    next[path] = data.items
-    childrenMap.value = { ...next }
+    // Merge atomically so parallel restores don't drop siblings.
+    childrenMap.value = { ...childrenMap.value, [path]: data.items }
     if (!path) fileTree.value = data.items
     treePath.value = path
   }
@@ -460,17 +472,34 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function restoreExpandedDirs(paths: string[]) {
-    const sorted = [...new Set(paths)].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
+    const sorted = [...new Set(paths)]
+      .sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
+      .slice(0, 24)
     const kept = new Set<string>()
+    const byDepth = new Map<number, string[]>()
     for (const path of sorted) {
-      const parent = parentPath(path)
-      if (parent && !kept.has(parent)) continue
-      try {
-        await loadTree(path)
-      } catch {
-        continue
-      }
-      if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
+      const d = depthOf(path)
+      const bucket = byDepth.get(d) || []
+      bucket.push(path)
+      byDepth.set(d, bucket)
+    }
+    for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
+      const batch = (byDepth.get(depth) || []).filter((path) => {
+        const parent = parentPath(path)
+        return !parent || kept.has(parent)
+      })
+      if (!batch.length) continue
+      await Promise.all(
+        batch.map(async (path) => {
+          const parent = parentPath(path)
+          try {
+            await loadTree(path)
+          } catch {
+            return
+          }
+          if (childrenOf(parent).some((item) => item.is_dir && item.path === path)) kept.add(path)
+        }),
+      )
     }
     setExpanded(kept)
   }
@@ -1338,8 +1367,10 @@ export const useAppStore = defineStore('app', () => {
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
       runStatus.value = event.type.replace('run.', '')
       const now = new Date().toISOString()
-      messages.value = messages.value.map((m) =>
-        m.run_id === event.run_id ? { ...m, ended_at: now } : m,
+      const decision = event.type === 'run.cancelled' ? 'cancelled' : 'denied'
+      messages.value = settleUndecidedApprovals(
+        messages.value.map((m) => (m.run_id === event.run_id ? { ...m, ended_at: now } : m)),
+        { runId: event.run_id, decision },
       )
       void refreshTree()
       if (activeRunId.value === event.run_id) activeRunId.value = null
@@ -1386,36 +1417,45 @@ export const useAppStore = defineStore('app', () => {
     lastEventId.value = null
   }
 
-  async function openConversation(id: string) {
-    // Leave the previous run stream behind so the new chat is not "busy"
-    detachRun()
-    conversationId.value = id
-    rememberConversation(id)
-    reviews.value = {}
-    activeReviewIndex.value = {}
-    messages.value = []
-    const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
-    // Ignore late responses if user already switched again
-    if (conversationId.value !== id) return
-    messages.value = data.messages || []
-    rebuildReviewsFromMessages(messages.value)
-    mode.value = (data.mode as typeof mode.value) || 'agent'
-    modelId.value = data.model_id
-    applied.value = new Set()
-    const active = data.active_run
-    if (active && ['queued', 'running'].includes(String(active.status))) {
-      lastEventId.value = active.last_event_id
-      attachRun(active.id, active.last_event_id)
-      syncCurrentConversationStatus({
-        awaiting_approval: pendingApprovalsFromMessages(messages.value).length > 0,
-      })
-    } else {
-      runStatus.value = 'idle'
-      activeRunId.value = null
-      lastEventId.value = null
-      syncCurrentConversationStatus({ awaiting_approval: false })
+  async function openConversation(id: string, opts?: { loading?: boolean }) {
+    const showLoading = opts?.loading !== false
+    const gen = showLoading ? ++switchLoadGen : switchLoadGen
+    if (showLoading) switchLoading.value = t('chat.loadingConversation')
+    try {
+      // Leave the previous run stream behind so the new chat is not "busy"
+      detachRun()
+      conversationId.value = id
+      rememberConversation(id)
+      reviews.value = {}
+      activeReviewIndex.value = {}
+      messages.value = []
+      const data = await api<Conversation & { messages: ChatMessage[]; active_run: any }>(`/api/conversations/${id}`)
+      // Ignore late responses if user already switched again
+      if (conversationId.value !== id) return
+      messages.value = data.messages || []
+      rebuildReviewsFromMessages(messages.value)
+      mode.value = (data.mode as typeof mode.value) || 'agent'
+      modelId.value = data.model_id
+      applied.value = new Set()
+      const active = data.active_run
+      if (active && ['queued', 'running'].includes(String(active.status))) {
+        lastEventId.value = active.last_event_id
+        attachRun(active.id, active.last_event_id)
+        syncCurrentConversationStatus({
+          awaiting_approval: pendingApprovalsFromMessages(messages.value).length > 0,
+        })
+      } else {
+        // Stale approval cards from failed/cancelled runs must not keep the action bar open.
+        messages.value = settleUndecidedApprovals(messages.value, { decision: 'denied' })
+        runStatus.value = 'idle'
+        activeRunId.value = null
+        lastEventId.value = null
+        syncCurrentConversationStatus({ awaiting_approval: false })
+      }
+      window.dispatchEvent(new Event('ca-messages-loaded'))
+    } finally {
+      if (showLoading && gen === switchLoadGen) switchLoading.value = null
     }
-    window.dispatchEvent(new Event('ca-messages-loaded'))
   }
 
   async function deleteConversation(id: string) {
@@ -1584,6 +1624,7 @@ export const useAppStore = defineStore('app', () => {
       // Stream closed after we already switched conversations — ignore
       if (activeRunId.value !== runId) return
       discardPendingDeltas()
+      messages.value = settleUndecidedApprovals(messages.value, { runId, decision: 'denied' })
       runStatus.value = runStatus.value === 'running' ? 'completed' : runStatus.value
       activeRunId.value = null
       syncCurrentConversationStatus({ awaiting_approval: false })
@@ -1845,7 +1886,12 @@ export const useAppStore = defineStore('app', () => {
     }).catch(() => undefined)
   }
 
-  const pendingApprovals = computed(() => pendingApprovalsFromMessages(messages.value))
+  const pendingApprovals = computed(() => {
+    // Only surface live confirmations for the in-flight run.
+    if (!activeRunId.value) return []
+    if (runStatus.value !== 'running' && runStatus.value !== 'queued') return []
+    return pendingApprovalsFromMessages(messages.value)
+  })
 
   async function loadProviders() {
     providers.value = await api('/api/llm/providers')
@@ -1948,6 +1994,7 @@ export const useAppStore = defineStore('app', () => {
     conversations,
     conversationId,
     messages,
+    switchLoading,
     runStatus,
     sendQueue,
     mode,

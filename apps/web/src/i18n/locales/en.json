@@ -124,7 +124,8 @@
     "sshPathPlaceholder": "Remote path, e.g. /home/you/project",
     "sshConnect": "Connect & browse",
     "sshBrowse": "Remote folders",
-    "sshLead": "Connect over SSH and pick a remote folder as the workspace."
+    "sshLead": "Connect over SSH and pick a remote folder as the workspace.",
+    "switching": "Switching workspace…"
   },
   "settings": {
     "title": "Settings",
@@ -313,6 +314,7 @@
     "promptBusy": "You can type while it runs; Enter queues, Alt+Enter sends now",
     "emptyLead": "Describe the change you want, or start with a Skill / your own model.",
     "emptyHint": "Open command palette",
+    "loadingConversation": "Loading conversation…",
     "copied": "Copied",
     "expandAll": "Expand all",
     "collapse": "Collapse",

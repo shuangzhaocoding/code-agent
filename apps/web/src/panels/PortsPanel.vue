@@ -13,6 +13,8 @@ const {
   highlightedPorts,
   error,
   loading,
+  autoRefresh,
+  setAutoRefresh,
   refresh: refreshShared,
   clearPortHighlighted,
 } = usePortsWatch()
@@ -20,11 +22,10 @@ const killing = ref<number | null>(null)
 const query = ref('')
 const previewPort = ref<number | null>(null)
 const listRef = ref<HTMLElement | null>(null)
-/** When off, freeze the list in the panel; shared poller still runs for toast. */
-const autoRefresh = ref(true)
 const frozenPorts = ref<PortItem[] | null>(null)
 
-const ports = computed(() => frozenPorts.value ?? livePorts.value)
+const ports = computed(() => (autoRefresh.value ? livePorts.value : frozenPorts.value ?? livePorts.value))
+
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -70,8 +71,8 @@ watch(
 
 async function refresh() {
   frozenPorts.value = null
-  autoRefresh.value = true
   await refreshShared()
+  if (!autoRefresh.value) frozenPorts.value = livePorts.value.map((p) => ({ ...p }))
 }
 
 function openExternal(item: PortItem) {
@@ -126,9 +127,10 @@ async function killPort(item: PortItem) {
 }
 
 function onToggleAuto() {
-  autoRefresh.value = !autoRefresh.value
-  if (autoRefresh.value) frozenPorts.value = null
-  else frozenPorts.value = livePorts.value.map((p) => ({ ...p }))
+  const next = !autoRefresh.value
+  if (!next) frozenPorts.value = livePorts.value.map((p) => ({ ...p }))
+  else frozenPorts.value = null
+  setAutoRefresh(next)
 }
 </script>
 

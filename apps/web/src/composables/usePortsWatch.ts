@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/app'
 
 const SYSTEM_PORTS = new Set([22, 25, 53, 111, 123, 135, 139, 445, 631, 5353])
 const HIGHLIGHT_TTL_MS = 60_000
+const AUTO_REFRESH_KEY = 'ca.ports.autoRefresh'
 
 export type PortItem = {
   port: number
@@ -29,6 +30,19 @@ const error = ref('')
 const loading = ref(false)
 const updatedAt = ref(0)
 const activeWorkspaceId = ref<string | null>(null)
+
+function readAutoRefreshPref(): boolean {
+  try {
+    const raw = localStorage.getItem(AUTO_REFRESH_KEY)
+    if (raw == null) return false
+    return raw === '1' || raw === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** Default off — manual refresh only unless user enables it. */
+const autoRefresh = ref(readAutoRefreshPref())
 
 const highlightTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -94,7 +108,7 @@ async function refreshPorts(opts?: { quiet?: boolean }) {
 }
 
 function startSharedTimer() {
-  if (timer) return
+  if (timer || !autoRefresh.value || subscribers <= 0) return
   timer = setInterval(() => {
     void refreshPorts({ quiet: true })
   }, POLL_MS)
@@ -106,11 +120,26 @@ function stopSharedTimer() {
   timer = null
 }
 
+function syncSharedTimer() {
+  if (autoRefresh.value && subscribers > 0) startSharedTimer()
+  else stopSharedTimer()
+}
+
+export function setPortsAutoRefresh(enabled: boolean) {
+  autoRefresh.value = Boolean(enabled)
+  try {
+    localStorage.setItem(AUTO_REFRESH_KEY, autoRefresh.value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+  syncSharedTimer()
+}
+
 function retainPortsWatch() {
   subscribers += 1
   if (subscribers === 1) {
     void refreshPorts()
-    startSharedTimer()
+    syncSharedTimer()
   }
   return () => {
     subscribers = Math.max(0, subscribers - 1)
@@ -125,6 +154,8 @@ export function usePortsWatch(): {
   error: Ref<string>
   loading: Ref<boolean>
   updatedAt: Ref<number>
+  autoRefresh: Ref<boolean>
+  setAutoRefresh: (enabled: boolean) => void
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
   pollMs: number
   markPortHighlighted: (port: number, ttlMs?: number) => void
@@ -161,6 +192,8 @@ export function usePortsWatch(): {
     error,
     loading,
     updatedAt,
+    autoRefresh,
+    setAutoRefresh: setPortsAutoRefresh,
     refresh: refreshPorts,
     pollMs: POLL_MS,
     markPortHighlighted,

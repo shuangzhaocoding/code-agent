@@ -122,7 +122,8 @@
     "sshPassphrase": "鍵パスフレーズ（任意）",
     "sshPathPlaceholder": "リモートパス",
     "sshConnect": "接続して参照",
-    "sshBrowse": "リモートフォルダー"
+    "sshBrowse": "リモートフォルダー",
+    "switching": "ワークスペースを切り替えています…"
   },
   "settings": {
     "title": "設定",
@@ -277,6 +278,7 @@
     "promptBusy": "実行中も入力できます。Enter でキュー、Alt+Enter で即送信",
     "emptyLead": "変更したい内容を書くか、Skill / 自分のモデルで開始してください。",
     "emptyHint": "コマンドパレットを開く",
+    "loadingConversation": "会話を読み込み中…",
     "copied": "コピーしました",
     "expandAll": "すべて展開",
     "collapse": "折りたたむ",

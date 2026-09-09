@@ -104,29 +104,39 @@ class SshWorkspaceBackend:
         sftp = await self._sftp()
         target = await self._abs(rel)
         try:
-            names = await sftp.listdir(target)
+            entries = [entry async for entry in sftp.scandir(target)]
         except (OSError, asyncssh.SFTPError) as exc:
             raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": str(exc)}) from exc
 
         ignores = TREE_IGNORES + list(getattr(self._ws, "ignore_globs", None) or []) + (extra_ignores or [])
         max_children = int(settings.get("workspace.tree_max_children") or 400)
         items: list[dict] = []
-        for name in sorted(names, key=lambda n: (str(n).startswith("."), str(n).lower())):
-            name_s = str(name)
+        for entry in sorted(
+            entries,
+            key=lambda e: (str(getattr(e, "filename", "")).startswith("."), str(getattr(e, "filename", "")).lower()),
+        ):
+            name_s = str(getattr(entry, "filename", "") or "")
             if name_s in {".", ".."}:
                 continue
             child = posixpath.join(target, name_s)
             rel_child = _rel_to_root(self.root_path, child) or name_s
             if matches_ignore(rel_child, ignores):
                 continue
-            try:
-                attrs = await sftp.stat(child)
-                mode = int(getattr(attrs, "permissions", 0) or 0)
-                is_dir = bool(mode and statmod.S_ISDIR(mode))
+            attrs = getattr(entry, "attrs", None)
+            mode = int(getattr(attrs, "permissions", 0) or 0) if attrs is not None else 0
+            if mode:
+                is_dir = bool(statmod.S_ISDIR(mode))
                 size = int(getattr(attrs, "size", 0) or 0) if not is_dir else None
-            except Exception:
-                is_dir = False
-                size = None
+            else:
+                # Fallback when server omits attrs in directory listing
+                try:
+                    st = await sftp.stat(child)
+                    mode = int(getattr(st, "permissions", 0) or 0)
+                    is_dir = bool(mode and statmod.S_ISDIR(mode))
+                    size = int(getattr(st, "size", 0) or 0) if not is_dir else None
+                except Exception:
+                    is_dir = False
+                    size = None
             items.append({"name": name_s, "path": rel_child, "is_dir": is_dir, "size": size})
             if len(items) >= max_children:
                 break

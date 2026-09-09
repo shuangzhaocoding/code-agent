@@ -122,7 +122,8 @@
     "sshPassphrase": "Schlüssel-Passphrase (optional)",
     "sshPathPlaceholder": "Remote-Pfad",
     "sshConnect": "Verbinden & browsen",
-    "sshBrowse": "Remote-Ordner"
+    "sshBrowse": "Remote-Ordner",
+    "switching": "Arbeitsbereich wird gewechselt…"
   },
   "settings": {
     "title": "Einstellungen",
@@ -277,6 +278,7 @@
     "promptBusy": "Eingabe während der Ausgabe möglich; Enter reiht ein, Alt+Enter sendet sofort",
     "emptyLead": "Beschreibe die gewünschte Änderung oder starte mit einem Skill / eigenem Modell.",
     "emptyHint": "Befehlspalette öffnen",
+    "loadingConversation": "Unterhaltung wird geladen…",
     "copied": "Kopiert",
     "expandAll": "Alles aufklappen",
     "collapse": "Einklappen",

@@ -174,3 +174,5 @@ ssh:
   # null = accept unknown hosts (local-first UX); true/"auto" = OpenSSH defaults; or path to known_hosts file
   known_hosts: null
   keepalive_interval: 30
+  # Reuse mirrored plugins/skills between workspace switches (seconds). 0 = always resync.
+  mirror_ttl_sec: 1800

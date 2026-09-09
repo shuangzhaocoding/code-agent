@@ -122,7 +122,8 @@
     "sshPassphrase": "키 암호(선택)",
     "sshPathPlaceholder": "원격 경로",
     "sshConnect": "연결 후 탐색",
-    "sshBrowse": "원격 폴더"
+    "sshBrowse": "원격 폴더",
+    "switching": "작업 공간 전환 중…"
   },
   "settings": {
     "title": "설정",
@@ -277,6 +278,7 @@
     "promptBusy": "실행 중에도 입력할 수 있습니다. Enter는 대기열, Alt+Enter는 즉시 전송",
     "emptyLead": "원하는 코드 변경을 설명하거나 Skill / 자체 모델로 시작하세요.",
     "emptyHint": "명령 팔레트 열기",
+    "loadingConversation": "대화 불러오는 중…",
     "copied": "복사됨",
     "expandAll": "모두 펼치기",
     "collapse": "접기",
