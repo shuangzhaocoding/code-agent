@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, shallowRef, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
@@ -58,7 +58,7 @@ const components = {
   trajectory: TrajectoryDockPanel,
 } as unknown as Record<string, VueComponent>
 
-const dock = ref<DockviewApi | null>(null)
+const dock = shallowRef<DockviewApi | null>(null)
 
 function onTheme(e: Event) {
   theme.value = (e as CustomEvent<Theme>).detail
