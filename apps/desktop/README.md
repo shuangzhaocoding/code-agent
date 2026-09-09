@@ -12,8 +12,11 @@ Windows 终端依赖打包进 runtime 的 `pywinpty`（ConPTY）。
 
 ```bash
 make desktop-win
-# 产物：apps/desktop/release/CodeAgent-*-win-x64.zip
+# 产物：apps/desktop/release/CodeAgent-<version>-Windows-x64-amd64-Python3.11.zip
 ```
+
+命名说明：`CodeAgent-{版本}-Windows-x64-amd64-Python3.11.zip`  
+（系统 Windows、CPU x64/amd64、内嵌 Python 3.11；需 64 位 Windows 10+）
 
 解压后直接运行 `Code Agent.exe`。若启动失败，弹窗会附带后端日志尾部。
 
