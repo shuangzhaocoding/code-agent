@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+  <title>Code Agent</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --fg: #e8eaed;
+      --muted: #9aa0a6;
+      --accent: #5b9fff;
+      --accent-soft: color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .wrap {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 32px;
+      background:
+        radial-gradient(ellipse 70% 50% at 50% 0%, rgba(91, 159, 255, 0.12), transparent 60%),
+        var(--bg);
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      text-align: center;
+      max-width: 360px;
+    }
+    .mark {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, #1a2230, #12161d);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    .mark svg { width: 28px; height: 28px; }
+    h1 {
+      margin: 0;
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    #status {
+      margin: 0;
+      color: var(--muted);
+      min-height: 1.45em;
+    }
+    .spinner {
+      width: 28px;
+      height: 28px;
+      border: 2.5px solid var(--accent-soft);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    .spinner.is-error {
+      border-color: rgba(255, 107, 107, 0.35);
+      border-top-color: #ff6b6b;
+      animation: none;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    #detail {
+      margin: 0;
+      color: #7a8088;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 160px;
+      overflow: auto;
+      text-align: left;
+      width: 100%;
+    }
+    #detail:empty { display: none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#5b9fff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+        </svg>
+      </div>
+      <h1>Code Agent</h1>
+      <div id="spinner" class="spinner" aria-hidden="true"></div>
+      <p id="status">正在启动服务…</p>
+      <p id="detail"></p>
+    </div>
+  </div>
+  <script>
+    window.setSplashStatus = function (text, opts) {
+      const status = document.getElementById('status')
+      const detail = document.getElementById('detail')
+      const spinner = document.getElementById('spinner')
+      if (typeof text === 'string') status.textContent = text
+      if (opts && typeof opts.detail === 'string') detail.textContent = opts.detail
+      if (opts && opts.error) spinner.classList.add('is-error')
+    }
+  </script>
+</body>
+</html>

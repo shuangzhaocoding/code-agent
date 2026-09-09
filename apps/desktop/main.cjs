@@ -86,6 +86,23 @@ function backendLogTail(max = 1800) {
   return text.length > max ? text.slice(-max) : text
 }
 
+function splashPath() {
+  return path.join(__dirname, 'splash.html')
+}
+
+function setSplashStatus(text, opts = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents
+    .executeJavaScript(
+      `window.setSplashStatus && window.setSplashStatus(${JSON.stringify(text)}, ${JSON.stringify({
+        detail: opts.detail || '',
+        error: !!opts.error,
+      })})`,
+      true,
+    )
+    .catch(() => {})
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -95,6 +112,7 @@ function createWindow() {
     title: 'Code Agent',
     backgroundColor: '#0f1115',
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -103,14 +121,38 @@ function createWindow() {
     },
   })
 
+  mainWindow.once('ready-to-show', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
   })
 
-  mainWindow.loadURL(`http://${HOST}:${PORT}/`)
+  mainWindow.loadFile(splashPath())
   mainWindow.on('closed', () => {
     mainWindow = null
+  })
+}
+
+function loadApp() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  setSplashStatus('服务已就绪，正在打开界面…')
+  mainWindow.loadURL(`http://${HOST}:${PORT}/`)
+}
+
+function waitSplashReady() {
+  return new Promise((resolve) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      resolve()
+      return
+    }
+    if (!mainWindow.webContents.isLoading()) {
+      resolve()
+      return
+    }
+    mainWindow.webContents.once('did-finish-load', () => resolve())
   })
 }
 
@@ -220,27 +262,37 @@ function stopBackend() {
 }
 
 async function boot() {
-  const alreadyUp = await probeHealth()
-  if (!alreadyUp) {
-    try {
-      startBackend()
-    } catch (err) {
-      dialog.showErrorBox('Failed to start backend', String(err))
-      app.quit()
-      return
-    }
-    const ok = await waitForBackend()
-    if (!ok) {
-      dialog.showErrorBox(
-        'Backend startup timeout',
-        `Could not reach ${HEALTH_URL}.\nPython: ${pythonCmd()}\n\n${backendLogTail()}`,
-      )
-      stopBackend()
-      app.quit()
-      return
-    }
-  }
   createWindow()
+  const splashReady = waitSplashReady()
+  const alreadyUp = await probeHealth()
+  if (alreadyUp) {
+    await splashReady
+    loadApp()
+    return
+  }
+
+  try {
+    startBackend()
+  } catch (err) {
+    await splashReady
+    setSplashStatus('后端启动失败', { error: true, detail: String(err) })
+    dialog.showErrorBox('Failed to start backend', String(err))
+    app.quit()
+    return
+  }
+
+  await splashReady
+  setSplashStatus('正在启动服务…')
+  const ok = await waitForBackend()
+  if (!ok) {
+    const detail = `Could not reach ${HEALTH_URL}.\nPython: ${pythonCmd()}\n\n${backendLogTail()}`
+    setSplashStatus('启动超时', { error: true, detail })
+    dialog.showErrorBox('Backend startup timeout', detail)
+    stopBackend()
+    app.quit()
+    return
+  }
+  loadApp()
 }
 
 const gotLock = app.requestSingleInstanceLock()
