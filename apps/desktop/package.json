@@ -1,6 +1,6 @@
 {
   "name": "code-agent-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Code Agent Electron shell with embedded Windows Python",
   "main": "main.cjs",

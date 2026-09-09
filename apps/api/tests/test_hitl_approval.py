@@ -97,6 +97,44 @@ def test_deny_run_approvals_wakes_waiter(monkeypatch):
     asyncio.run(_run())
 
 
+def test_resolve_approval_cross_process_via_ipc(tmp_path, monkeypatch):
+    """Worker polls IPC decision written by the API gateway process."""
+    from code_agent.tools import approval_ipc
+
+    monkeypatch.setattr(approval_ipc.settings, "data_dir", tmp_path)
+
+    class _Run:
+        status = "running"
+
+    async def _get_or_none(id=None):
+        return _Run()
+
+    monkeypatch.setattr("code_agent.db.models.Run.get_or_none", _get_or_none)
+
+    async def _publish(run_id, event_type, payload):
+        return None
+
+    monkeypatch.setattr("code_agent.streaming.broker.broker.publish", _publish)
+
+    async def _run():
+        interrupts = (
+            SimpleNamespace(id="remote-2", value={"tool": "write_file", "summary": "w2", "kind": "write"}),
+        )
+        task = asyncio.create_task(
+            approval_mod.wait_for_approval_resume("run-remote-2", interrupts, timeout=5)
+        )
+        await asyncio.sleep(0.05)
+        # Gateway writes decision without local waiter memory
+        approval_ipc.put_decision("run-remote-2", "remote-2", True)
+        assert await task is True
+
+        # Gateway resolve_approval with no local pending persists IPC
+        await approval_mod.resolve_approval("run-gone", "aid-x", True)
+        assert approval_ipc.take_decision("run-gone", "aid-x") is True
+
+    asyncio.run(_run())
+
+
 def test_stream_resume_with_command(monkeypatch):
     """End-to-end: ToolNode interrupt → wait → Command(resume=True)."""
 
