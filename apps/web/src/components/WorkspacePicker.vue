@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
+import { useSshWorkspaceBrowse } from '@/composables/useSshWorkspaceBrowse'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
@@ -14,36 +15,66 @@ import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
-const { path, error, creating, createValue, createKey, dirs, displayPath, canGoParent, atRoots, browse, goParent, startCreate, cancelCreate, commitCreate, errMessage } = useWorkspaceBrowse('~')
+const mode = ref<'local' | 'ssh'>('local')
+const local = reactive(useWorkspaceBrowse('~'))
+const ssh = reactive(useSshWorkspaceBrowse())
 
 const isDesktop = Boolean((window as Window & { codeAgentDesktop?: { isDesktop?: boolean; pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop?.isDesktop)
 
 onMounted(async () => {
   await store.loadWorkspaces()
-  await browse('~')
+  await local.browse('~')
 })
 
-async function open() {
-  if (!path.value) return
-  error.value = ''
+async function openLocal() {
+  if (!local.path) return
+  local.error = ''
   try {
-    await store.addWorkspace(path.value)
+    await store.addWorkspace(local.path)
   } catch (err) {
-    error.value = errMessage(err)
+    local.error = local.errMessage(err)
+  }
+}
+
+async function connectSsh() {
+  ssh.error = ''
+  try {
+    await ssh.browse(ssh.path || '~')
+  } catch {
+    /* error set in composable */
+  }
+}
+
+async function openSsh() {
+  if (!ssh.path) return
+  ssh.error = ''
+  try {
+    await store.addSshWorkspace({
+      root_path: ssh.path,
+      ssh_display_name: ssh.auth.display_name.trim() || undefined,
+      ssh_host: ssh.auth.host.trim(),
+      ssh_port: Number(ssh.auth.port) || 22,
+      ssh_user: ssh.auth.username.trim(),
+      ssh_password: ssh.auth.password || undefined,
+      ssh_private_key: ssh.auth.private_key || undefined,
+      ssh_passphrase: ssh.auth.passphrase || undefined,
+    })
+  } catch (err) {
+    ssh.error = ssh.errMessage(err)
   }
 }
 
 async function pickNativeFolder() {
   const desktop = (window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop
   if (!desktop?.pickDirectory) return
-  error.value = ''
+  local.error = ''
   try {
     const chosen = await desktop.pickDirectory()
     if (!chosen) return
-    path.value = chosen
-    await browse(chosen)
+    local.path = chosen
+    await local.browse(chosen)
   } catch (err) {
-    error.value = errMessage(err)
+    local.error = local.errMessage(err)
   }
 }
 
@@ -52,8 +83,8 @@ function onToggleTheme() {
 }
 
 const recents = computed(() => store.recentWorkspaces)
+const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.error))
 </script>
-
 <template>
   <div class="launch-page">
     <header class="launch-header">
@@ -70,13 +101,63 @@ const recents = computed(() => store.recentWorkspaces)
     </header>
 
     <main class="launch-body">
-      <div class="launch-path">
-        <AppIcon name="folder" :size="15" />
-        <input v-model="path" :placeholder="t('workspace.pathPlaceholder')" @keydown.enter="open" />
-        <button v-if="isDesktop" type="button" class="btn" @click="pickNativeFolder">{{ t('workspace.pickFolder') }}</button>
-        <button type="button" class="btn btn-primary" @click="open">{{ t('common.open') }}</button>
+      <div class="mode-tabs">
+        <button type="button" class="mode-tab" :class="{ active: mode === 'local' }" @click="mode = 'local'">
+          {{ t('workspace.localTab') }}
+        </button>
+        <button type="button" class="mode-tab" :class="{ active: mode === 'ssh' }" @click="mode = 'ssh'">
+          {{ t('workspace.sshTab') }}
+        </button>
       </div>
-      <p v-if="error" class="launch-err">{{ error }}</p>
+
+      <template v-if="mode === 'local'">
+        <div class="launch-path">
+          <AppIcon name="folder" :size="15" />
+          <input v-model="local.path" :placeholder="t('workspace.pathPlaceholder')" @keydown.enter="openLocal" />
+          <button v-if="isDesktop" type="button" class="btn" @click="pickNativeFolder">{{ t('workspace.pickFolder') }}</button>
+          <button type="button" class="btn btn-primary" @click="openLocal">{{ t('common.open') }}</button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="ssh-form-wrap">
+          <input
+            v-model="ssh.auth.display_name"
+            class="ssh-display-name"
+            type="text"
+            maxlength="120"
+            :placeholder="t('workspace.sshDisplayName')"
+          />
+          <div class="ssh-form">
+            <input v-model="ssh.auth.host" :placeholder="t('workspace.sshHost')" />
+            <input v-model.number="ssh.auth.port" type="number" min="1" max="65535" :placeholder="t('workspace.sshPort')" />
+            <input v-model="ssh.auth.username" :placeholder="t('workspace.sshUser')" />
+            <input v-model="ssh.auth.password" type="password" :placeholder="t('workspace.sshPassword')" />
+          </div>
+        </div>
+        <textarea
+          v-model="ssh.auth.private_key"
+          class="ssh-key"
+          rows="3"
+          :placeholder="t('workspace.sshKey')"
+        />
+        <input
+          v-model="ssh.auth.passphrase"
+          class="ssh-passphrase"
+          type="password"
+          :placeholder="t('workspace.sshPassphrase')"
+        />
+        <div class="launch-path">
+          <AppIcon name="folder" :size="15" />
+          <input v-model="ssh.path" :placeholder="t('workspace.sshPathPlaceholder')" @keydown.enter="openSsh" />
+          <button type="button" class="btn" :disabled="ssh.connecting" @click="connectSsh">
+            {{ t('workspace.sshConnect') }}
+          </button>
+          <button type="button" class="btn btn-primary" :disabled="!ssh.path" @click="openSsh">
+            {{ t('common.open') }}
+          </button>
+        </div>
+      </template>
+      <p v-if="activeError" class="launch-err">{{ activeError }}</p>
 
       <div class="launch-split">
         <section class="launch-col">
@@ -87,7 +168,7 @@ const recents = computed(() => store.recentWorkspaces)
             :key="ws.id"
             type="button"
             class="recent-item"
-            :title="ws.root_path"
+            :title="ws.display_path || ws.root_path"
             @click="store.selectWorkspace(ws.id)"
           >
             <AppIcon name="folder" :size="15" />
@@ -96,32 +177,53 @@ const recents = computed(() => store.recentWorkspaces)
                 <strong>{{ ws.name }}</strong>
                 <time v-if="ws.last_opened_at" class="recent-time">{{ formatWorkspaceOpenedAt(ws.last_opened_at) }}</time>
               </span>
-              <span class="recent-path">{{ ws.root_path }}</span>
+              <span class="recent-path">{{ ws.display_path || ws.root_path }}</span>
             </span>
           </button>
         </section>
 
         <section class="launch-col">
           <div class="browse-head">
-            <h2>{{ t('workspace.browse') }}</h2>
+            <h2>{{ mode === 'local' ? t('workspace.browse') : t('workspace.sshBrowse') }}</h2>
             <div class="browse-actions">
-              <button type="button" class="browse-up" :disabled="atRoots" @click="startCreate">{{ t('workspace.newFolder') }}</button>
-              <button type="button" class="browse-up" :disabled="!canGoParent" @click="goParent">{{ t('common.parent') }}</button>
+              <button
+                v-if="mode === 'local'"
+                type="button"
+                class="browse-up"
+                :disabled="local.atRoots"
+                @click="local.startCreate"
+              >
+                {{ t('workspace.newFolder') }}
+              </button>
+              <button
+                type="button"
+                class="browse-up"
+                :disabled="mode === 'local' ? !local.canGoParent : !ssh.canGoParent"
+                @click="mode === 'local' ? local.goParent() : ssh.goParent()"
+              >
+                {{ t('common.parent') }}
+              </button>
             </div>
           </div>
-          <p class="browse-path" :title="displayPath">{{ displayPath }}</p>
+          <p class="browse-path" :title="mode === 'local' ? local.displayPath : ssh.displayPath">
+            {{ mode === 'local' ? local.displayPath : ssh.displayPath }}
+          </p>
           <ul class="dirs">
-            <li v-if="creating">
+            <li v-if="mode === 'local' && local.creating">
               <WorkspaceMkdirRow
-                :key="createKey"
-                :model-value="createValue"
-                @update:model-value="createValue = $event"
-                @commit="commitCreate"
-                @cancel="cancelCreate"
+                :key="local.createKey"
+                :model-value="local.createValue"
+                @update:model-value="local.createValue = $event"
+                @commit="local.commitCreate"
+                @cancel="local.cancelCreate"
               />
             </li>
-            <li v-for="item in dirs" :key="item.path">
-              <button type="button" class="dir-item" @click="browse(item.path)">
+            <li v-for="item in mode === 'local' ? local.dirs : ssh.dirs" :key="item.path">
+              <button
+                type="button"
+                class="dir-item"
+                @click="mode === 'local' ? local.browse(item.path) : ssh.browse(item.path)"
+              >
                 <AppIcon name="folder" :size="15" />
                 {{ item.name }}
               </button>
@@ -132,7 +234,6 @@ const recents = computed(() => store.recentWorkspaces)
     </main>
   </div>
 </template>
-
 <style scoped>
 .launch-page {
   min-height: 100vh;
@@ -189,6 +290,70 @@ const recents = computed(() => store.recentWorkspaces)
   max-width: 960px;
   width: 100%;
   margin: 0 auto;
+}
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+}
+.mode-tab {
+  border: var(--border-width) solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.mode-tab.active {
+  background: var(--code-bg);
+  color: var(--text-h);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+.ssh-form-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ssh-display-name {
+  width: 100%;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.ssh-display-name::placeholder,
+.ssh-form input::placeholder,
+.ssh-key::placeholder {
+  font-size: 11.5px;
+  color: color-mix(in srgb, var(--text-muted) 72%, transparent);
+  opacity: 1;
+}
+.ssh-form {
+  display: grid;
+  grid-template-columns: 1.6fr 0.6fr 1fr 1fr;
+  gap: 8px;
+}
+.ssh-form input,
+.ssh-key,
+.ssh-passphrase {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-bg);
+  color: var(--text-h);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--mono);
+}
+.ssh-key {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+}
+.ssh-passphrase {
+  width: 100%;
+  margin-top: 8px;
 }
 .launch-path {
   display: flex;

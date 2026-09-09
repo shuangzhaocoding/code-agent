@@ -44,6 +44,22 @@ async def upgrade_llm_schema() -> None:
     if await _table_exists("runs") and not await _column_exists("runs", "graph_thread_id"):
         await conn.execute_script("ALTER TABLE runs ADD COLUMN graph_thread_id VARCHAR(128)")
 
+    if await _table_exists("workspaces"):
+        if not await _column_exists("workspaces", "kind"):
+            await conn.execute_script(
+                "ALTER TABLE workspaces ADD COLUMN kind VARCHAR(20) NOT NULL DEFAULT 'local'"
+            )
+        if not await _column_exists("workspaces", "ssh_host"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_host VARCHAR(255)")
+        if not await _column_exists("workspaces", "ssh_port"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_port INT")
+        if not await _column_exists("workspaces", "ssh_user"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_user VARCHAR(128)")
+        if not await _column_exists("workspaces", "ssh_secret"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_secret TEXT")
+        if not await _column_exists("workspaces", "ssh_display_name"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_display_name VARCHAR(120)")
+
     if not await _table_exists("workspace_memories"):
         await conn.execute_script(
             """

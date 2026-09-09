@@ -11,6 +11,12 @@ class Workspace(Model):
     name = fields.CharField(max_length=200)
     root_path = fields.CharField(max_length=2048)
     ignore_globs = fields.JSONField(default=list)
+    kind = fields.CharField(max_length=20, default="local")  # local | ssh
+    ssh_host = fields.CharField(max_length=255, null=True)
+    ssh_port = fields.IntField(null=True)
+    ssh_user = fields.CharField(max_length=128, null=True)
+    ssh_secret = fields.TextField(null=True)  # encrypted JSON: password / private_key / passphrase
+    ssh_display_name = fields.CharField(max_length=120, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     last_opened_at = fields.DatetimeField(auto_now=True)
 

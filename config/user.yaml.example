@@ -21,3 +21,8 @@ storage:
   postgres_url: ""
   redis_url: ""  # 例：redis://127.0.0.1:6379/0
   checkpoint_postgres_url: ""
+
+# ssh:
+#   login_timeout: 20
+#   known_hosts: null  # null | auto | /path/to/known_hosts
+#   keepalive_interval: 30

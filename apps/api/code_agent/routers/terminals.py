@@ -73,7 +73,11 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
         return
     cols = int(settings.get("terminal.default_cols") or 120)
     rows = int(settings.get("terminal.default_rows") or 32)
-    handle = pty_manager.attach(terminal_id, row.cwd, cols, rows)
+    ws = await Workspace.get_or_none(id=row.workspace_id)
+    if ws is not None:
+        handle = await pty_manager.attach_workspace(terminal_id, ws, cols, rows)
+    else:
+        handle = pty_manager.attach(terminal_id, row.cwd, cols, rows)
     handle.subscribers.append(websocket)
     if handle.buffer:
         await websocket.send_bytes(bytes(handle.buffer))

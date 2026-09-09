@@ -4,14 +4,25 @@ import { useAppStore, type Conversation, type Workspace } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceSwitch from '@/components/WorkspaceSwitch.vue'
+import type { WorkspaceSwitchPrefill } from '@/components/WorkspaceSwitch.vue'
+import WorkspaceEditDialog from '@/components/WorkspaceEditDialog.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
 import { formatRelativeTime, formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 
 const PREVIEW_LIMIT = 5
 
+type WorkspaceHostGroup = {
+  key: string
+  label: string
+  kind: 'local' | 'ssh'
+  workspaces: Workspace[]
+}
+
 const store = useAppStore()
 const pins = useSessionPins()
 const showOpen = ref(false)
+const openPrefill = ref<WorkspaceSwitchPrefill | null>(null)
+const editingHost = ref<WorkspaceHostGroup | null>(null)
 const expandedIds = ref<Set<string>>(new Set())
 const showAllIds = ref<Set<string>>(new Set())
 const convMap = reactive<Record<string, Conversation[]>>({})
@@ -61,6 +72,71 @@ function showsAll(id: string) {
 function basename(path: string) {
   const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/)
   return parts[parts.length - 1] || path
+}
+
+function isSsh(ws: Workspace) {
+  return (ws.kind || 'local') === 'ssh'
+}
+
+function hostKey(ws: Workspace) {
+  if (!isSsh(ws)) return 'local'
+  const host = ws.ssh_host || 'unknown'
+  const port = ws.ssh_port || 22
+  const user = ws.ssh_user || ''
+  return `ssh:${user}@${host}:${port}`
+}
+
+function hostEndpoint(ws: Workspace) {
+  const host = ws.ssh_host || 'unknown'
+  const port = ws.ssh_port || 22
+  const user = ws.ssh_user || ''
+  return user ? `${user}@${host}:${port}` : `${host}:${port}`
+}
+
+function hostLabel(ws: Workspace) {
+  if (!isSsh(ws)) return '本地'
+  const custom = (ws.ssh_display_name || '').trim()
+  return custom || hostEndpoint(ws)
+}
+
+const workspaceGroups = computed<WorkspaceHostGroup[]>(() => {
+  const map = new Map<string, WorkspaceHostGroup>()
+  for (const ws of store.recentWorkspaces) {
+    const key = hostKey(ws)
+    let group = map.get(key)
+    if (!group) {
+      group = {
+        key,
+        label: hostLabel(ws),
+        kind: isSsh(ws) ? 'ssh' : 'local',
+        workspaces: [],
+      }
+      map.set(key, group)
+    }
+    group.workspaces.push(ws)
+    if (isSsh(ws)) {
+      const custom = (ws.ssh_display_name || '').trim()
+      if (custom) group.label = custom
+    }
+  }
+  // Local first, then SSH hosts alphabetically
+  return [...map.values()].sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'local' ? -1 : 1
+    return a.label.localeCompare(b.label)
+  })
+})
+
+const collapsedHosts = ref<Set<string>>(new Set())
+
+function isHostOpen(key: string) {
+  return !collapsedHosts.value.has(key)
+}
+
+function toggleHost(key: string) {
+  const next = new Set(collapsedHosts.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  collapsedHosts.value = next
 }
 
 const hoverWorkspace = computed(() =>
@@ -194,6 +270,38 @@ async function openWorkspace(ws: Workspace, e: MouseEvent) {
   } finally {
     switchingId.value = null
   }
+}
+
+function startEditHost(group: WorkspaceHostGroup, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (group.kind !== 'ssh') return
+  editingHost.value = group
+}
+
+function startAddWorkspace(group: WorkspaceHostGroup, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  if (group.kind === 'ssh') {
+    const sample = group.workspaces[0]
+    openPrefill.value = {
+      mode: 'ssh',
+      lockMode: true,
+      ssh_display_name: (sample?.ssh_display_name || '').trim() || undefined,
+      ssh_host: sample?.ssh_host || '',
+      ssh_port: sample?.ssh_port || 22,
+      ssh_user: sample?.ssh_user || '',
+      reuse_ssh_from: sample?.id,
+    }
+  } else {
+    openPrefill.value = { mode: 'local', lockMode: true }
+  }
+  showOpen.value = true
+}
+
+function closeOpenDialog() {
+  showOpen.value = false
+  openPrefill.value = null
 }
 
 async function removeWorkspace(ws: Workspace, e: MouseEvent) {
@@ -370,7 +478,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   <div class="panel-shell workspace-panel panel-chromeless">
     <header class="ws-head">
       <span class="ws-head-title">工作空间</span>
-      <button type="button" class="ws-head-btn" title="打开工作空间" @click="showOpen = true">
+      <button type="button" class="ws-head-btn" title="打开工作空间" @click="openPrefill = null; showOpen = true">
         <AppIcon name="plus" :size="14" :stroke-width="1.75" />
         <span>打开</span>
       </button>
@@ -379,154 +487,195 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
     <div class="workspace-body">
       <p v-if="!store.recentWorkspaces.length" class="empty">还没有工作空间，点右上角打开一个目录。</p>
 
-      <ul class="ws-list">
-        <li
-          v-for="ws in store.recentWorkspaces"
-          :key="ws.id"
-          class="ws-group"
-          :class="{ current: ws.id === store.workspaceId, open: isExpanded(ws.id) }"
-        >
-          <div
-            class="ws-row"
-            @mouseenter="showTip(ws, $event)"
-            @mouseleave="scheduleHideTip"
+      <div v-for="group in workspaceGroups" :key="group.key" class="host-block">
+        <div class="host-row">
+          <button type="button" class="host-main" @click="toggleHost(group.key)">
+            <AppIcon
+              class="host-chev"
+              :name="isHostOpen(group.key) ? 'chevron-down' : 'chevron-right'"
+              :size="11"
+              :stroke-width="2"
+            />
+            <AppIcon
+              class="host-icon"
+              :name="group.kind === 'ssh' ? 'globe' : 'folder'"
+              :size="13"
+              :stroke-width="1.75"
+            />
+            <span class="host-label">{{ group.label }}</span>
+            <span v-if="group.kind === 'ssh'" class="host-badge">SSH</span>
+            <span class="host-count">{{ group.workspaces.length }}</span>
+          </button>
+          <div class="host-tools">
+            <button
+              v-if="group.kind === 'ssh'"
+              type="button"
+              class="host-tool"
+              title="编辑主机"
+              @click="startEditHost(group, $event)"
+            >
+              <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
+            </button>
+            <button
+              type="button"
+              class="host-tool"
+              :title="group.kind === 'ssh' ? '添加远程工作空间' : '添加本地工作空间'"
+              @click="startAddWorkspace(group, $event)"
+            >
+              <AppIcon name="plus" :size="13" :stroke-width="1.75" />
+            </button>
+          </div>
+        </div>
+
+        <ul v-if="isHostOpen(group.key)" class="ws-list">
+          <li
+            v-for="ws in group.workspaces"
+            :key="ws.id"
+            class="ws-group"
+            :class="{ current: ws.id === store.workspaceId, open: isExpanded(ws.id) }"
           >
-            <button type="button" class="ws-main" @click="toggleExpand(ws.id)">
-              <AppIcon
-                class="ws-chev"
-                :name="isExpanded(ws.id) ? 'chevron-down' : 'chevron-right'"
-                :size="12"
-                :stroke-width="2"
-              />
-              <AppIcon class="ws-icon" name="folder" :size="14" :stroke-width="1.75" />
-              <span class="ws-copy">
-                <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
-              </span>
-            </button>
-            <div class="ws-end">
-              <div class="ws-tools">
-                <button
-                  type="button"
-                  class="ws-tool"
-                  title="新建会话"
-                  :disabled="creatingId === ws.id"
-                  @click="newSession(ws, $event)"
-                >
-                  <AppIcon name="plus" :size="13" :stroke-width="1.75" />
-                </button>
-                <button
-                  v-if="ws.id !== store.workspaceId"
-                  type="button"
-                  class="ws-tool text"
-                  :disabled="switchingId === ws.id"
-                  @click="openWorkspace(ws, $event)"
-                >
-                  打开
-                </button>
-                <button
-                  type="button"
-                  class="ws-tool danger"
-                  title="移除工作空间"
-                  :disabled="removingId === ws.id"
-                  @click="removeWorkspace(ws, $event)"
-                >
-                  <AppIcon name="trash" :size="13" :stroke-width="1.75" />
-                </button>
-              </div>
-              <span v-if="ws.id === store.workspaceId" class="ws-dot" title="当前工作空间" />
-            </div>
-          </div>
-
-          <div v-if="isExpanded(ws.id)" class="ws-sessions">
-            <p v-if="loading[ws.id]" class="hint">加载中…</p>
-            <p v-else-if="errors[ws.id]" class="hint err">{{ errors[ws.id] }}</p>
-            <p v-else-if="!sortedConvs(ws.id).length" class="hint">暂无会话</p>
-
             <div
-              v-for="conv in visibleConvs(ws.id)"
-              :key="conv.id"
-              class="conv-row"
-              :class="{
-                active: conv.id === store.conversationId && ws.id === store.workspaceId,
-                pinned: pins.isPinnedIn(ws.id, conv.id),
-              }"
-              @click="openConv(ws, conv)"
+              class="ws-row"
+              @mouseenter="showTip(ws, $event)"
+              @mouseleave="scheduleHideTip"
             >
-              <span class="conv-status-slot" aria-hidden="true">
-                <template v-for="st in [statusByKey.get(`${ws.id}:${conv.id}`)]" :key="`${conv.id}-status`">
-                  <span
-                    v-if="st"
-                    class="conv-status"
-                    :class="st.tone"
-                    :title="st.label"
-                    :aria-label="st.label"
-                  >
-                    <AppIcon :name="st.icon" :size="12" :stroke-width="1.75" />
-                  </span>
-                </template>
-              </span>
-
-              <span class="conv-copy">
-                <input
-                  v-if="editingId === conv.id"
-                  v-model="editingTitle"
-                  class="conv-rename-input"
-                  type="text"
-                  maxlength="300"
-                  aria-label="重命名"
-                  @click.stop
-                  @keydown="onRenameKeydown(ws.id, conv.id, $event)"
-                  @blur="commitRename(ws.id, conv.id)"
+              <button type="button" class="ws-main" @click="toggleExpand(ws.id)">
+                <AppIcon
+                  class="ws-chev"
+                  :name="isExpanded(ws.id) ? 'chevron-down' : 'chevron-right'"
+                  :size="12"
+                  :stroke-width="2"
                 />
-                <span v-else class="conv-title" :title="conv.title">{{ conv.title }}</span>
-              </span>
-
-              <span class="conv-meta">
-                <span v-if="!editingId" class="conv-time">
-                  {{ formatRelativeTime(conv.updated_at || conv.created_at) }}
+                <AppIcon class="ws-icon" name="folder" :size="14" :stroke-width="1.75" />
+                <span class="ws-copy">
+                  <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
                 </span>
-              </span>
-
-              <span class="conv-actions">
-                <button type="button" class="conv-action" title="重命名" @click="startRename(conv, $event)">
-                  <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
-                </button>
-                <button
-                  type="button"
-                  class="conv-action"
-                  :class="{ on: pins.isPinnedIn(ws.id, conv.id) }"
-                  :title="pins.isPinnedIn(ws.id, conv.id) ? '取消置顶' : '置顶'"
-                  @click="onTogglePin(ws.id, conv.id, $event)"
-                >
-                  <AppIcon name="pin" :size="13" :stroke-width="1.75" />
-                </button>
-                <button type="button" class="conv-action danger" title="删除会话" @click="onDelete(ws.id, conv.id, $event)">
-                  <AppIcon name="trash" :size="13" :stroke-width="1.75" />
-                </button>
-              </span>
-
-              <span class="conv-turns">{{ turnCount(ws.id, conv) }}轮</span>
+              </button>
+              <div class="ws-end">
+                <div class="ws-tools">
+                  <button
+                    type="button"
+                    class="ws-tool"
+                    title="新建会话"
+                    :disabled="creatingId === ws.id"
+                    @click="newSession(ws, $event)"
+                  >
+                    <AppIcon name="plus" :size="13" :stroke-width="1.75" />
+                  </button>
+                  <button
+                    v-if="ws.id !== store.workspaceId"
+                    type="button"
+                    class="ws-tool text"
+                    :disabled="switchingId === ws.id"
+                    @click="openWorkspace(ws, $event)"
+                  >
+                    打开
+                  </button>
+                  <button
+                    type="button"
+                    class="ws-tool danger"
+                    title="移除工作空间"
+                    :disabled="removingId === ws.id"
+                    @click="removeWorkspace(ws, $event)"
+                  >
+                    <AppIcon name="trash" :size="13" :stroke-width="1.75" />
+                  </button>
+                </div>
+                <span v-if="ws.id === store.workspaceId" class="ws-dot" title="当前工作空间" />
+              </div>
             </div>
 
-            <button
-              v-if="hiddenCount(ws.id)"
-              type="button"
-              class="show-more"
-              @click="toggleShowAll(ws.id)"
-            >
-              显示更多（{{ hiddenCount(ws.id) }}）
-            </button>
-            <button
-              v-else-if="showsAll(ws.id) && sortedConvs(ws.id).length > PREVIEW_LIMIT"
-              type="button"
-              class="show-more"
-              @click="toggleShowAll(ws.id)"
-            >
-              收起
-            </button>
-          </div>
-        </li>
-      </ul>
+            <div v-if="isExpanded(ws.id)" class="ws-sessions">
+              <p v-if="loading[ws.id]" class="hint">加载中…</p>
+              <p v-else-if="errors[ws.id]" class="hint err">{{ errors[ws.id] }}</p>
+              <p v-else-if="!sortedConvs(ws.id).length" class="hint">暂无会话</p>
+
+              <div
+                v-for="conv in visibleConvs(ws.id)"
+                :key="conv.id"
+                class="conv-row"
+                :class="{
+                  active: conv.id === store.conversationId && ws.id === store.workspaceId,
+                  pinned: pins.isPinnedIn(ws.id, conv.id),
+                }"
+                @click="openConv(ws, conv)"
+              >
+                <span class="conv-status-slot" aria-hidden="true">
+                  <template v-for="st in [statusByKey.get(`${ws.id}:${conv.id}`)]" :key="`${conv.id}-status`">
+                    <span
+                      v-if="st"
+                      class="conv-status"
+                      :class="st.tone"
+                      :title="st.label"
+                      :aria-label="st.label"
+                    >
+                      <AppIcon :name="st.icon" :size="12" :stroke-width="1.75" />
+                    </span>
+                  </template>
+                </span>
+
+                <span class="conv-copy">
+                  <input
+                    v-if="editingId === conv.id"
+                    v-model="editingTitle"
+                    class="conv-rename-input"
+                    type="text"
+                    maxlength="300"
+                    aria-label="重命名"
+                    @click.stop
+                    @keydown="onRenameKeydown(ws.id, conv.id, $event)"
+                    @blur="commitRename(ws.id, conv.id)"
+                  />
+                  <span v-else class="conv-title" :title="conv.title">{{ conv.title }}</span>
+                </span>
+
+                <span class="conv-meta">
+                  <span v-if="!editingId" class="conv-time">
+                    {{ formatRelativeTime(conv.updated_at || conv.created_at) }}
+                  </span>
+                </span>
+
+                <span class="conv-actions">
+                  <button type="button" class="conv-action" title="重命名" @click="startRename(conv, $event)">
+                    <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
+                  </button>
+                  <button
+                    type="button"
+                    class="conv-action"
+                    :class="{ on: pins.isPinnedIn(ws.id, conv.id) }"
+                    :title="pins.isPinnedIn(ws.id, conv.id) ? '取消置顶' : '置顶'"
+                    @click="onTogglePin(ws.id, conv.id, $event)"
+                  >
+                    <AppIcon name="pin" :size="13" :stroke-width="1.75" />
+                  </button>
+                  <button type="button" class="conv-action danger" title="删除会话" @click="onDelete(ws.id, conv.id, $event)">
+                    <AppIcon name="trash" :size="13" :stroke-width="1.75" />
+                  </button>
+                </span>
+
+                <span class="conv-turns">{{ turnCount(ws.id, conv) }}轮</span>
+              </div>
+
+              <button
+                v-if="hiddenCount(ws.id)"
+                type="button"
+                class="show-more"
+                @click="toggleShowAll(ws.id)"
+              >
+                显示更多（{{ hiddenCount(ws.id) }}）
+              </button>
+              <button
+                v-else-if="showsAll(ws.id) && sortedConvs(ws.id).length > PREVIEW_LIMIT"
+                type="button"
+                class="show-more"
+                @click="toggleShowAll(ws.id)"
+              >
+                收起
+              </button>
+            </div>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <Teleport to="body">
@@ -541,16 +690,28 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
         @mouseleave="scheduleHideTip"
       >
         <div class="ws-tip-head">
-          <AppIcon class="ws-tip-icon" name="folder" :size="15" :stroke-width="1.75" />
+          <AppIcon
+            class="ws-tip-icon"
+            :name="isSsh(hoverWorkspace) ? 'globe' : 'folder'"
+            :size="15"
+            :stroke-width="1.75"
+          />
           <div class="ws-tip-titles">
             <strong>{{ hoverWorkspace.name || basename(hoverWorkspace.root_path) }}</strong>
+            <span v-if="isSsh(hoverWorkspace)" class="ws-tip-badge remote">远程</span>
             <span v-if="hoverWorkspace.id === store.workspaceId" class="ws-tip-badge">当前</span>
           </div>
         </div>
         <dl class="ws-tip-meta">
+          <div v-if="isSsh(hoverWorkspace)">
+            <dt>主机</dt>
+            <dd class="mono">{{ hostEndpoint(hoverWorkspace) }}</dd>
+          </div>
           <div>
             <dt>路径</dt>
-            <dd class="mono" :title="hoverWorkspace.root_path">{{ hoverWorkspace.root_path }}</dd>
+            <dd class="mono" :title="hoverWorkspace.display_path || hoverWorkspace.root_path">
+              {{ hoverWorkspace.display_path || hoverWorkspace.root_path }}
+            </dd>
           </div>
           <div v-if="hoverWorkspace.last_opened_at">
             <dt>最近打开</dt>
@@ -568,7 +729,17 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       </div>
     </Teleport>
 
-    <WorkspaceSwitch v-if="showOpen" @close="showOpen = false" />
+    <WorkspaceSwitch
+      v-if="showOpen"
+      :prefill="openPrefill"
+      @close="closeOpenDialog"
+    />
+    <WorkspaceEditDialog
+      v-if="editingHost"
+      :workspaces="editingHost.workspaces"
+      :label="editingHost.label"
+      @close="editingHost = null"
+    />
   </div>
 </template>
 
@@ -620,6 +791,126 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   min-height: 0;
   overflow: auto;
   padding: 4px 8px 12px;
+}
+
+.host-block {
+  margin-bottom: 8px;
+}
+
+.host-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding-right: 4px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.host-row:hover {
+  background: color-mix(in srgb, var(--text-h) 4%, transparent);
+  color: var(--text-secondary);
+}
+
+.host-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 6px 2px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.host-tools {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.host-row:hover .host-tools,
+.host-row:focus-within .host-tools {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.host-tool {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.host-tool:hover {
+  background: var(--code-bg);
+  color: var(--text-h);
+}
+
+.host-chev,
+.host-icon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.host-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.host-badge,
+.ws-badge {
+  flex-shrink: 0;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+
+.host-badge,
+.ws-badge.remote,
+.ws-tip-badge.remote {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
+}
+
+.ws-tip-badge.local {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: var(--text-secondary);
+}
+
+.host-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.host-block .ws-list {
+  padding-left: 8px;
 }
 
 .empty,
@@ -777,7 +1068,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 1px 0 6px;
+  padding: 1px 0 6px 8px;
 }
 
 .conv-row {
@@ -787,7 +1078,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   align-items: center;
   gap: 6px;
   min-height: 30px;
-  padding: 4px 8px 4px 10px;
+  padding: 4px 8px;
   border-radius: 10px;
   color: var(--text);
   cursor: pointer;
@@ -949,7 +1240,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   width: 100%;
   height: 26px;
   margin-top: 2px;
-  padding: 0 10px 0 30px;
+  padding: 0 10px 0 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -1019,6 +1310,14 @@ html[data-theme='dark'] .ws-tip {
   color: var(--primary);
   font-size: 10px;
   font-weight: 600;
+}
+.ws-tip-badge.local {
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: var(--text-secondary);
+}
+.ws-tip-badge.remote {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
 }
 .ws-tip-meta {
   margin: 0;

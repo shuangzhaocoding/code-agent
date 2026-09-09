@@ -110,7 +110,19 @@
     "fallbackName": "Arbeitsbereich",
     "pickFolder": "Ordner wählen",
     "rootsLabel": "Dieser PC",
-    "pickDriveFirst": "Zuerst ein Laufwerk oder einen Ordner öffnen"
+    "pickDriveFirst": "Zuerst ein Laufwerk oder einen Ordner öffnen",
+    "localTab": "Lokal",
+    "sshTab": "SSH Remote",
+    "sshDisplayName": "Anzeigename (optional)",
+    "sshHost": "Host",
+    "sshPort": "Port",
+    "sshUser": "Benutzer",
+    "sshPassword": "Passwort (optional)",
+    "sshKey": "Private Key PEM (optional)",
+    "sshPassphrase": "Schlüssel-Passphrase (optional)",
+    "sshPathPlaceholder": "Remote-Pfad",
+    "sshConnect": "Verbinden & browsen",
+    "sshBrowse": "Remote-Ordner"
   },
   "settings": {
     "title": "Einstellungen",

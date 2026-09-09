@@ -53,6 +53,7 @@ deps = [
     "tzdata>=2024.1",
     # ConPTY / winpty for in-app terminal on Windows.
     "pywinpty>=2.0.14",
+    "asyncssh>=2.14.0",
 ]
 print("\n".join(deps))
 PY

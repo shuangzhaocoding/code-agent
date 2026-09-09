@@ -1,34 +1,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
-import re
-import shutil
-import subprocess
-from pathlib import Path
 
 from langchain_core.tools import tool
 
 from code_agent.config import settings
 from code_agent.plugins.base import registry
 from code_agent.tools.context import get_run_id, get_workspace
-from code_agent.tools.paths import read_text_file, resolve_in_workspace, walk_files
 from code_agent.policy.engine import is_command_blocked, is_protected
 from code_agent.tools.approval import request_approval
 
 
 async def _run_sync(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
-
-
-def _read_text_for_edit(path: Path) -> str:
-    """Read file text for write/replace tools; never raises UnicodeDecodeError."""
-    if not path.is_file():
-        return ""
-    data = path.read_bytes()
-    if b"\x00" in data[:4096]:
-        raise ValueError("binary file")
-    return data.decode("utf-8", errors="replace")
 
 
 async def _emit(block_type: str, meta: dict, text: str = "", complete: bool = True) -> None:
@@ -48,6 +32,26 @@ async def _emit(block_type: str, meta: dict, text: str = "", complete: bool = Tr
         await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
 
 
+async def _backend():
+    from code_agent.db.models import Workspace
+    from code_agent.workspace.backend import get_workspace_backend
+    from code_agent.workspace.local import LocalWorkspaceBackend
+
+    ctx = get_workspace()
+    wid = ctx.get("id")
+    if wid:
+        row = await Workspace.get_or_none(id=wid)
+        if row:
+            return await get_workspace_backend(row)
+    # Fallback for legacy context with only root_path
+    class _Tmp:
+        root_path = ctx["root_path"]
+        ignore_globs = []
+        kind = "local"
+
+    return LocalWorkspaceBackend(_Tmp())  # type: ignore[arg-type]
+
+
 def _root() -> str:
     return get_workspace()["root_path"]
 
@@ -55,10 +59,13 @@ def _root() -> str:
 @tool
 async def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
     """Read a UTF-8 text file. Path may be workspace-relative or absolute (incl. ~)."""
-    file_path = resolve_in_workspace(_root(), path)
-    if not file_path.is_file():
+    fs = await _backend()
+    if not await fs.is_file(path):
         return f"ERROR: file not found: {path}"
-    text = await _run_sync(read_text_file, file_path)
+    try:
+        text = await fs.read_text(path)
+    except Exception as exc:
+        return f"ERROR: {exc}"
     lines = text.splitlines()
     start = max(offset - 1, 0)
     end = min(start + max(limit, 1), len(lines))
@@ -70,9 +77,11 @@ async def read_file(path: str, offset: int = 1, limit: int = 200) -> str:
 @tool
 async def list_dir(path: str = ".") -> str:
     """List a directory. Path may be workspace-relative or absolute (incl. ~)."""
-    from code_agent.tools.paths import list_dir as _list
-
-    items = await _run_sync(_list, _root(), path)
+    fs = await _backend()
+    try:
+        items = await fs.list_dir(path)
+    except Exception as exc:
+        return f"ERROR: {exc}"
     lines = [("📁 " if i["is_dir"] else "📄 ") + i["path"] for i in items]
     return "\n".join(lines) or "(empty)"
 
@@ -82,9 +91,10 @@ async def glob_search(pattern: str) -> str:
     """Find files by glob pattern relative to the workspace (e.g. **/*.py)."""
     import fnmatch
 
+    fs = await _backend()
     matches = []
-    for rel, _path in await _run_sync(lambda: list(walk_files(_root()))):
-        if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(Path(rel).name, pattern):
+    for rel, _abs in await fs.walk_files():
+        if fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(rel.split("/")[-1], pattern):
             matches.append(rel)
         if len(matches) >= 200:
             break
@@ -95,46 +105,12 @@ async def glob_search(pattern: str) -> str:
 async def grep_search(query: str, glob: str = "", regex: bool = False) -> str:
     """Search file contents. Prefer literal query unless regex=True."""
     max_hits = int(settings.get("workspace.grep_max_hits") or 200)
-    if shutil.which("rg"):
-        cmd = ["rg", "-n", "--hidden", "--no-heading", "-m", "50", "-g", "!node_modules", "-g", "!.git"]
-        if glob:
-            cmd.extend(["-g", glob])
-        if not regex:
-            cmd.append("-F")
-        cmd.extend([query, _root()])
-        try:
-            proc = await _run_sync(
-                subprocess.run,
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-        except subprocess.TimeoutExpired:
-            return "ERROR: grep timed out"
-        lines = proc.stdout.splitlines()[:max_hits]
-        return "\n".join(lines) or "(no matches)"
-
-    flags = re.IGNORECASE
-    cre = re.compile(query if regex else re.escape(query), flags)
-    hits: list[str] = []
-    files = await _run_sync(lambda: list(walk_files(_root())))
-    for rel, path in files:
-        if glob:
-            import fnmatch
-
-            if not fnmatch.fnmatch(rel, glob) and not fnmatch.fnmatch(path.name, glob):
-                continue
-        try:
-            text = await _run_sync(read_text_file, path)
-        except Exception:
-            continue
-        for i, line in enumerate(text.splitlines(), 1):
-            if cre.search(line):
-                hits.append(f"{rel}:{i}:{line[:240]}")
-                if len(hits) >= max_hits:
-                    return "\n".join(hits)
-    return "\n".join(hits) or "(no matches)"
+    fs = await _backend()
+    include = [glob] if glob else None
+    hits = await fs.search(query, regex=regex, include=include, max_hits=max_hits)
+    if not hits:
+        return "(no matches)"
+    return "\n".join(f"{h['path']}:{h.get('line', 0)}:{h.get('text', '')}" for h in hits)
 
 
 @tool
@@ -144,28 +120,25 @@ async def write_file(path: str, content: str) -> str:
         return f"ERROR: protected file, cannot write: {path}"
     if not await request_approval("write_file", f"写入 {path}", {"path": path}, kind="write"):
         return "ERROR: user denied this operation"
-    file_path = resolve_in_workspace(_root(), path)
-    def _write() -> tuple[str, str, str]:
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-        old = _read_text_for_edit(file_path) if file_path.exists() else ""
-        file_path.write_text(content, encoding="utf-8")
-        import difflib
-
-        action = "create" if not old else "overwrite"
-        diff = "".join(
-            difflib.unified_diff(
-                old.splitlines(True),
-                content.splitlines(True),
-                fromfile=f"a/{path}",
-                tofile=f"b/{path}",
-            )
-        )
-        return old, action, diff
-
+    fs = await _backend()
+    old = ""
     try:
-        old, action, diff = await _run_sync(_write)
-    except ValueError:
-        return f"ERROR: binary file, cannot write as text: {path}"
+        if await fs.is_file(path):
+            old = await fs.read_text(path)
+    except Exception:
+        old = ""
+    await fs.write_text(path, content)
+    import difflib
+
+    action = "create" if not old else "overwrite"
+    diff = "".join(
+        difflib.unified_diff(
+            old.splitlines(True),
+            content.splitlines(True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+        )
+    )
     await _emit(
         "file.diff",
         {
@@ -193,33 +166,27 @@ async def search_replace(path: str, old_string: str, new_string: str) -> str:
         kind="write",
     ):
         return "ERROR: user denied this operation"
-    file_path = resolve_in_workspace(_root(), path)
-    if not file_path.is_file():
+    fs = await _backend()
+    if not await fs.is_file(path):
         return f"ERROR: file not found: {path}"
-    def _replace() -> tuple[str, str, str]:
-        text = _read_text_for_edit(file_path)
-        if old_string not in text:
-            raise ValueError("old_string not found")
-        updated = text.replace(old_string, new_string, 1)
-        file_path.write_text(updated, encoding="utf-8")
-        import difflib
-
-        diff = "".join(
-            difflib.unified_diff(
-                text.splitlines(True),
-                updated.splitlines(True),
-                fromfile=f"a/{path}",
-                tofile=f"b/{path}",
-            )
-        )
-        return text, updated, diff
-
     try:
-        text, updated, diff = await _run_sync(_replace)
-    except ValueError as exc:
-        if str(exc) == "binary file":
-            return f"ERROR: binary file, cannot edit as text: {path}"
+        text = await fs.read_text(path)
+    except Exception as exc:
+        return f"ERROR: {exc}"
+    if old_string not in text:
         return "ERROR: old_string not found"
+    updated = text.replace(old_string, new_string, 1)
+    await fs.write_text(path, updated)
+    import difflib
+
+    diff = "".join(
+        difflib.unified_diff(
+            text.splitlines(True),
+            updated.splitlines(True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+        )
+    )
     await _emit(
         "file.diff",
         {"path": path, "action": "edit", "before": text, "after": updated},
@@ -233,25 +200,18 @@ async def delete_file(path: str) -> str:
     """Delete a file or directory. Path may be workspace-relative or absolute (incl. ~)."""
     if is_protected(path):
         return f"ERROR: protected path, cannot delete: {path}"
-    file_path = resolve_in_workspace(_root(), path)
-    if not file_path.exists():
+    fs = await _backend()
+    if not await fs.exists(path):
         return f"ERROR: not found: {path}"
     if not await request_approval("delete_file", f"删除 {path}", {"path": path}, kind="delete"):
         return "ERROR: user denied this operation"
-    def _delete() -> str:
+    before = ""
+    try:
+        if await fs.is_file(path):
+            before = await fs.read_text(path)
+    except Exception:
         before = ""
-        if file_path.is_file():
-            try:
-                before = _read_text_for_edit(file_path)
-            except ValueError:
-                before = ""
-        if file_path.is_dir():
-            shutil.rmtree(file_path)
-        else:
-            file_path.unlink()
-        return before
-
-    before = await _run_sync(_delete)
+    await fs.delete(path)
     await _emit("file.delete", {"path": path, "action": "delete", "before": before, "after": ""})
     return f"Deleted {path}"
 
@@ -268,43 +228,35 @@ async def run_command(command: str, cwd: str = ".") -> str:
         kind="command",
     ):
         return "ERROR: user denied this operation"
-    work = resolve_in_workspace(_root(), cwd)
-    if not work.is_dir():
-        work = resolve_in_workspace(_root(), ".")
+    fs = await _backend()
     timeout = int(settings.get("agent.tool_timeout_sec") or 90)
     max_chars = int(settings.get("agent.max_tool_output_chars") or 12000)
-    try:
-        proc = await _run_sync(
-            subprocess.run,
-            command,
-            shell=True,
-            cwd=str(work),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-    except subprocess.TimeoutExpired:
-        return f"ERROR: timed out after {timeout}s"
-    output = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
+    code, stdout, stderr = await fs.run_command(command, cwd=cwd, timeout=timeout)
+    output = stdout + (("\n" + stderr) if stderr else "")
     if len(output) > max_chars:
         output = output[:max_chars] + "\n...[truncated]"
     await _emit(
         "terminal",
-        {"command": command, "cwd": cwd, "exit_code": proc.returncode},
+        {"command": command, "cwd": cwd, "exit_code": code},
         output[-4000:],
     )
-    return f"exit {proc.returncode}\n{output}"
+    return f"exit {code}\n{output}"
 
 
 @tool
 async def list_skills() -> str:
     """List available agent skills (name + description). Load one with load_skill before following it."""
-    from code_agent.skills.registry import list_skill_catalog
+    from code_agent.db.models import Workspace
+    from code_agent.skills.registry import ensure_skills_ready, list_skill_catalog
 
-    items = list_skill_catalog(get_workspace()["root_path"])
+    ctx = get_workspace()
+    ws = None
+    wid = ctx.get("id")
+    if wid:
+        ws = await Workspace.get_or_none(id=wid)
+        if ws:
+            await ensure_skills_ready(ws)
+    items = list_skill_catalog(ws or ctx.get("root_path"))
     enabled = [s for s in items if s.get("enabled") and not s.get("invalid_reason")]
     if not enabled:
         return "(no skills)"
@@ -314,9 +266,17 @@ async def list_skills() -> str:
 @tool
 async def load_skill(name: str) -> str:
     """Load the full SKILL.md body for a skill. Call when the task matches a listed skill."""
-    from code_agent.skills.registry import load_skill_body
+    from code_agent.db.models import Workspace
+    from code_agent.skills.registry import ensure_skills_ready, load_skill_body
 
-    body = load_skill_body(get_workspace()["root_path"], name)
+    ctx = get_workspace()
+    ws = None
+    wid = ctx.get("id")
+    if wid:
+        ws = await Workspace.get_or_none(id=wid)
+        if ws:
+            await ensure_skills_ready(ws)
+    body = load_skill_body(ws or ctx.get("root_path"), name)
     if not body:
         return f"ERROR: skill not found: {name}"
     await _emit("skill.activated", {"name": name}, body[:500])

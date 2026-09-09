@@ -1,6 +1,7 @@
 from code_agent.plugins.base import LlmAdapter, PluginInfo, PluginRegistry, ProviderSpec, ToolSpec, registry
 from code_agent.plugins.loader import (
     activate_workspace_plugins,
+    activate_workspace_plugins_for,
     active_workspace_root,
     apply_plugin_states,
     load_plugins,
@@ -15,6 +16,7 @@ __all__ = [
     "ProviderSpec",
     "ToolSpec",
     "activate_workspace_plugins",
+    "activate_workspace_plugins_for",
     "active_workspace_root",
     "apply_plugin_states",
     "load_plugins",

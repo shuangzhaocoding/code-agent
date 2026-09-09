@@ -14,6 +14,13 @@ export type Workspace = {
   id: string
   name: string
   root_path: string
+  kind?: 'local' | 'ssh'
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_user?: string | null
+  ssh_display_name?: string | null
+  has_ssh_secret?: boolean
+  display_path?: string | null
   created_at?: string | null
   last_opened_at?: string | null
 }
@@ -224,7 +231,27 @@ export const useAppStore = defineStore('app', () => {
   async function addWorkspace(root_path: string, name?: string) {
     const ws = await api<Workspace>('/api/workspaces', {
       method: 'POST',
-      body: JSON.stringify({ root_path, name }),
+      body: JSON.stringify({ root_path, name, kind: 'local' }),
+    })
+    await loadWorkspaces()
+    await selectWorkspace(ws.id)
+  }
+
+  async function addSshWorkspace(payload: {
+    root_path: string
+    name?: string
+    ssh_display_name?: string
+    ssh_host: string
+    ssh_port?: number
+    ssh_user: string
+    ssh_password?: string
+    ssh_private_key?: string
+    ssh_passphrase?: string
+    reuse_ssh_from?: string
+  }) {
+    const ws = await api<Workspace>('/api/workspaces', {
+      method: 'POST',
+      body: JSON.stringify({ ...payload, kind: 'ssh' }),
     })
     await loadWorkspaces()
     await selectWorkspace(ws.id)
@@ -240,6 +267,31 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     clearWorkspace()
+  }
+
+  async function updateWorkspace(
+    id: string,
+    payload: {
+      name?: string
+      root_path?: string
+      ssh_display_name?: string
+      ssh_host?: string
+      ssh_port?: number
+      ssh_user?: string
+      ssh_password?: string
+      ssh_private_key?: string
+      ssh_passphrase?: string
+    },
+  ) {
+    const ws = await api<Workspace>(`/api/workspaces/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+    await loadWorkspaces()
+    if (workspaceId.value === id) {
+      await selectWorkspace(id, { openExplorer: false })
+    }
+    return ws
   }
 
   function clearWorkspace() {
@@ -1945,7 +1997,9 @@ export const useAppStore = defineStore('app', () => {
     pendingModelProbe,
     loadWorkspaces,
     addWorkspace,
+    addSshWorkspace,
     removeWorkspace,
+    updateWorkspace,
     clearWorkspace,
     selectWorkspace,
     loadTree,

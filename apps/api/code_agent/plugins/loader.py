@@ -297,6 +297,15 @@ async def activate_workspace_plugins(workspace_root: str) -> dict:
     }
 
 
+async def activate_workspace_plugins_for(ws) -> dict:
+    """Activate plugins for a Workspace model (local path or SSH mirror)."""
+    from code_agent.workspace.backend import workspace_is_ssh
+    from code_agent.workspace.mirror import ensure_local_assets_root
+
+    root = await ensure_local_assets_root(ws)
+    return await activate_workspace_plugins(root)
+
+
 async def apply_plugin_states(plugin_ids: list[str] | None = None) -> None:
     from code_agent.db.models import PluginState
 

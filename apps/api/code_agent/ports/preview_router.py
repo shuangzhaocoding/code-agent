@@ -54,10 +54,17 @@ _PREVIEW_PATCH = """<script data-ca-preview-ws>
 (function () {
   var PREFIX = %PREFIX%;
   var TARGET_PORT = %PORT%;
+  var WORKSPACE_ID = %WORKSPACE_ID%;
   var PREFIX_SLASH = PREFIX.replace(/\\/$/, "");
 
   function isLoopback(hostname) {
     return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1";
+  }
+
+  function withWorkspace(abs) {
+    if (!WORKSPACE_ID) return abs.toString();
+    abs.searchParams.set("workspace_id", WORKSPACE_ID);
+    return abs.toString();
   }
 
   function rewriteUrl(raw) {
@@ -68,7 +75,7 @@ _PREVIEW_PATCH = """<script data-ca-preview-ws>
     } catch (e) {
       return raw;
     }
-    if (abs.pathname.indexOf("/api/preview/") === 0) return abs.toString();
+    if (abs.pathname.indexOf("/api/preview/") === 0) return withWorkspace(abs);
 
     // http://127.0.0.1:8001/api/... → /api/preview/8001/api/...
     if (isLoopback(abs.hostname) && abs.port && abs.port !== location.port) {
@@ -80,13 +87,13 @@ _PREVIEW_PATCH = """<script data-ca-preview-ws>
       } else {
         abs.pathname = "/api/preview/" + other + (abs.pathname || "/");
       }
-      return abs.toString();
+      return withWorkspace(abs);
     }
 
     // same-origin /api/... (Vite proxy to backend) → /api/preview/{frontendPort}/api/...
     if (abs.origin === location.origin && abs.pathname.charAt(0) === "/" && abs.pathname.indexOf(PREFIX_SLASH) !== 0) {
       abs.pathname = PREFIX_SLASH + abs.pathname;
-      return abs.toString();
+      return withWorkspace(abs);
     }
     return abs.toString();
   }
@@ -103,13 +110,13 @@ _PREVIEW_PATCH = """<script data-ca-preview-ws>
         u.host = location.host;
         var rest = u.pathname && u.pathname !== "/" ? u.pathname : "/";
         u.pathname = PREFIX_SLASH + (rest.startsWith("/") ? rest : "/" + rest);
-        return u.toString();
+        return withWorkspace(u);
       }
       if (toOther) {
         u.protocol = location.protocol === "https:" ? "wss:" : "ws:";
         u.host = location.host;
         u.pathname = "/api/preview/" + u.port + (u.pathname || "/");
-        return u.toString();
+        return withWorkspace(u);
       }
     } catch (e) {}
     return raw;
@@ -167,16 +174,37 @@ from code_agent.ports.protected import protected_ports as _own_ports
 
 
 @router.get("/api/ports")
-async def get_ports():
+async def get_ports(workspace_id: str | None = None):
     own = _own_ports()
+    if workspace_id:
+        from code_agent.db.models import Workspace
+        from code_agent.ports.remote_scan import list_remote_listening_ports
+        from code_agent.workspace.backend import get_workspace_backend, workspace_is_ssh
+
+        ws = await Workspace.get_or_none(id=workspace_id)
+        if not ws:
+            raise HTTPException(status_code=404, detail={"code": "workspace.not_found"})
+        if workspace_is_ssh(ws):
+            backend = await get_workspace_backend(ws)
+            items = await list_remote_listening_ports(
+                backend, exclude_ports=own, workspace_id=str(ws.id)
+            )
+            for item in items:
+                item["self"] = item["port"] in own
+            return {"ports": items, "count": len(items), "scope": "ssh"}
     items = list_listening_ports()
     for item in items:
         item["self"] = item["port"] in own
-    return {"ports": items, "count": len(items)}
+    return {"ports": items, "count": len(items), "scope": "local"}
 
 
 @router.delete("/api/ports/{port}")
-async def kill_port(port: int):
+async def kill_port(port: int, workspace_id: str | None = None):
+    if workspace_id:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "ports.remote_kill", "message": "远程端口暂不支持在此结束进程"},
+        )
     if port < 1 or port > 65535:
         raise HTTPException(status_code=400, detail={"code": "ports.invalid", "message": "无效端口"})
     if port in _own_ports():
@@ -244,12 +272,17 @@ def json_dumps_str(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _rewrite_html(html: str, prefix: str, port: int) -> str:
+def _rewrite_html(html: str, prefix: str, port: int, workspace_id: str | None = None) -> str:
     base = prefix.rstrip("/") + "/"
+    if workspace_id:
+        sep = "&" if "?" in base else "?"
+        base = f"{base}{sep}workspace_id={workspace_id}"
     html = _ATTR_ABS.sub(rf"\g<attr>{base}", html)
     html = _rewrite_text_paths(html, prefix)
-    patch = _PREVIEW_PATCH.replace("%PREFIX%", json_dumps_str(prefix.rstrip("/"))).replace(
-        "%PORT%", str(int(port))
+    patch = (
+        _PREVIEW_PATCH.replace("%PREFIX%", json_dumps_str(prefix.rstrip("/")))
+        .replace("%PORT%", str(int(port)))
+        .replace("%WORKSPACE_ID%", json_dumps_str(workspace_id) if workspace_id else "null")
     )
     inject_parts: list[str] = []
     if "data-ca-preview-ws" not in html:
@@ -292,17 +325,44 @@ async def _open_upstream(method: str, target: str, headers: dict, body: bytes | 
 async def _proxy(port: int, path: str, request: Request) -> Response:
     if port < 1 or port > 65535:
         raise HTTPException(status_code=400, detail={"code": "ports.invalid", "message": "无效端口"})
-    entry = get_port_entry(port)
-    if not entry:
-        raise HTTPException(status_code=404, detail={"code": "ports.not_listening", "message": f"端口 {port} 未在监听"})
     if port in _own_ports():
         raise HTTPException(status_code=400, detail={"code": "ports.self", "message": "不能代理 Code Agent 自身端口"})
 
-    connect_host = entry.get("connect_host") or "127.0.0.1"
+    workspace_id = request.query_params.get("workspace_id") or None
+    connect_host = "127.0.0.1"
+    connect_port = port
+
+    if workspace_id:
+        from code_agent.db.models import Workspace
+        from code_agent.ports.remote_scan import list_remote_listening_ports
+        from code_agent.ports.ssh_tunnel import ssh_forwards
+        from code_agent.workspace.backend import get_workspace_backend, workspace_is_ssh
+
+        ws = await Workspace.get_or_none(id=workspace_id)
+        if not ws or not workspace_is_ssh(ws):
+            raise HTTPException(status_code=404, detail={"code": "ports.not_listening", "message": f"端口 {port} 未在监听"})
+        backend = await get_workspace_backend(ws)
+        remote_ports = await list_remote_listening_ports(backend, workspace_id=str(ws.id))
+        if not any(item["port"] == port for item in remote_ports):
+            raise HTTPException(status_code=404, detail={"code": "ports.not_listening", "message": f"端口 {port} 未在监听"})
+        try:
+            connect_port = await ssh_forwards.local_port(str(ws.id), port)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"code": "ports.tunnel_error", "message": f"SSH 端口转发失败: {exc}"},
+            ) from exc
+    else:
+        entry = get_port_entry(port)
+        if not entry:
+            raise HTTPException(status_code=404, detail={"code": "ports.not_listening", "message": f"端口 {port} 未在监听"})
+        connect_host = entry.get("connect_host") or "127.0.0.1"
+
     candidates = [connect_host]
-    alt = "::1" if connect_host == "127.0.0.1" else "127.0.0.1"
-    if alt not in candidates:
-        candidates.append(alt)
+    if not workspace_id:
+        alt = "::1" if connect_host == "127.0.0.1" else "127.0.0.1"
+        if alt not in candidates:
+            candidates.append(alt)
 
     prefix = f"/api/preview/{port}"
     body = await request.body()
@@ -312,10 +372,14 @@ async def _proxy(port: int, path: str, request: Request) -> Response:
     client = None
     upstream = None
     for host in candidates:
-        target_base = format_open_url(host, port).rstrip("/") + "/"
+        target_base = format_open_url(host, connect_port).rstrip("/") + "/"
         target = urljoin(target_base, path.lstrip("/"))
-        if request.url.query:
-            target = f"{target}?{request.url.query}"
+        # Preserve non-workspace query params for upstream
+        q = request.url.query
+        if q:
+            pairs = [p for p in q.split("&") if p and not p.startswith("workspace_id=")]
+            if pairs:
+                target = f"{target}?{'&'.join(pairs)}"
         try:
             client, upstream = await _open_upstream(request.method, target, headers, body)
             break
@@ -343,7 +407,11 @@ async def _proxy(port: int, path: str, request: Request) -> Response:
                 text = raw.decode(upstream.charset_encoding or "utf-8", errors="replace")
             except LookupError:
                 text = raw.decode("utf-8", errors="replace")
-            text = _rewrite_html(text, prefix, port) if kind == "html" else _rewrite_text_paths(text, prefix)
+            text = (
+                _rewrite_html(text, prefix, port, workspace_id=workspace_id)
+                if kind == "html"
+                else _rewrite_text_paths(text, prefix)
+            )
             raw = text.encode("utf-8")
             resp_headers.pop("Content-Length", None)
         return PlainResponse(
@@ -381,24 +449,60 @@ def _ws_upstream_uri(host: str, port: int, path: str, query: bytes) -> str:
 @router.websocket("/api/preview/{port}")
 @router.websocket("/api/preview/{port}/{path:path}")
 async def preview_ws(websocket: WebSocket, port: int, path: str = ""):
-    entry = get_port_entry(port)
-    if not entry or port in _own_ports():
+    if port in _own_ports():
         await websocket.close(code=4404)
         return
 
-    connect_host = entry.get("connect_host") or "127.0.0.1"
-    hosts = [connect_host]
-    alt = "::1" if connect_host == "127.0.0.1" else "127.0.0.1"
-    if alt not in hosts:
-        hosts.append(alt)
+    raw_q = websocket.scope.get("query_string") or b""
+    qtext = raw_q.decode("utf-8", errors="replace") if isinstance(raw_q, (bytes, bytearray)) else str(raw_q)
+    workspace_id = None
+    for part in qtext.split("&"):
+        if part.startswith("workspace_id="):
+            workspace_id = part.split("=", 1)[1] or None
+            break
+
+    connect_host = "127.0.0.1"
+    connect_port = port
+    if workspace_id:
+        from code_agent.db.models import Workspace
+        from code_agent.ports.remote_scan import list_remote_listening_ports
+        from code_agent.ports.ssh_tunnel import ssh_forwards
+        from code_agent.workspace.backend import get_workspace_backend, workspace_is_ssh
+
+        ws = await Workspace.get_or_none(id=workspace_id)
+        if not ws or not workspace_is_ssh(ws):
+            await websocket.close(code=4404)
+            return
+        backend = await get_workspace_backend(ws)
+        remote_ports = await list_remote_listening_ports(backend, workspace_id=str(ws.id))
+        if not any(item["port"] == port for item in remote_ports):
+            await websocket.close(code=4404)
+            return
+        try:
+            connect_port = await ssh_forwards.local_port(str(ws.id), port)
+        except Exception:
+            await websocket.close(code=1011, reason="tunnel failed")
+            return
+        hosts = ["127.0.0.1"]
+    else:
+        entry = get_port_entry(port)
+        if not entry:
+            await websocket.close(code=4404)
+            return
+        connect_host = entry.get("connect_host") or "127.0.0.1"
+        hosts = [connect_host]
+        alt = "::1" if connect_host == "127.0.0.1" else "127.0.0.1"
+        if alt not in hosts:
+            hosts.append(alt)
 
     await websocket.accept()
-    query = websocket.scope.get("query_string") or b""
+    # Strip workspace_id from upstream query
+    upstream_q = "&".join(p for p in qtext.split("&") if p and not p.startswith("workspace_id=")).encode()
 
     upstream = None
     last_error: Exception | None = None
     for host in hosts:
-        uri = _ws_upstream_uri(host, port, path, query)
+        uri = _ws_upstream_uri(host, connect_port, path, upstream_q)
         try:
             upstream = await websockets.connect(uri, open_timeout=5)
             break

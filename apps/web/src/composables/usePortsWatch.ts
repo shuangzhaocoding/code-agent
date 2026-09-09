@@ -1,5 +1,6 @@
-import { onMounted, onUnmounted, ref, type Ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch, type Ref } from 'vue'
 import { api } from '@/api/http'
+import { useAppStore } from '@/stores/app'
 
 const SYSTEM_PORTS = new Set([22, 25, 53, 111, 123, 135, 139, 445, 631, 5353])
 const HIGHLIGHT_TTL_MS = 60_000
@@ -15,6 +16,8 @@ export type PortItem = {
   connect_host?: string
   reachable?: boolean
   self?: boolean
+  remote?: boolean
+  workspace_id?: string
 }
 
 /** Single shared poll — toast + panel must not each hit /api/ports. */
@@ -25,6 +28,7 @@ const highlightedPorts = ref<Set<number>>(new Set())
 const error = ref('')
 const loading = ref(false)
 const updatedAt = ref(0)
+const activeWorkspaceId = ref<string | null>(null)
 
 const highlightTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -75,7 +79,8 @@ async function refreshPorts(opts?: { quiet?: boolean }) {
   error.value = ''
   inFlight = (async () => {
     try {
-      const data = await api<{ ports: PortItem[] }>('/api/ports')
+      const q = activeWorkspaceId.value ? `?workspace_id=${encodeURIComponent(activeWorkspaceId.value)}` : ''
+      const data = await api<{ ports: PortItem[] }>(`/api/ports${q}`)
       ports.value = data.ports || []
       updatedAt.value = Date.now()
     } catch (err) {
@@ -125,11 +130,27 @@ export function usePortsWatch(): {
   markPortHighlighted: (port: number, ttlMs?: number) => void
   clearPortHighlighted: (port: number) => void
 } {
+  const store = useAppStore()
   let release: (() => void) | null = null
+  let stopWatch: (() => void) | null = null
+
   onMounted(() => {
+    activeWorkspaceId.value = store.workspaceId || null
     release = retainPortsWatch()
+    stopWatch = watch(
+      () => store.workspaceId,
+      (id) => {
+        const next = id || null
+        if (next === activeWorkspaceId.value) return
+        activeWorkspaceId.value = next
+        highlightedPorts.value = new Set()
+        void refreshPorts()
+      },
+    )
   })
   onUnmounted(() => {
+    stopWatch?.()
+    stopWatch = null
     release?.()
     release = null
   })

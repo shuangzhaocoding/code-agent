@@ -1,7 +1,7 @@
 PLUGIN_TITLE = "Git"
 PLUGIN_DESCRIPTION = "Workspace Git tools: status, diff, log, branch, add, commit, push, pull, checkout, reset."
 PLUGIN_KIND = "tools"
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.1.0"
 PLUGIN_AUTHOR = "Code Agent"
 PLUGIN_HOMEPAGE = "https://git-scm.com/"
 PLUGIN_REPOSITORY = "https://github.com/git/git"
@@ -14,16 +14,34 @@ PLUGIN_KEYWORDS = ("git", "version-control", "scm")
 def register(registry) -> None:
     from langchain_core.tools import tool
 
+    from code_agent.db.models import Workspace
     from code_agent.tools.approval import request_approval
     from code_agent.tools.context import get_workspace
     from code_agent.tools.git_ops import GitError, parse_status, run_git
+    from code_agent.workspace.backend import get_workspace_backend
+    from code_agent.workspace.local import LocalWorkspaceBackend
 
-    def _root() -> str:
-        return get_workspace()["root_path"]
+    async def _backend():
+        ctx = get_workspace()
+        wid = ctx.get("id")
+        if wid:
+            row = await Workspace.get_or_none(id=wid)
+            if row:
+                return await get_workspace_backend(row)
 
-    def _run(args: list[str], timeout: int = 60) -> str:
+        class _Tmp:
+            root_path = ctx["root_path"]
+            ignore_globs: list = []
+            kind = str(ctx.get("kind") or "local")
+
+        if _Tmp.kind == "ssh":
+            raise RuntimeError("SSH workspace context missing id")
+        return LocalWorkspaceBackend(_Tmp())  # type: ignore[arg-type]
+
+    async def _run(args: list[str], timeout: int = 60) -> str:
         try:
-            return run_git(_root(), args, timeout=timeout) or "(ok)"
+            backend = await _backend()
+            return await run_git(backend, args, timeout=timeout) or "(ok)"
         except GitError as exc:
             return f"ERROR: {exc}"
         except FileNotFoundError:
@@ -34,7 +52,11 @@ def register(registry) -> None:
     @tool
     async def git_status() -> str:
         """Show git branch and changed files in the workspace repository."""
-        data = parse_status(_root())
+        try:
+            backend = await _backend()
+            data = await parse_status(backend)
+        except Exception as exc:
+            return f"ERROR: {exc}"
         if not data.get("ok"):
             return f"ERROR: {data.get('error') or 'not a git repository'}"
         lines = [f"branch {data['branch']} ahead={data['ahead']} behind={data['behind']}"]
@@ -49,18 +71,18 @@ def register(registry) -> None:
         args = ["diff"]
         if path:
             args.extend(["--", path])
-        return _run(args)
+        return await _run(args)
 
     @tool
     async def git_log(limit: int = 12) -> str:
         """Show recent git commits (oneline)."""
         n = max(1, min(int(limit or 12), 50))
-        return _run(["log", f"-{n}", "--oneline", "--decorate"])
+        return await _run(["log", f"-{n}", "--oneline", "--decorate"])
 
     @tool
     async def git_branch() -> str:
         """List local git branches."""
-        return _run(["branch", "-vv"])
+        return await _run(["branch", "-vv"])
 
     @tool
     async def git_add(paths: str) -> str:
@@ -68,14 +90,14 @@ def register(registry) -> None:
         items = [p for p in paths.split() if p]
         if not items:
             return "ERROR: no paths"
-        return _run(["add", "--", *items])
+        return await _run(["add", "--", *items])
 
     @tool
     async def git_commit(message: str) -> str:
         """Create a git commit from currently staged files. Requires user confirmation."""
         if not await request_approval("git_commit", f"提交：{message}", {"message": message}, kind="git"):
             return "ERROR: user denied this operation"
-        return _run(["commit", "-m", message])
+        return await _run(["commit", "-m", message])
 
     @tool
     async def git_push(remote: str = "origin", branch: str = "") -> str:
@@ -86,7 +108,7 @@ def register(registry) -> None:
         summary = f"推送到 {remote}" + (f" {branch}" if branch else "")
         if not await request_approval("git_push", summary, {"remote": remote, "branch": branch}, kind="git"):
             return "ERROR: user denied this operation"
-        return _run(args, timeout=120)
+        return await _run(args, timeout=120)
 
     @tool
     async def git_pull(remote: str = "origin", branch: str = "") -> str:
@@ -96,14 +118,14 @@ def register(registry) -> None:
             args.append(branch)
         if not await request_approval("git_pull", f"拉取 {remote} {branch}".strip(), {"remote": remote, "branch": branch}, kind="git"):
             return "ERROR: user denied this operation"
-        return _run(args, timeout=120)
+        return await _run(args, timeout=120)
 
     @tool
     async def git_checkout(ref: str) -> str:
         """Switch branch or restore files (`git checkout <ref>`). Requires user confirmation."""
         if not await request_approval("git_checkout", f"切换/恢复：{ref}", {"ref": ref}, kind="git"):
             return "ERROR: user denied this operation"
-        return _run(["checkout", ref])
+        return await _run(["checkout", ref])
 
     @tool
     async def git_reset(mode: str = "mixed", ref: str = "HEAD") -> str:
@@ -116,7 +138,7 @@ def register(registry) -> None:
             kind="git",
         ):
             return "ERROR: user denied this operation"
-        return _run(["reset", flag, ref])
+        return await _run(["reset", flag, ref])
 
     for t, modes in [
         (git_status, ("ask", "agent", "plan")),

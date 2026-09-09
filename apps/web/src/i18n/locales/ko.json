@@ -110,7 +110,19 @@
     "fallbackName": "작업 공간",
     "pickFolder": "폴더 선택",
     "rootsLabel": "이 PC",
-    "pickDriveFirst": "먼저 드라이브 또는 폴더를 여세요"
+    "pickDriveFirst": "먼저 드라이브 또는 폴더를 여세요",
+    "localTab": "로컬",
+    "sshTab": "SSH 원격",
+    "sshDisplayName": "표시 이름 (선택)",
+    "sshHost": "호스트",
+    "sshPort": "포트",
+    "sshUser": "사용자",
+    "sshPassword": "비밀번호(선택)",
+    "sshKey": "개인키 PEM(선택)",
+    "sshPassphrase": "키 암호(선택)",
+    "sshPathPlaceholder": "원격 경로",
+    "sshConnect": "연결 후 탐색",
+    "sshBrowse": "원격 폴더"
   },
   "settings": {
     "title": "설정",

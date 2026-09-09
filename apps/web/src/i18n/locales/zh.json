@@ -111,7 +111,20 @@
     "fallbackName": "工作空间",
     "pickFolder": "选择文件夹",
     "rootsLabel": "此电脑",
-    "pickDriveFirst": "请先进入一个磁盘或目录"
+    "pickDriveFirst": "请先进入一个磁盘或目录",
+    "localTab": "本地",
+    "sshTab": "SSH 远程",
+    "sshDisplayName": "显示名称（可选）",
+    "sshHost": "主机",
+    "sshPort": "端口",
+    "sshUser": "用户名",
+    "sshPassword": "密码（可选）",
+    "sshKey": "私钥 PEM（可选，与密码二选一）",
+    "sshPassphrase": "私钥口令（可选）",
+    "sshPathPlaceholder": "远程目录，如 /home/you/project",
+    "sshConnect": "连接并浏览",
+    "sshBrowse": "远程目录",
+    "sshLead": "通过 SSH 连接远程主机并选择目录作为工作空间。"
   },
   "settings": {
     "title": "设置",

@@ -201,7 +201,7 @@ async def _execute_legacy(run_id: str, recursion_limit: int) -> None:
         turn_needs_vision,
     )
     from code_agent.plugins.base import registry
-    from code_agent.skills.registry import load_skill_body
+    from code_agent.agent.context_builder import history_to_lc_messages
 
     run = await Run.get(id=run_id)
     conv = await Conversation.get(id=run.conversation_id)
@@ -230,14 +230,20 @@ async def _execute_legacy(run_id: str, recursion_limit: int) -> None:
     if model is None:
         raise RuntimeError("model.missing")
     vision = model_has_vision(model_row)
-    set_tool_context(run_id, {"id": str(workspace.id), "root_path": workspace.root_path})
+    set_tool_context(
+        run_id,
+        {
+            "id": str(workspace.id),
+            "root_path": workspace.root_path,
+            "kind": getattr(workspace, "kind", None) or "local",
+        },
+    )
     tools = registry.enabled_tools(run.mode)
     graph = create_react_agent(
         model,
         tools,
         prompt=_system_prompt(workspace, run.mode, thinking_level),
     )
-    from code_agent.agent.context_builder import history_to_lc_messages
 
     lc_messages = history_to_lc_messages(list(history), vision=vision and need_vision)
     await stream_graph_events(

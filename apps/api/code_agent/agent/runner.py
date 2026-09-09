@@ -12,7 +12,6 @@ from code_agent.llm.thinking import normalize_thinking_level
 from code_agent.llm.vision import is_image_file_meta, message_files, message_text, turn_needs_vision
 from code_agent.plugins.base import registry
 from code_agent.protocol.events import new_id
-from code_agent.skills.registry import load_skill_body
 from code_agent.streaming.broker import broker
 from code_agent.tools.context import set_tool_context
 from code_agent.tools.host import register_builtin_tools
@@ -88,7 +87,14 @@ async def run_agent_graph(
         await broker.publish(run_id, "block.delta", {"block_id": notice_id, "text": notice})
         await broker.publish(run_id, "block.completed", {"block_id": notice_id, "status": "ok"})
 
-    set_tool_context(run_id, {"id": str(workspace.id), "root_path": workspace.root_path})
+    set_tool_context(
+        run_id,
+        {
+            "id": str(workspace.id),
+            "root_path": workspace.root_path,
+            "kind": getattr(workspace, "kind", None) or "local",
+        },
+    )
     tools = registry.enabled_tools(run.mode)
 
     skill_name = (run.model_snapshot or {}).get("skill_name")
@@ -98,7 +104,10 @@ async def run_agent_graph(
             skill_name = skill_meta.get("name")
     skill_body = None
     if skill_name:
-        skill_body = load_skill_body(workspace.root_path, str(skill_name))
+        from code_agent.skills.registry import ensure_skills_ready, load_skill_body
+
+        await ensure_skills_ready(workspace)
+        skill_body = load_skill_body(workspace, str(skill_name))
         if skill_body:
             block_id = new_id()
             await broker.publish(

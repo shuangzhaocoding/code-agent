@@ -35,7 +35,7 @@ def build_system_prompt(
     memory_facts: list[dict] | None = None,
     conversation_summary: str = "",
 ) -> str:
-    skills = list_skill_catalog(workspace.root_path)
+    skills = list_skill_catalog(workspace)
     skill_lines = "\n".join(
         f"- {s['name']}: {s['description']}" for s in skills if not s.get("invalid_reason")
     ) or "(none)"

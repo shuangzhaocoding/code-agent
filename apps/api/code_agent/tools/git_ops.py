@@ -1,44 +1,41 @@
 from __future__ import annotations
 
 import re
-import shutil
-import subprocess
-from pathlib import Path
+import shlex
 from typing import Any
+
+from code_agent.workspace.backend import WorkspaceBackend
 
 
 class GitError(RuntimeError):
     pass
 
 
-def run_git(
-    root: str | Path,
+async def run_git(
+    backend: WorkspaceBackend,
     args: list[str],
     timeout: int = 60,
     include_stderr: bool = True,
     ok_codes: tuple[int, ...] = (0,),
 ) -> str:
-    proc = subprocess.run(
-        ["git", *args],
-        cwd=str(root),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
-    stdout = proc.stdout or ""
-    stderr = (proc.stderr or "").strip()
-    if proc.returncode not in ok_codes:
-        raise GitError((stdout + ("\n" + stderr if stderr else "")).strip() or f"git {' '.join(args)} failed ({proc.returncode})")
-    if include_stderr and stderr:
-        return (stdout + "\n" + stderr).strip()
-    return stdout.strip()
+    cmd = "git " + " ".join(shlex.quote(a) for a in args)
+    code, stdout, stderr = await backend.run_command(cmd, cwd=".", timeout=timeout)
+    out = stdout or ""
+    err = (stderr or "").strip()
+    if code == 127 or (code != 0 and "not found" in err.lower() and "git" in err.lower()):
+        raise FileNotFoundError("git is not installed")
+    if code not in ok_codes:
+        raise GitError((out + ("\n" + err if err else "")).strip() or f"git {' '.join(args)} failed ({code})")
+    if include_stderr and err:
+        return (out + "\n" + err).strip()
+    return out.strip()
 
 
-def is_repo(root: str | Path) -> bool:
+async def is_repo(backend: WorkspaceBackend) -> bool:
     try:
-        run_git(root, ["rev-parse", "--is-inside-work-tree"])
+        await run_git(backend, ["rev-parse", "--is-inside-work-tree"])
         return True
-    except (GitError, FileNotFoundError, subprocess.TimeoutExpired):
+    except (GitError, FileNotFoundError, TimeoutError):
         return False
 
 
@@ -51,10 +48,20 @@ def _under(path: str, prefix: str) -> bool:
     return path == target or path.startswith(target + "/")
 
 
-def parse_status(root: str | Path) -> dict[str, Any]:
-    if not is_repo(root):
+def safe_rel_paths(paths: list[str]) -> list[str]:
+    out: list[str] = []
+    for raw in paths:
+        rel = _norm_rel(raw)
+        if not rel or rel in {".", ".."} or rel.startswith("../") or "/../" in f"/{rel}/":
+            continue
+        out.append(rel)
+    return out
+
+
+async def parse_status(backend: WorkspaceBackend) -> dict[str, Any]:
+    if not await is_repo(backend):
         return {"ok": False, "error": "not a git repository", "branch": "", "ahead": 0, "behind": 0, "files": []}
-    raw = run_git(root, ["status", "-sb", "-z", "-uall", "--porcelain=v1"], include_stderr=False)
+    raw = await run_git(backend, ["status", "-sb", "-z", "-uall", "--porcelain=v1"], include_stderr=False)
     chunks = raw.split("\0")
     branch = ""
     ahead = 0
@@ -93,10 +100,9 @@ def parse_status(root: str | Path) -> dict[str, Any]:
         code = xy.strip() or xy[1]
         if xy == "??":
             code = "?"
-            target = Path(root) / path
-            if target.is_dir():
-                extra = run_git(
-                    root,
+            if await backend.is_dir(path):
+                extra = await run_git(
+                    backend,
                     ["ls-files", "-z", "--others", "--exclude-standard", "--", path or "."],
                     include_stderr=False,
                 )
@@ -118,22 +124,22 @@ def parse_status(root: str | Path) -> dict[str, Any]:
 _REV_BLOB_RE = re.compile(r"^(HEAD|[0-9a-fA-F]{7,40})$")
 
 
-def show_blob(root: str | Path, rel: str, rev: str = "HEAD") -> dict[str, Any]:
+async def show_blob(backend: WorkspaceBackend, rel: str, rev: str = "HEAD") -> dict[str, Any]:
     if not _REV_BLOB_RE.fullmatch(rev or ""):
         raise GitError("invalid revision")
     path = _norm_rel(rel)
     if not path:
         raise GitError("path required")
-    content = run_git(root, ["show", f"{rev}:{path}"], include_stderr=False)
+    content = await run_git(backend, ["show", f"{rev}:{path}"], include_stderr=False)
     return {"path": path, "rev": rev, "content": content}
 
 
-def discard_paths(root: str | Path, paths: list[str]) -> dict[str, Any]:
+async def discard_paths(backend: WorkspaceBackend, paths: list[str]) -> dict[str, Any]:
     wanted = [_norm_rel(p).rstrip("/") for p in paths if _norm_rel(p).rstrip("/")]
     wanted = [p for p in wanted if p not in {".", ".."} and not p.startswith("../")]
     if not wanted:
-        return parse_status(root)
-    status = parse_status(root)
+        return await parse_status(backend)
+    status = await parse_status(backend)
     tracked: list[str] = []
     untracked: list[str] = []
     seen: set[str] = set()
@@ -149,47 +155,49 @@ def discard_paths(root: str | Path, paths: list[str]) -> dict[str, Any]:
     for target in wanted:
         if any(_under(path, target) for path in seen):
             continue
-        full = Path(root) / target
-        if full.exists():
+        if await backend.exists(target):
             untracked.append(target)
     if tracked:
         try:
-            run_git(root, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked])
+            await run_git(backend, ["restore", "--source=HEAD", "--staged", "--worktree", "--", *tracked])
         except GitError:
-            run_git(root, ["checkout", "--", *tracked])
+            await run_git(backend, ["checkout", "--", *tracked])
             try:
-                run_git(root, ["reset", "-q", "HEAD", "--", *tracked])
+                await run_git(backend, ["reset", "-q", "HEAD", "--", *tracked])
             except GitError:
                 pass
     if untracked:
         try:
-            run_git(root, ["clean", "-fd", "--", *untracked])
+            await run_git(backend, ["clean", "-fd", "--", *untracked])
         except GitError:
             for path in untracked:
-                full = Path(root) / path
-                if full.is_dir():
-                    shutil.rmtree(full, ignore_errors=True)
-                elif full.is_file() or full.is_symlink():
-                    full.unlink(missing_ok=True)
-    return parse_status(root)
+                try:
+                    if await backend.exists(path):
+                        await backend.delete(path)
+                except Exception:
+                    pass
+    return await parse_status(backend)
 
 
-def ignore_paths(root: str | Path, paths: list[str]) -> dict[str, Any]:
+async def ignore_paths(backend: WorkspaceBackend, paths: list[str]) -> dict[str, Any]:
     patterns: list[str] = []
     for raw in paths:
         rel = _norm_rel(raw)
         if not rel or rel in {".", ".."} or rel.startswith("../"):
             continue
         pattern = rel
-        full = Path(root) / rel.rstrip("/")
-        if full.is_dir() and not pattern.endswith("/"):
+        if await backend.is_dir(rel.rstrip("/")) and not pattern.endswith("/"):
             pattern = f"{pattern}/"
         if pattern not in patterns:
             patterns.append(pattern)
     if not patterns:
-        return parse_status(root)
-    gitignore = Path(root) / ".gitignore"
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+        return await parse_status(backend)
+    existing = ""
+    try:
+        if await backend.is_file(".gitignore"):
+            existing = await backend.read_text(".gitignore")
+    except Exception:
+        existing = ""
     have = {line.strip() for line in existing.splitlines() if line.strip() and not line.strip().startswith("#")}
     added = [p for p in patterns if p not in have]
     if added:
@@ -197,8 +205,8 @@ def ignore_paths(root: str | Path, paths: list[str]) -> dict[str, Any]:
         if text and not text.endswith("\n"):
             text += "\n"
         text += "\n".join(added) + "\n"
-        gitignore.write_text(text, encoding="utf-8")
-    return parse_status(root)
+        await backend.write_text(".gitignore", text)
+    return await parse_status(backend)
 
 
 _LOG_SEP = "\x1f"
@@ -218,16 +226,16 @@ def _parse_refs(raw: str) -> list[str]:
     return refs
 
 
-def parse_log(root: str | Path, limit: int = 80) -> dict[str, Any]:
-    if not is_repo(root):
+async def parse_log(backend: WorkspaceBackend, limit: int = 80) -> dict[str, Any]:
+    if not await is_repo(backend):
         return {"ok": False, "error": "not a git repository", "head": "", "commits": []}
     n = max(1, min(int(limit or 80), 200))
     try:
-        head = run_git(root, ["rev-parse", "HEAD"])
+        head = await run_git(backend, ["rev-parse", "HEAD"])
     except GitError:
         return {"ok": True, "head": "", "commits": []}
     try:
-        out = run_git(root, ["log", "--all", "--topo-order", f"-{n}", f"--format={_LOG_FMT}"])
+        out = await run_git(backend, ["log", "--all", "--topo-order", f"-{n}", f"--format={_LOG_FMT}"])
     except GitError as exc:
         return {"ok": False, "error": str(exc), "head": head, "commits": []}
     commits: list[dict[str, Any]] = []
@@ -342,55 +350,56 @@ def split_git_diff(text: str) -> list[dict[str, Any]]:
     return files
 
 
-def parse_commit(root: str | Path, rev: str) -> dict[str, Any]:
-    if not is_repo(root):
+async def parse_commit(backend: WorkspaceBackend, rev: str) -> dict[str, Any]:
+    if not await is_repo(backend):
         return {"ok": False, "error": "not a git repository", "commit": None, "files": []}
     if not _REV_RE.fullmatch(rev or ""):
         return {"ok": False, "error": "invalid revision", "commit": None, "files": []}
     try:
-        full = run_git(root, ["rev-parse", "--verify", f"{rev}^{{commit}}"], include_stderr=False)
-        head = run_git(root, ["rev-parse", "HEAD"], include_stderr=False)
-        meta_line = run_git(root, ["log", "-1", f"--format={_LOG_FMT}", full], include_stderr=False)
+        full = await run_git(backend, ["rev-parse", "--verify", f"{rev}^{{commit}}"], include_stderr=False)
+        head = await run_git(backend, ["rev-parse", "HEAD"], include_stderr=False)
+        meta_line = await run_git(backend, ["log", "-1", f"--format={_LOG_FMT}", full], include_stderr=False)
         commit = _parse_commit_meta(meta_line.splitlines()[0] if meta_line else "", head)
         if not commit:
             return {"ok": False, "error": "commit not found", "commit": None, "files": []}
         parents = commit["parents"]
         if parents:
-            patch = run_git(
-                root,
+            patch = await run_git(
+                backend,
                 ["diff", "--find-renames", "--no-color", parents[0], full],
                 include_stderr=False,
                 ok_codes=(0, 1),
             )
         else:
-            patch = run_git(
-                root,
+            patch = await run_git(
+                backend,
                 ["show", "--pretty=format:", "--find-renames", "--no-color", full],
                 include_stderr=False,
                 ok_codes=(0, 1),
             )
         return {"ok": True, "commit": commit, "files": split_git_diff(patch)}
-    except (GitError, FileNotFoundError, subprocess.TimeoutExpired) as exc:
+    except (GitError, FileNotFoundError, TimeoutError) as exc:
         return {"ok": False, "error": str(exc), "commit": None, "files": []}
 
 
-def file_diff(root: str | Path, rel: str, staged: bool = False) -> str:
+async def file_diff(backend: WorkspaceBackend, rel: str, staged: bool = False) -> str:
     path = (rel or "").replace("\\", "/").lstrip("/")
     if not path:
         args = ["diff", "--no-color"]
         if staged:
             args.append("--cached")
-        return run_git(root, args, include_stderr=False, ok_codes=(0, 1))
+        return await run_git(backend, args, include_stderr=False, ok_codes=(0, 1))
     if staged:
-        return run_git(root, ["diff", "--cached", "--no-color", "--", path], include_stderr=False, ok_codes=(0, 1))
-    out = run_git(root, ["diff", "--no-color", "--", path], include_stderr=False, ok_codes=(0, 1))
+        return await run_git(
+            backend, ["diff", "--cached", "--no-color", "--", path], include_stderr=False, ok_codes=(0, 1)
+        )
+    out = await run_git(backend, ["diff", "--no-color", "--", path], include_stderr=False, ok_codes=(0, 1))
     if out:
         return out
-    full = Path(root) / path
-    if not full.is_file():
+    if not await backend.is_file(path):
         return out
-    return run_git(
-        root,
+    return await run_git(
+        backend,
         ["diff", "--no-index", "--no-color", "--", "/dev/null", path],
         include_stderr=False,
         ok_codes=(0, 1),

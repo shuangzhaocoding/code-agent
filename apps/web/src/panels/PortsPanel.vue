@@ -35,9 +35,14 @@ const filtered = computed(() => {
   })
 })
 
-const previewUrl = computed(() =>
-  previewPort.value != null ? `/api/preview/${previewPort.value}/` : null,
-)
+const previewUrl = computed(() => {
+  if (previewPort.value == null) return null
+  const item = ports.value.find((p) => p.port === previewPort.value)
+  if (item?.preview_path) return item.preview_path
+  const wid = store.workspaceId
+  const q = wid ? `?workspace_id=${encodeURIComponent(wid)}` : ''
+  return `/api/preview/${previewPort.value}/${q}`
+})
 
 watch(
   highlightedPorts,

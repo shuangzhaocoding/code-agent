@@ -167,3 +167,10 @@ storage:
   redis_url: ""  # 例：redis://127.0.0.1:6379/0
   checkpoint: sqlite  # sqlite | postgres
   checkpoint_postgres_url: ""  # defaults to postgres_url when empty
+
+# SSH remote workspaces
+ssh:
+  login_timeout: 20
+  # null = accept unknown hosts (local-first UX); true/"auto" = OpenSSH defaults; or path to known_hosts file
+  known_hosts: null
+  keepalive_interval: 30

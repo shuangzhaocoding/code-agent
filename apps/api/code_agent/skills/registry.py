@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -59,9 +60,32 @@ def skill_roots(workspace_root: str | None = None) -> list[tuple[str, Path]]:
     return roots
 
 
-def discover_skills(workspace_root: str | None = None) -> list[dict]:
+def _resolve_scan_root(workspace: Any | None) -> str | None:
+    """Map Workspace / path / None to a local filesystem root for skill scanning."""
+    if workspace is None:
+        return None
+    if isinstance(workspace, str):
+        return workspace
+    # Workspace model or dict-like
+    try:
+        from code_agent.workspace.backend import workspace_is_ssh
+        from code_agent.workspace.mirror import local_assets_root
+
+        if workspace_is_ssh(workspace):
+            return local_assets_root(workspace)
+        root = getattr(workspace, "root_path", None)
+        if root is None and isinstance(workspace, dict):
+            root = workspace.get("root_path")
+        return str(root) if root else None
+    except Exception:
+        root = getattr(workspace, "root_path", None)
+        return str(root) if root else None
+
+
+def discover_skills(workspace_root: Any | None = None) -> list[dict]:
+    scan_root = _resolve_scan_root(workspace_root)
     found: dict[str, dict] = {}
-    for source, root in skill_roots(workspace_root):
+    for source, root in skill_roots(scan_root):
         if not root.exists():
             continue
         for skill_md in root.glob("*/SKILL.md"):
@@ -73,7 +97,7 @@ def discover_skills(workspace_root: str | None = None) -> list[dict]:
     return list(found.values())
 
 
-def list_skill_catalog(workspace_root: str | None = None) -> list[dict]:
+def list_skill_catalog(workspace_root: Any | None = None) -> list[dict]:
     items = []
     for s in discover_skills(workspace_root):
         items.append(
@@ -89,8 +113,20 @@ def list_skill_catalog(workspace_root: str | None = None) -> list[dict]:
     return items
 
 
-def load_skill_body(workspace_root: str | None, name: str) -> str | None:
+def load_skill_body(workspace_root: Any | None, name: str) -> str | None:
     for s in discover_skills(workspace_root):
         if s["name"] == name and not s.get("invalid_reason"):
             return f"# Skill: {name}\n\n{s['description']}\n\n{s['body']}"
     return None
+
+
+async def ensure_skills_ready(workspace) -> Any:
+    """For SSH workspaces, sync remote skill dirs before discovery."""
+    from code_agent.workspace.backend import workspace_is_ssh
+    from code_agent.workspace.mirror import ensure_local_assets_root
+
+    if workspace is None:
+        return None
+    if workspace_is_ssh(workspace):
+        await ensure_local_assets_root(workspace)
+    return workspace

@@ -111,7 +111,20 @@
     "fallbackName": "Workspace",
     "pickFolder": "Choose folder",
     "rootsLabel": "This PC",
-    "pickDriveFirst": "Open a drive or folder first"
+    "pickDriveFirst": "Open a drive or folder first",
+    "localTab": "Local",
+    "sshTab": "SSH Remote",
+    "sshDisplayName": "Display name (optional)",
+    "sshHost": "Host",
+    "sshPort": "Port",
+    "sshUser": "Username",
+    "sshPassword": "Password (optional)",
+    "sshKey": "Private key PEM (optional)",
+    "sshPassphrase": "Key passphrase (optional)",
+    "sshPathPlaceholder": "Remote path, e.g. /home/you/project",
+    "sshConnect": "Connect & browse",
+    "sshBrowse": "Remote folders",
+    "sshLead": "Connect over SSH and pick a remote folder as the workspace."
   },
   "settings": {
     "title": "Settings",

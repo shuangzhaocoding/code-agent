@@ -293,13 +293,120 @@ pty_manager = PtyManager()
 
 
 async def create_terminal(workspace_id: str, title: str | None = None) -> TerminalSession:
+    from code_agent.workspace.backend import workspace_is_ssh
+
     ws = await Workspace.get(id=workspace_id)
     cols = int(settings.get("terminal.default_cols") or 120)
     rows = int(settings.get("terminal.default_rows") or 32)
     row = await TerminalSession.create(
         workspace_id=workspace_id,
-        title=title or "Terminal",
+        title=title or ("SSH Terminal" if workspace_is_ssh(ws) else "Terminal"),
         cwd=ws.root_path,
     )
-    pty_manager.attach(str(row.id), ws.root_path, cols, rows)
+    await pty_manager.attach_workspace(str(row.id), ws, cols, rows)
     return row
+
+
+class SshPtyHandle(_BasePtyHandle):
+    def __init__(self, session_id: str, cwd: str, shell: str) -> None:
+        super().__init__(session_id, cwd, shell)
+        self._process = None
+        self._reader_task: asyncio.Task | None = None
+        self._conn_key = ""
+
+    @classmethod
+    async def create(cls, session_id: str, ws: Workspace, cols: int, rows: int) -> SshPtyHandle:
+        from code_agent.workspace.ssh import SshWorkspaceBackend
+
+        backend = await SshWorkspaceBackend.open(ws)
+        conn = await backend._conn()
+        shell = _default_shell()
+        # Prefer remote login shell in workspace cwd
+        import shlex
+
+        cmd = f"cd {shlex.quote(ws.root_path)} && exec \"$SHELL\" -l"
+        process = await conn.create_process(
+            cmd,
+            term_type="xterm-256color",
+            term_size=(rows, cols),
+        )
+        handle = cls(session_id, ws.root_path, shell)
+        handle._process = process
+        handle._conn_key = str(ws.id)
+        handle.alive = True
+        handle.pid = None
+        handle._reader_task = asyncio.create_task(handle._read_loop())
+        return handle
+
+    async def _read_loop(self) -> None:
+        assert self._process is not None
+        try:
+            while self.alive:
+                data = await self._process.stdout.read(4096)
+                if not data:
+                    break
+                chunk = data.encode("utf-8", errors="replace") if isinstance(data, str) else bytes(data)
+                self._append(chunk)
+                await self._broadcast(chunk)
+        except Exception:
+            pass
+        self.alive = False
+        await self._broadcast_exit()
+
+    def spawn(self, cols: int, rows: int) -> None:
+        raise RuntimeError("SshPtyHandle must be created via create()")
+
+    def resize(self, cols: int, rows: int) -> None:
+        if self._process is None:
+            return
+        try:
+            self._process.change_terminal_size(cols, rows)
+        except Exception:
+            try:
+                self._process.term_size = (rows, cols)
+            except Exception:
+                pass
+
+    def write(self, data: bytes) -> None:
+        if self._process is None or not self.alive:
+            return
+        text = data.decode("utf-8", errors="replace")
+        try:
+            self._process.stdin.write(text)
+        except Exception:
+            self.alive = False
+
+    def close(self) -> None:
+        self.alive = False
+        if self._reader_task and not self._reader_task.done():
+            self._reader_task.cancel()
+        proc = self._process
+        self._process = None
+        if proc is not None:
+            try:
+                proc.terminate()
+            except Exception:
+                try:
+                    proc.close()
+                except Exception:
+                    pass
+
+
+# Patch PtyManager with async workspace attach
+_orig_attach = PtyManager.attach
+
+
+async def _attach_workspace(self: PtyManager, session_id: str, ws: Workspace, cols: int, rows: int) -> _BasePtyHandle:
+    from code_agent.workspace.backend import workspace_is_ssh
+
+    existing = self._sessions.get(session_id)
+    if existing and existing.alive:
+        return existing
+    if workspace_is_ssh(ws):
+        handle = await SshPtyHandle.create(session_id, ws, cols, rows)
+        self._sessions[session_id] = handle
+        return handle
+    return _orig_attach(self, session_id, ws.root_path, cols, rows)
+
+
+PtyManager.attach_workspace = _attach_workspace  # type: ignore[attr-defined]

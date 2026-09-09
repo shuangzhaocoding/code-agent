@@ -110,7 +110,19 @@
     "fallbackName": "ワークスペース",
     "pickFolder": "フォルダーを選択",
     "rootsLabel": "このPC",
-    "pickDriveFirst": "先にドライブまたはフォルダーを開いてください"
+    "pickDriveFirst": "先にドライブまたはフォルダーを開いてください",
+    "localTab": "ローカル",
+    "sshTab": "SSH リモート",
+    "sshDisplayName": "表示名（任意）",
+    "sshHost": "ホスト",
+    "sshPort": "ポート",
+    "sshUser": "ユーザー名",
+    "sshPassword": "パスワード（任意）",
+    "sshKey": "秘密鍵 PEM（任意）",
+    "sshPassphrase": "鍵パスフレーズ（任意）",
+    "sshPathPlaceholder": "リモートパス",
+    "sshConnect": "接続して参照",
+    "sshBrowse": "リモートフォルダー"
   },
   "settings": {
     "title": "設定",
