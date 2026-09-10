@@ -4,12 +4,16 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import AppIcon from '@/components/AppIcon.vue'
 import type { PlanStep } from '@/utils/parsePlan'
+import { useAppStore } from '@/stores/app'
+import { fileLinkFromClickTarget, linkifyFilePathsInHtml } from '@/utils/chatFileLinks'
 
 const props = defineProps<{
   steps: PlanStep[]
 }>()
 
+const store = useAppStore()
 const open = ref<Set<number>>(new Set())
+const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
 
 watch(
   () => props.steps.map((s) => s.index).join(','),
@@ -31,9 +35,18 @@ function toggle(index: number) {
 
 function detailHtml(detail: string) {
   if (!detail.trim()) return ''
-  return DOMPurify.sanitize(marked.parse(detail, { breaks: true }) as string)
+  const root = store.workspace?.root_path || ''
+  const linked = linkifyFilePathsInHtml(marked.parse(detail, { breaks: true }) as string, root)
+  return DOMPurify.sanitize(linked, purifyOpts)
 }
 
+function onDetailClick(e: MouseEvent) {
+  const fileLink = fileLinkFromClickTarget(e.target)
+  if (!fileLink) return
+  e.preventDefault()
+  e.stopPropagation()
+  void store.openChatFilePath(fileLink.path, fileLink.line)
+}
 </script>
 
 <template>
@@ -60,7 +73,7 @@ function detailHtml(detail: string) {
           <span class="plan-title">{{ step.title }}</span>
           <AppIcon v-if="step.detail" class="plan-chev" name="chevron-right" :size="13" />
         </button>
-        <div v-if="step.detail && isOpen(step.index)" class="plan-body">
+        <div v-if="step.detail && isOpen(step.index)" class="plan-body" @click="onDetailClick">
           <div class="markdown-body" v-html="detailHtml(step.detail)" />
         </div>
       </li>

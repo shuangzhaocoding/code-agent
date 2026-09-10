@@ -5,8 +5,11 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { Block } from '@/protocol/applyEvent'
 import EventCard from '@/components/EventCard.vue'
+import { useAppStore } from '@/stores/app'
+import { fileLinkFromClickTarget, linkifyFilePathsInHtml } from '@/utils/chatFileLinks'
 
 const props = defineProps<{ block: Block }>()
+const store = useAppStore()
 const streaming = computed(() => props.block.status === 'streaming')
 const bodyEl = ref<HTMLElement | null>(null)
 const html = ref('')
@@ -17,6 +20,7 @@ let renderRaf = 0
 let lastRenderAt = 0
 let scrollRaf = 0
 const STREAM_RENDER_MS = 80
+const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
 
 function toMs(v: number | string | undefined): number {
   if (!v) return 0
@@ -33,9 +37,9 @@ function updateElapsed() {
 
 function renderNow(text: string) {
   const source = text || (streaming.value ? '正在思考…' : '（无内容）')
-  html.value = DOMPurify.sanitize(
-    marked.parse(source, { breaks: true }) as string,
-  )
+  const root = store.workspace?.root_path || ''
+  const linked = linkifyFilePathsInHtml(marked.parse(source, { breaks: true }) as string, root)
+  html.value = DOMPurify.sanitize(linked, purifyOpts)
   lastRenderAt = Date.now()
   if (scrollRaf) return
   scrollRaf = requestAnimationFrame(() => {
@@ -119,6 +123,14 @@ const subtitle = computed(() => {
   if (props.block.text) return `已生成思考内容（${timeLabel.value}）`
   return ''
 })
+
+function onThinkClick(e: MouseEvent) {
+  const fileLink = fileLinkFromClickTarget(e.target)
+  if (!fileLink) return
+  e.preventDefault()
+  e.stopPropagation()
+  void store.openChatFilePath(fileLink.path, fileLink.line)
+}
 </script>
 
 <template>
@@ -130,7 +142,7 @@ const subtitle = computed(() => {
     :default-open="false"
     :subtitle="subtitle"
   >
-    <div ref="bodyEl" class="think-body">
+    <div ref="bodyEl" class="think-body" @click="onThinkClick">
       <div class="markdown-body" v-html="html" />
       <span v-if="streaming" class="caret" />
     </div>

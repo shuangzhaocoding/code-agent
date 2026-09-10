@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import { extractPlanSteps } from '@/utils/parsePlan'
 import PlanSteps from '@/components/PlanSteps.vue'
 import { openImageLightbox } from '@/composables/useImageLightbox'
+import { fileLinkFromClickTarget, linkifyFilePathsInHtml } from '@/utils/chatFileLinks'
 
 const props = defineProps<{ block: Block }>()
 const store = useAppStore()
@@ -26,13 +27,16 @@ let lastRenderAt = 0
 /** Keep markdown while streaming; coalesce parse to ~1–2 frames. */
 const STREAM_RENDER_MS = 80
 
+const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
+
 function toHtml(text: string) {
   if (!text.trim()) return ''
-  return DOMPurify.sanitize(
-    marked.parse(text, {
-      breaks: props.block.type === 'user.text',
-    }) as string,
-  )
+  const root = store.workspace?.root_path || ''
+  const parsed = marked.parse(text, {
+    breaks: props.block.type === 'user.text',
+  }) as string
+  const linked = linkifyFilePathsInHtml(parsed, root)
+  return DOMPurify.sanitize(linked, purifyOpts)
 }
 
 function renderNow(text: string) {
@@ -79,7 +83,7 @@ function clearSchedulers() {
 }
 
 watch(
-  () => [props.block.text, props.block.status, props.block.type] as const,
+  () => [props.block.text, props.block.status, props.block.type, store.workspace?.root_path] as const,
   ([text, status]) => {
     if (status === 'streaming') {
       if (Date.now() - lastRenderAt >= STREAM_RENDER_MS) {
@@ -99,6 +103,13 @@ watch(
 onBeforeUnmount(clearSchedulers)
 
 function onMdClick(e: MouseEvent) {
+  const fileLink = fileLinkFromClickTarget(e.target)
+  if (fileLink) {
+    e.preventDefault()
+    e.stopPropagation()
+    void store.openChatFilePath(fileLink.path, fileLink.line)
+    return
+  }
   const target = e.target
   if (!(target instanceof HTMLImageElement)) return
   const root = mdRoot.value

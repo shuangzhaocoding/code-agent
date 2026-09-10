@@ -8,6 +8,7 @@ import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenF
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
 import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/approvals'
+import { parseChatFileRef } from '@/utils/chatFileLinks'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -995,11 +996,29 @@ export const useAppStore = defineStore('app', () => {
     editorCopyContext.value = null
   }
 
+  async function openChatFilePath(rawPath: string, line?: number) {
+    if (!rawPath) return
+    const root = workspace.value?.root_path || ''
+    const ref = parseChatFileRef(rawPath, root)
+    const path = ref?.openPath || rawPath
+    const targetLine = line ?? ref?.line
+    const revealRel = ref?.revealRel ?? null
+
+    if (revealRel) {
+      activity.value = 'explorer'
+      window.dispatchEvent(new Event('ca-open-explorer'))
+      await revealInTree(revealRel)
+      if (targetLine) await openPathAtLine(revealRel, targetLine)
+      else await openPath(revealRel, false)
+      return
+    }
+
+    if (targetLine) await openPathAtLine(path, targetLine)
+    else await openPath(path, false)
+  }
+
   async function openAgentFile(path: string) {
-    if (!path) return
-    activity.value = 'explorer'
-    await revealInTree(path)
-    await openPath(path, false)
+    await openChatFilePath(path)
   }
 
   async function openRevisionFile(relPath: string, rev = 'HEAD') {
@@ -2208,6 +2227,7 @@ export const useAppStore = defineStore('app', () => {
     moveFsEntry,
     openPath,
     openPathAtLine,
+    openChatFilePath,
     openAgentFile,
     openRevisionFile,
     acceptReview,

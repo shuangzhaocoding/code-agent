@@ -30,7 +30,11 @@ function resolveMentionIsDir(path: string) {
 }
 
 function openMention(path: string, isDir = false) {
-  void store.openPath(path, isDir)
+  if (isDir) {
+    void store.openPath(path, true)
+    return
+  }
+  void store.openChatFilePath(path)
 }
 
 type Segment = {
