@@ -122,9 +122,15 @@ onBeforeUnmount(() => {
 .ctx-ico {
   flex: 0 0 16px;
   width: 16px;
-  color: inherit;
+  color: color-mix(in srgb, var(--text) 62%, transparent);
+}
+.ctx .menu-item:hover .ctx-ico {
+  color: var(--text-h);
 }
 .ctx .menu-item.danger {
+  color: var(--danger);
+}
+.ctx .menu-item.danger .ctx-ico {
   color: var(--danger);
 }
 .ctx .menu-item:disabled {

@@ -406,13 +406,24 @@ export const useAppStore = defineStore('app', () => {
     if (activePath.value) window.dispatchEvent(new Event('ca-focus-editor'))
   }
 
-  async function selectWorkspace(id: string, opts?: { openExplorer?: boolean }) {
+  async function selectWorkspace(
+    id: string,
+    opts?: { openExplorer?: boolean; conversationId?: string | null },
+  ) {
     const gen = ++switchLoadGen
     switchLoading.value = t('workspace.switching')
     try {
       await api(`/api/workspaces/${id}/open`, { method: 'POST' })
       workspaceId.value = id
       localStorage.setItem('ca.workspace', id)
+      // Drop previous workspace chat immediately so the UI never keeps showing
+      // remote/local messages from the workspace we just left.
+      detachRun()
+      conversationId.value = null
+      messages.value = []
+      reviews.value = {}
+      activeReviewIndex.value = {}
+      applied.value = new Set()
       suppressEditorPersist.value = true
       openFiles.value = []
       activePath.value = null
@@ -427,10 +438,13 @@ export const useAppStore = defineStore('app', () => {
       fsClipboard.value = null
       // Critical path first — git / editor restore are deferred so chat UI unlocks sooner.
       await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders()])
+      if (workspaceId.value !== id || gen !== switchLoadGen) return
       void loadGitChangedPaths()
       const expandTask = restoreExpandedDirs(savedExpanded)
+      const preferred = opts?.conversationId
       const saved = localStorage.getItem(conversationStorageKey(id))
       const restore =
+        (preferred && conversations.value.some((c) => c.id === preferred) && preferred) ||
         (saved && conversations.value.some((c) => c.id === saved) && saved) ||
         conversations.value[0]?.id ||
         null
@@ -439,6 +453,7 @@ export const useAppStore = defineStore('app', () => {
       } else {
         await newChat()
       }
+      if (workspaceId.value !== id || gen !== switchLoadGen) return
       await expandTask
       void restoreEditorState().finally(() => {
         suppressEditorPersist.value = false
@@ -1306,6 +1321,13 @@ export const useAppStore = defineStore('app', () => {
     const i = openFiles.value.findIndex((f) => f.path === path)
     if (i < 0) return
     openFiles.value = openFiles.value.slice(0, i + 1)
+    if (!openFiles.value.some((f) => f.path === activePath.value)) activePath.value = path
+  }
+
+  function closeFilesToTheLeft(path: string) {
+    const i = openFiles.value.findIndex((f) => f.path === path)
+    if (i <= 0) return
+    openFiles.value = openFiles.value.slice(i)
     if (!openFiles.value.some((f) => f.path === activePath.value)) activePath.value = path
   }
 
@@ -2179,6 +2201,7 @@ export const useAppStore = defineStore('app', () => {
     closeFile,
     closeOtherFiles,
     closeFilesToTheRight,
+    closeFilesToTheLeft,
     closeAllFiles,
     updateOpenContent,
     saveOpenFile,

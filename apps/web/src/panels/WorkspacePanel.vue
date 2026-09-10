@@ -352,9 +352,20 @@ async function openConv(ws: Workspace, conv: Conversation) {
   openingId.value = conv.id
   try {
     if (store.workspaceId !== ws.id) {
-      await store.selectWorkspace(ws.id, { openExplorer: false })
+      try {
+        await store.selectWorkspace(ws.id, {
+          openExplorer: false,
+          conversationId: conv.id,
+        })
+      } catch (err) {
+        // open() may have already flipped workspaceId; still try to open the chat.
+        if (store.workspaceId !== ws.id) throw err
+      }
     }
-    if (store.conversationId !== conv.id) {
+    // Always land on the clicked conversation. selectWorkspace restores a preferred
+    // id, but a partial failure used to leave the previous workspace's messages up
+    // until a second click.
+    if (store.workspaceId === ws.id && store.conversationId !== conv.id) {
       await store.openConversation(conv.id)
     }
     window.dispatchEvent(new Event('ca-focus-agent'))

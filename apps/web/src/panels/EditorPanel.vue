@@ -19,6 +19,8 @@ const mdPreview = ref(false)
 /** HTML: true = iframe preview, false = Monaco source */
 const htmlPreview = ref(false)
 const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
+const editorMenu = ref<{ x: number; y: number } | null>(null)
+let editorCtxDisposable: import('monaco-editor').IDisposable | null = null
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
 let monacoMod: typeof import('monaco-editor') | null = null
@@ -152,6 +154,7 @@ const editorOptions = {
   scrollBeyondLastLine: false,
   padding: { top: 12 },
   scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+  contextmenu: false,
 }
 
 function showPath(path: string | null) {
@@ -177,6 +180,7 @@ function showPath(path: string | null) {
   const model = ensureModel(path, file.content ?? '')
   if (model) editor.setModel(model)
   editor.updateOptions({ readOnly: Boolean(file.readonly) })
+  bindEditorContextMenu(editor)
   applySearchReveal(path)
   requestAnimationFrame(() => editor?.layout())
 }
@@ -330,6 +334,7 @@ function showDiff(path: string, before: string, after: string) {
       renderSideBySide: true,
       ignoreTrimWhitespace: false,
     })
+    bindEditorContextMenu(diffEditor.getModifiedEditor())
   }
   const original = ensureOrigModel(path, before)
   const modified = ensureModel(path, after)
@@ -366,6 +371,7 @@ onMounted(async () => {
     theme: 'ca-editor',
     ...editorOptions,
   })
+  bindEditorContextMenu(editor)
   editor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
     void onEditorSave()
   })
@@ -527,6 +533,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-file-reload', onReload as EventListener)
   window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.removeEventListener('keydown', onReviewKey)
+  editorCtxDisposable?.dispose()
+  editorCtxDisposable = null
   for (const model of models.values()) model.dispose()
   for (const model of origModels.values()) model.dispose()
   models.clear()
@@ -555,7 +563,51 @@ function onTabAux(path: string, e: MouseEvent) {
 function onTabContext(path: string, e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
+  editorMenu.value = null
   tabMenu.value = { x: e.clientX, y: e.clientY, path }
+}
+
+function toAbsolutePath(rel: string): string {
+  const root = (store.workspace?.root_path || '').trim()
+  if (!root) return rel
+  if (!rel) return root
+  const winStyle = /^[A-Za-z]:[\\/]/.test(root) || root.includes('\\')
+  const sep = winStyle ? '\\' : '/'
+  const normalizedRoot = root.replace(/[\\/]+$/, '')
+  const normalizedRel = rel.replace(/^[\\/]+/, '').replace(/[\\/]+/g, sep)
+  return `${normalizedRoot}${sep}${normalizedRel}`
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    /* ignore */
+  }
+}
+
+function activeEditor() {
+  return review.value ? diffEditor?.getModifiedEditor() || null : editor
+}
+
+function editorHasSelection() {
+  const ed = activeEditor()
+  if (!ed) return false
+  const sel = ed.getSelection()
+  return Boolean(sel && !sel.isEmpty())
+}
+
+function editorSelectionText() {
+  const ed = activeEditor()
+  if (!ed) return ''
+  const model = ed.getModel()
+  const sel = ed.getSelection()
+  if (!model || !sel || sel.isEmpty()) return ''
+  return model.getValueInRange(sel)
+}
+
+function editorReadOnly() {
+  return Boolean(store.openFile?.readonly || review.value)
 }
 
 const tabMenuItems = computed((): ContextMenuItem[] => {
@@ -563,34 +615,158 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
   if (!path) return []
   const files = store.openFiles
   const index = files.findIndex((f) => f.path === path)
+  const file = files[index]
   return [
-    { id: 'close', label: '关闭', icon: 'close' },
-    { id: 'close-others', label: '关闭其他', icon: 'close-others', disabled: files.length < 2 },
-    { id: 'close-right', label: '关闭右侧', icon: 'close-right', disabled: index < 0 || index >= files.length - 1 },
-    { id: 'close-all', label: '关闭全部', icon: 'close-all', disabled: files.length === 0 },
-    { id: 'sep-copy', separator: true },
-    { id: 'copy-path', label: '复制路径', icon: 'copy' },
+    { id: 'save', label: t('editor.save'), icon: 'save', disabled: !file || file.readonly || !file.dirty },
+    { id: 'reload', label: t('editor.reload'), icon: 'refresh', disabled: !file },
+    { id: 'sep-file', separator: true },
+    { id: 'add-to-chat', label: t('editor.addToChat'), icon: 'chat' },
+    { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
+    { id: 'sep-path', separator: true },
+    { id: 'copy-relative', label: t('editor.copyRelativePath'), icon: 'path-relative' },
+    { id: 'copy-absolute', label: t('editor.copyAbsolutePath'), icon: 'path-absolute' },
+    { id: 'sep-close', separator: true },
+    { id: 'close', label: t('editor.close'), icon: 'close' },
+    { id: 'close-others', label: t('editor.closeOthers'), icon: 'close-others', disabled: files.length < 2 },
+    { id: 'close-left', label: t('editor.closeLeft'), icon: 'close-left', disabled: index <= 0 },
+    { id: 'close-right', label: t('editor.closeRight'), icon: 'close-right', disabled: index < 0 || index >= files.length - 1 },
+    { id: 'close-all', label: t('editor.closeAll'), icon: 'close-all', disabled: files.length === 0 },
   ]
 })
 
 const tabMenuActions: Record<string, (path: string) => void | Promise<void>> = {
+  save: async (path) => {
+    store.activateFile(path)
+    await store.saveOpenFile()
+  },
+  reload: async (path) => {
+    await store.reloadOpenFile(path)
+  },
+  'add-to-chat': (path) => {
+    window.dispatchEvent(new CustomEvent('ca-add-chat-mention', {
+      detail: { name: fileName(path), path, is_dir: false },
+    }))
+  },
+  reveal: async (path) => {
+    await store.revealInTree(path)
+    window.dispatchEvent(new Event('ca-open-explorer'))
+  },
+  'copy-relative': async (path) => copyText(path),
+  'copy-absolute': async (path) => copyText(toAbsolutePath(path)),
   close: (path) => store.closeFile(path),
   'close-others': (path) => store.closeOtherFiles(path),
+  'close-left': (path) => store.closeFilesToTheLeft(path),
   'close-right': (path) => store.closeFilesToTheRight(path),
   'close-all': () => store.closeAllFiles(),
-  'copy-path': async (path) => {
-    try {
-      await navigator.clipboard.writeText(path)
-    } catch {
-      /* ignore */
-    }
-  },
 }
 
 async function onTabMenuSelect(id: string) {
   const path = tabMenu.value?.path
   if (!path) return
   await tabMenuActions[id]?.(path)
+}
+
+const editorMenuItems = computed((): ContextMenuItem[] => {
+  if (!editorMenu.value || !store.activePath) return []
+  const hasSel = editorHasSelection()
+  const readOnly = editorReadOnly()
+  const file = store.openFile
+  return [
+    { id: 'cut', label: t('editor.cut'), icon: 'cut', disabled: readOnly || !hasSel },
+    { id: 'copy', label: t('editor.copy'), icon: 'copy', disabled: !hasSel },
+    { id: 'paste', label: t('editor.paste'), icon: 'paste', disabled: readOnly },
+    { id: 'sep-edit', separator: true },
+    { id: 'add-selection', label: t('editor.addSelectionToChat'), icon: 'chat-plus', disabled: !hasSel },
+    { id: 'add-to-chat', label: t('editor.addToChat'), icon: 'chat' },
+    { id: 'sep-nav', separator: true },
+    { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
+    { id: 'copy-relative', label: t('editor.copyRelativePath'), icon: 'path-relative' },
+    { id: 'copy-absolute', label: t('editor.copyAbsolutePath'), icon: 'path-absolute' },
+    { id: 'sep-file', separator: true },
+    { id: 'save', label: t('editor.save'), icon: 'save', disabled: !file || file.readonly || !file.dirty },
+    { id: 'reload', label: t('editor.reload'), icon: 'refresh' },
+    { id: 'find', label: t('editor.find'), icon: 'search' },
+  ]
+})
+
+async function onEditorMenuSelect(id: string) {
+  const path = store.activePath
+  if (!path) return
+  const ed = activeEditor()
+  if (id === 'cut') {
+    const text = editorSelectionText()
+    if (!text || editorReadOnly() || !ed) return
+    await copyText(text)
+    const sel = ed.getSelection()
+    if (sel) ed.executeEdits('cut', [{ range: sel, text: '', forceMoveMarkers: true }])
+    return
+  }
+  if (id === 'copy') {
+    const text = editorSelectionText()
+    if (text) await copyText(text)
+    return
+  }
+  if (id === 'paste') {
+    if (!ed || editorReadOnly()) return
+    ed.focus()
+    try {
+      const text = await navigator.clipboard.readText()
+      const sel = ed.getSelection()
+      if (text && sel) ed.executeEdits('paste', [{ range: sel, text, forceMoveMarkers: true }])
+    } catch {
+      ed.trigger('keyboard', 'editor.action.clipboardPasteAction', null)
+    }
+    return
+  }
+  if (id === 'add-selection') {
+    const text = editorSelectionText()
+    if (!text) return
+    const fence = `\`\`\`${path}\n${text.replace(/\n$/, '')}\n\`\`\``
+    window.dispatchEvent(new CustomEvent('ca-append-chat-text', { detail: { text: fence } }))
+    return
+  }
+  if (id === 'add-to-chat') {
+    window.dispatchEvent(new CustomEvent('ca-add-chat-mention', {
+      detail: { name: fileName(path), path, is_dir: false },
+    }))
+    return
+  }
+  if (id === 'reveal') {
+    await store.revealInTree(path)
+    window.dispatchEvent(new Event('ca-open-explorer'))
+    return
+  }
+  if (id === 'copy-relative') {
+    await copyText(path)
+    return
+  }
+  if (id === 'copy-absolute') {
+    await copyText(toAbsolutePath(path))
+    return
+  }
+  if (id === 'save') {
+    await store.saveOpenFile()
+    return
+  }
+  if (id === 'reload') {
+    await store.reloadOpenFile(path)
+    return
+  }
+  if (id === 'find') {
+    ed?.focus()
+    ed?.trigger('menu', 'actions.find', null)
+  }
+}
+
+function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCodeEditor) {
+  editorCtxDisposable?.dispose()
+  editorCtxDisposable = ed.onContextMenu((e) => {
+    const ev = e.event
+    ev.preventDefault()
+    ev.stopPropagation()
+    tabMenu.value = null
+    editorMenu.value = { x: ev.posx, y: ev.posy }
+  })
 }
 </script>
 
@@ -736,6 +912,14 @@ async function onTabMenuSelect(id: string) {
       :items="tabMenuItems"
       @select="onTabMenuSelect"
       @close="tabMenu = null"
+    />
+    <ContextMenu
+      v-if="editorMenu"
+      :x="editorMenu.x"
+      :y="editorMenu.y"
+      :items="editorMenuItems"
+      @select="onEditorMenuSelect"
+      @close="editorMenu = null"
     />
   </div>
 </template>

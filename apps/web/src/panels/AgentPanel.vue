@@ -705,6 +705,36 @@ function setSenderDraft(text: string) {
   sender.value?.setContent?.(normalized)
 }
 
+function appendSenderText(text: string) {
+  const normalized = text.replace(/\r\n/g, '\n').trimEnd()
+  if (!normalized) return
+  const editor = getSenderEditor()
+  if (editor) {
+    const existing = editor.getText().trimEnd()
+    const next = existing ? `${existing}\n\n${normalized}` : normalized
+    editor.commands.setContent(plainTextToSenderHtml(next), { emitUpdate: false })
+    draft.value = editor.getText()
+    return
+  }
+  draft.value = draft.value.trimEnd() ? `${draft.value.trimEnd()}\n\n${normalized}` : normalized
+  sender.value?.setContent?.(draft.value)
+}
+
+async function onAppendChatText(e: Event) {
+  const text = String((e as CustomEvent<{ text?: string }>).detail?.text || '')
+  if (!text.trim()) return
+  window.dispatchEvent(new Event('ca-focus-agent'))
+  for (let i = 0; i < 12; i++) {
+    if (getSenderEditor() || sender.value) {
+      appendSenderText(text)
+      return
+    }
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 40))
+  }
+  appendSenderText(text)
+}
+
 function resolveMentionIsDir(path: string) {
   if (store.childrenMap[path]) return true
   const parent = store.parentPath(path)
@@ -1035,6 +1065,7 @@ onMounted(() => {
   }
   onMessagesLoaded()
   window.addEventListener('ca-add-chat-mention', onAddChatMention)
+  window.addEventListener('ca-append-chat-text', onAppendChatText)
   window.addEventListener('ca-messages-loaded', onMessagesLoaded)
   window.addEventListener('ca-layout-ready', onMessagesLoaded)
   nextTick(() => {
@@ -1052,6 +1083,7 @@ onBeforeUnmount(() => {
   historyObs = null
   if (pinRaf) cancelAnimationFrame(pinRaf)
   window.removeEventListener('ca-add-chat-mention', onAddChatMention)
+  window.removeEventListener('ca-append-chat-text', onAppendChatText)
   window.removeEventListener('ca-messages-loaded', onMessagesLoaded)
   window.removeEventListener('ca-layout-ready', onMessagesLoaded)
 })
