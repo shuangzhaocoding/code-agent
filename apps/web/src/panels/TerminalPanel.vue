@@ -296,7 +296,7 @@ onBeforeUnmount(() => {
     <aside class="term-sidebar" :style="{ width: sideWidth + 'px' }">
       <div class="side-head">
         <span class="side-title">终端</span>
-        <button type="button" class="ghost-icon-btn" title="新建终端" @click="addTerminal">
+        <button type="button" class="ghost-icon-btn" title="新建终端" @click="addTerminal()">
           <AppIcon name="plus" :size="16" :stroke-width="1.75" />
         </button>
       </div>
