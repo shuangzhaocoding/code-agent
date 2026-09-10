@@ -813,6 +813,22 @@ export const useAppStore = defineStore('app', () => {
     return dest
   }
 
+  /** Move a file/dir into destDir (workspace-relative). No-op if already there. */
+  async function moveFsEntry(src: string, destDir: string, isDir: boolean) {
+    if (!workspaceId.value || !src) return null
+    if (isDir && (destDir === src || destDir.startsWith(`${src}/`))) {
+      throw new Error('Cannot move into itself')
+    }
+    if (parentPath(src) === destDir) return src
+    const name = src.split('/').filter(Boolean).pop() || src
+    await loadTree(destDir)
+    const dest = uniqueChildPath(destDir, name)
+    if (dest === src) return src
+    await renameEntry(src, dest)
+    if (destDir) setExpanded(new Set([...expanded.value, destDir]))
+    return dest
+  }
+
   async function deleteEntry(relPath: string) {
     if (!workspaceId.value) return
     await api(`/api/workspaces/${workspaceId.value}/entries?path=${encodeURIComponent(relPath)}`, {
@@ -2152,6 +2168,7 @@ export const useAppStore = defineStore('app', () => {
     setFsClipboard,
     clearFsClipboard,
     pasteFsClipboard,
+    moveFsEntry,
     openPath,
     openPathAtLine,
     openAgentFile,

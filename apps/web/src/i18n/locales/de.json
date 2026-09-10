@@ -493,7 +493,9 @@
     "addToNewChat": "Zu neuem Chat hinzufügen",
     "copyRelativePath": "Relativen Pfad kopieren",
     "copyAbsolutePath": "Absoluten Pfad kopieren",
-    "copyFail": "Kopieren fehlgeschlagen"
+    "copyFail": "Kopieren fehlgeschlagen",
+    "cannotMoveIntoSelf": "Kann nicht in sich selbst oder ein Unterverzeichnis verschoben werden",
+    "moveFail": "Verschieben fehlgeschlagen"
   },
   "editor": {
     "close": "Schließen",

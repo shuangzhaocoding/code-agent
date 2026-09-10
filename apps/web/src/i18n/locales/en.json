@@ -528,7 +528,9 @@
     "addToNewChat": "Add to new chat",
     "copyRelativePath": "Copy relative path",
     "copyAbsolutePath": "Copy absolute path",
-    "copyFail": "Failed to copy"
+    "copyFail": "Failed to copy",
+    "cannotMoveIntoSelf": "Cannot move into itself or a subdirectory",
+    "moveFail": "Failed to move"
   },
   "editor": {
     "close": "Close",

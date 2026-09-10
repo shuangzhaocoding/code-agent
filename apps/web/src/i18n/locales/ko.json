@@ -492,7 +492,9 @@
     "addToNewChat": "새 채팅에 추가",
     "copyRelativePath": "상대 경로 복사",
     "copyAbsolutePath": "절대 경로 복사",
-    "copyFail": "복사 실패"
+    "copyFail": "복사 실패",
+    "cannotMoveIntoSelf": "자신 또는 하위 디렉터리로는 이동할 수 없습니다",
+    "moveFail": "이동 실패"
   },
   "editor": {
     "close": "닫기",

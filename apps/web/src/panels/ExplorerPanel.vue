@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type FsItem } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
+import {
+  explorerDragKey,
+  FS_DRAG_MIME,
+  type FsDragPayload,
+} from '@/panels/explorerDrag'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -14,6 +19,90 @@ const error = ref('')
 const renamingPath = ref<string | null>(null)
 const selectedItem = ref<FsItem | null>(null)
 let createSeq = 0
+
+const dragSrc = ref<FsDragPayload | null>(null)
+const dropHoverPath = ref<string | null>(null)
+let dropDestDir: string | null = null
+
+function canDropTo(destDir: string, src: FsDragPayload | null = dragSrc.value) {
+  if (!src) return false
+  if (store.parentPath(src.path) === destDir) return false
+  if (src.is_dir && (destDir === src.path || destDir.startsWith(`${src.path}/`))) return false
+  return true
+}
+
+function resolveDestDir(item: FsItem) {
+  return item.is_dir ? item.path : store.parentPath(item.path)
+}
+
+function beginDrag(item: FsItem) {
+  dragSrc.value = { path: item.path, is_dir: item.is_dir }
+  dropHoverPath.value = null
+  dropDestDir = null
+}
+
+function endDrag() {
+  dragSrc.value = null
+  dropHoverPath.value = null
+  dropDestDir = null
+}
+
+function setDropHover(path: string | null, destDir: string | null) {
+  if (destDir !== null && !canDropTo(destDir)) {
+    dropHoverPath.value = null
+    dropDestDir = null
+    return
+  }
+  dropHoverPath.value = path
+  dropDestDir = destDir
+}
+
+async function dropTo(destDir: string) {
+  const src = dragSrc.value
+  const ok = canDropTo(destDir, src)
+  endDrag()
+  if (!src || !ok) return
+  try {
+    await store.moveFsEntry(src.path, destDir, src.is_dir)
+    error.value = ''
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    error.value =
+      msg.includes('itself') ? t('explorer.cannotMoveIntoSelf') : msg || t('explorer.moveFail')
+  }
+}
+
+provide(explorerDragKey, {
+  dragSrc,
+  dropHoverPath,
+  beginDrag,
+  endDrag,
+  setDropHover,
+  canDropTo,
+  resolveDestDir,
+  dropTo,
+})
+
+function onTreeDragOver(e: DragEvent) {
+  const types = e.dataTransfer?.types
+  const isOurs = !!dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  if (!isOurs) return
+  if (!canDropTo('')) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+    return
+  }
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  setDropHover('', '')
+}
+
+function onTreeDrop(e: DragEvent) {
+  const types = e.dataTransfer?.types
+  const isOurs = !!dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  if (!isOurs) return
+  e.preventDefault()
+  void dropTo(dropDestDir ?? '')
+}
 
 const workspaceTitle = computed(() => store.workspace?.name || t('panels.workspace'))
 
@@ -311,7 +400,12 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
       </div>
     </div>
     <p v-if="error" class="err">{{ error }}</p>
-    <div class="tree">
+    <div
+      class="tree"
+      :class="{ 'drop-over': dragSrc && dropHoverPath === '' }"
+      @dragover="onTreeDragOver"
+      @drop="onTreeDrop"
+    >
       <ExplorerCreateRow
         v-if="creating && creating.dir === ''"
         :key="creating.id"
@@ -475,6 +569,14 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   flex: 1;
   overflow: auto;
   padding: 0 0 12px;
+  min-height: 48px;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
+  transition: outline-color 0.12s ease, background-color 0.12s ease;
+}
+.tree.drop-over {
+  outline-color: color-mix(in srgb, var(--primary) 55%, transparent);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 .ctx {
   position: fixed;

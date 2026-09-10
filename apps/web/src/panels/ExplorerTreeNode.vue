@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue'
 import type { FsItem } from '@/stores/app'
 import { useAppStore } from '@/stores/app'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
+import { explorerDragKey, FS_DRAG_MIME } from '@/panels/explorerDrag'
 
 const props = defineProps<{
   item: FsItem
@@ -14,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const store = useAppStore()
+const drag = inject(explorerDragKey, null)
 const mark = computed(() => store.fileTreeMark(props.item.path, props.item.is_dir))
 const isCut = computed(() => {
   const clip = store.fsClipboard
@@ -21,6 +23,11 @@ const isCut = computed(() => {
   const src = clip.path
   return props.item.path === src || props.item.path.startsWith(`${src}/`)
 })
+const isDragging = computed(() => drag?.dragSrc.value?.path === props.item.path)
+const isDropTarget = computed(() => drag?.dropHoverPath.value === props.item.path)
+const isDropExpandHover = computed(
+  () => props.item.is_dir && drag?.dropHoverPath.value === props.item.path,
+)
 const emit = defineEmits<{
   context: [e: MouseEvent, item: FsItem]
   select: [item: FsItem]
@@ -35,6 +42,8 @@ const emit = defineEmits<{
 const renameVal = ref('')
 const renameInput = ref<HTMLInputElement | null>(null)
 const isRenaming = computed(() => props.renamingPath === props.item.path)
+let suppressClick = false
+let expandTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(isRenaming, (v) => {
   if (v) {
@@ -44,6 +53,26 @@ watch(isRenaming, (v) => {
       renameInput.value?.select()
     })
   }
+})
+
+watch(
+  () => isDropExpandHover.value,
+  (shouldExpand) => {
+    if (expandTimer) {
+      clearTimeout(expandTimer)
+      expandTimer = null
+    }
+    if (!shouldExpand) return
+    if (store.isExpanded(props.item.path)) return
+    expandTimer = setTimeout(() => {
+      void store.expandDir(props.item.path)
+      expandTimer = null
+    }, 650)
+  },
+)
+
+onUnmounted(() => {
+  if (expandTimer) clearTimeout(expandTimer)
 })
 
 function commitRename() {
@@ -56,8 +85,71 @@ function commitRename() {
 }
 
 function onRowClick() {
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
   emit('select', props.item)
   store.openPath(props.item.path, props.item.is_dir)
+}
+
+function onDragStart(e: DragEvent) {
+  if (!drag || isRenaming.value) {
+    e.preventDefault()
+    return
+  }
+  const dt = e.dataTransfer
+  if (!dt) return
+  dt.effectAllowed = 'move'
+  dt.setData(FS_DRAG_MIME, JSON.stringify({ path: props.item.path, is_dir: props.item.is_dir }))
+  dt.setData('text/plain', props.item.path)
+  drag.beginDrag(props.item)
+  suppressClick = true
+}
+
+function onDragEnd() {
+  drag?.endDrag()
+  nextTick(() => {
+    // Keep suppressClick through the trailing click after a drag.
+    setTimeout(() => {
+      suppressClick = false
+    }, 0)
+  })
+}
+
+function onDragOver(e: DragEvent) {
+  if (!drag) return
+  const types = e.dataTransfer?.types
+  const isOurs = !!drag.dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  if (!isOurs) return
+  e.preventDefault()
+  e.stopPropagation()
+  const dest = drag.resolveDestDir(props.item)
+  if (!drag.canDropTo(dest)) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+    drag.setDropHover(null, null)
+    return
+  }
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  drag.setDropHover(props.item.path, dest)
+}
+
+function onDragLeave(e: DragEvent) {
+  if (!drag) return
+  const related = e.relatedTarget as Node | null
+  if (related && (e.currentTarget as Node).contains(related)) return
+  if (drag.dropHoverPath.value === props.item.path) drag.setDropHover(null, null)
+}
+
+function onDrop(e: DragEvent) {
+  if (!drag) return
+  const types = e.dataTransfer?.types
+  const isOurs = !!drag.dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  if (!isOurs) return
+  e.preventDefault()
+  e.stopPropagation()
+  const dest = drag.resolveDestDir(props.item)
+  void drag.dropTo(dest)
 }
 </script>
 
@@ -66,11 +158,21 @@ function onRowClick() {
     <button
       type="button"
       class="row"
-      :class="{ active: store.activePath === item.path, cut: isCut }"
+      :class="{
+        active: store.activePath === item.path,
+        cut: isCut || isDragging,
+        'drop-target': isDropTarget,
+      }"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
-      :aria-grabbed="isCut ? 'true' : undefined"
+      :draggable="!isRenaming"
+      :aria-grabbed="isCut || isDragging ? 'true' : undefined"
       @click="onRowClick"
       @contextmenu="emit('context', $event, item)"
+      @dragstart="onDragStart"
+      @dragend="onDragEnd"
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
+      @drop="onDrop"
     >
       <span class="twist" :class="{ on: item.is_dir && store.isExpanded(item.path), hidden: !item.is_dir }" />
       <FileTreeIcon
@@ -165,6 +267,10 @@ function onRowClick() {
 .row.cut :deep(.file-tree-icon),
 .row.cut .twist {
   opacity: 0.85;
+}
+.row.drop-target {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 .twist {
   width: 8px;

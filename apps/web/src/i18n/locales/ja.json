@@ -492,7 +492,9 @@
     "addToNewChat": "新しいチャットに追加",
     "copyRelativePath": "相対パスをコピー",
     "copyAbsolutePath": "絶対パスをコピー",
-    "copyFail": "コピーに失敗しました"
+    "copyFail": "コピーに失敗しました",
+    "cannotMoveIntoSelf": "自身またはそのサブディレクトリには移動できません",
+    "moveFail": "移動に失敗しました"
   },
   "editor": {
     "close": "閉じる",
