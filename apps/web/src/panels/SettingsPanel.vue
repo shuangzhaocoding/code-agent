@@ -34,6 +34,7 @@ const groups = computed(() => {
     terminal: { titleKey: 'settings.groups.terminal', icon: 'terminal' },
     llm: { titleKey: 'settings.groups.llm', icon: 'chip' },
     ui: { titleKey: 'settings.groups.ui', icon: 'sliders' },
+    uploads: { titleKey: 'settings.groups.uploads', icon: 'folder' },
     storage: { titleKey: 'settings.groups.storage', icon: 'gear' },
   }
   for (const key of Object.keys(schema.value)) {
@@ -124,6 +125,27 @@ function applySettingsValues(values: Record<string, unknown>) {
 }
 
 const storageStatus = computed(() => (store.settings as { storage?: Record<string, unknown> } | null)?.storage || null)
+const uploadsResolved = computed(
+  () => (store.settings as { uploads_resolved?: string } | null)?.uploads_resolved || '',
+)
+const isDesktop = Boolean(
+  (window as Window & { codeAgentDesktop?: { isDesktop?: boolean; pickDirectory?: () => Promise<string | null> } })
+    .codeAgentDesktop?.isDesktop,
+)
+
+async function pickDirectory(key: string) {
+  const desktop = (
+    window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }
+  ).codeAgentDesktop
+  if (!desktop?.pickDirectory) return
+  try {
+    const chosen = await desktop.pickDirectory()
+    if (!chosen) return
+    local[key] = chosen
+  } catch {
+    /* ignore cancel / picker errors */
+  }
+}
 
 async function save() {
   await store.saveSettings({ ...local })
@@ -227,8 +249,34 @@ async function save() {
 
             <input v-else-if="specFor(key).format === 'password'" :id="key" v-model="local[key]" class="field-control setting-input" type="password" autocomplete="off" :placeholder="fieldPlaceholder(key)" />
 
+            <div v-else-if="specFor(key).format === 'directory'" class="setting-path">
+              <input
+                :id="key"
+                v-model="local[key] as string"
+                class="field-control setting-input"
+                type="text"
+                :placeholder="fieldPlaceholder(key)"
+              />
+              <button
+                v-if="isDesktop"
+                type="button"
+                class="btn setting-browse"
+                @click="pickDirectory(key)"
+              >
+                <AppIcon name="folder" :size="14" :stroke-width="1.75" />
+                {{ t('workspace.pickFolder') }}
+              </button>
+            </div>
+
             <input v-else :id="key" v-model="local[key]" class="field-control setting-input" :placeholder="fieldPlaceholder(key)" />
           </div>
+          <p v-if="group.id === 'uploads'" class="storage-note">
+            {{ t('settings.uploads.hint') }}
+            <template v-if="uploadsResolved">
+              <br />
+              <span class="uploads-resolved">{{ t('settings.uploads.resolved', { path: uploadsResolved }) }}</span>
+            </template>
+          </p>
           <p v-if="group.id === 'storage'" class="storage-note">{{ t('settings.storage.restartHint') }}</p>
           <dl v-if="group.id === 'storage' && storageStatus" class="storage-status">
             <div><dt>{{ t('settings.storage.activeDatabase') }}</dt><dd>{{ storageStatus.database }}</dd></div>
@@ -392,6 +440,31 @@ async function save() {
   width: 100%;
   font-size: 12px;
   padding: 6px 9px;
+}
+.setting-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.setting-path .setting-input {
+  flex: 1;
+  min-width: 0;
+}
+.setting-browse {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.uploads-resolved {
+  font-family: var(--mono);
+  font-size: 10px;
+  word-break: break-all;
 }
 .setting-select {
   max-width: 360px;

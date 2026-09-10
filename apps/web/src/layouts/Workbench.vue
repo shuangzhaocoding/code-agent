@@ -14,6 +14,7 @@ import ConfirmCard from '@/components/ConfirmCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import { getSidebarCollapsed, setSidebarCollapsed } from '@/utils/layoutPrefs'
+import { queueTerminalCwd } from '@/utils/terminalOpen'
 
 const TrajectoryDockPanel = defineAsyncComponent(() => import('@/panels/TrajectoryDockPanel.vue'))
 const WorkspacePanel = defineAsyncComponent(() => import('@/panels/WorkspacePanel.vue'))
@@ -71,6 +72,7 @@ onMounted(() => {
   window.addEventListener('ca-open-models', openModels)
   window.addEventListener('ca-open-search', openSearch)
   window.addEventListener('ca-open-explorer', openExplorer)
+  window.addEventListener('ca-open-terminal', onOpenTerminal)
   window.addEventListener('ca-open-skills', openSkills)
   window.addEventListener('keydown', onWorkbenchKey)
   window.addEventListener('ca-locale', retitlePanels)
@@ -82,6 +84,7 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-models', openModels)
   window.removeEventListener('ca-open-search', openSearch)
   window.removeEventListener('ca-open-explorer', openExplorer)
+  window.removeEventListener('ca-open-terminal', onOpenTerminal)
   window.removeEventListener('ca-open-skills', openSkills)
   window.removeEventListener('keydown', onWorkbenchKey)
   window.removeEventListener('ca-locale', retitlePanels)
@@ -106,6 +109,19 @@ function openSearch() {
 
 function openExplorer() {
   openPanel('explorer', 'explorer', panelTitle('explorer'))
+}
+
+function openTerminal() {
+  openPanel('terminal', 'terminal', panelTitle('terminal'))
+}
+
+async function onOpenTerminal(e: Event) {
+  const detail = (e as CustomEvent<{ cwd?: string }>).detail
+  queueTerminalCwd(detail?.cwd ?? '')
+  openTerminal()
+  await nextTick()
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  window.dispatchEvent(new Event('ca-terminal-cwd'))
 }
 
 function openSkills() {

@@ -138,9 +138,15 @@
       "terminal": "ターミナル",
       "llm": "モデル",
       "ui": "インターフェース",
-      "appearance": "外観"
+      "appearance": "外観",
+      "uploads": "アップロード",
+      "storage": "ストレージ"
     },
     "languageLead": "UI 言語を切り替えます。すぐに反映されます。",
+    "uploads": {
+      "hint": "auto（既定：SQLite と同じデータディレクトリ下の uploads）、相対パス、または絶対パス。保存後すぐに反映され、再起動は不要です。デスクトップではフォルダーを選択できます。",
+      "resolved": "実際のパス：{path}"
+    },
     "fields": {
       "agent": {
         "max_steps": "Agent の最大ステップ数",
@@ -162,6 +168,9 @@
         "theme": "テーマ",
         "font_size": "UI フォントサイズ",
         "send_on_enter": "Enter で送信"
+      },
+      "uploads": {
+        "dir": "アップロードディレクトリ"
       }
     },
     "enums": {
@@ -527,7 +536,11 @@
     "prevFile": "前のファイル",
     "nextFile": "次のファイル",
     "diffCount": "変更 {i}/{n}",
-    "openFromSidebar": "サイドバーからファイルを開く"
+    "openFromSidebar": "サイドバーからファイルを開く",
+    "splitRight": "エディターを右に分割",
+    "splitDown": "エディターを下に分割",
+    "closeSplit": "分割を閉じる",
+    "splitEmpty": "このペインでファイルを開く"
   },
   "search": {
     "title": "検索",

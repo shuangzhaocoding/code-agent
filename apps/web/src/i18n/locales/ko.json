@@ -138,9 +138,15 @@
       "terminal": "터미널",
       "llm": "모델",
       "ui": "인터페이스",
-      "appearance": "모양"
+      "appearance": "모양",
+      "uploads": "업로드",
+      "storage": "스토리지"
     },
     "languageLead": "UI 언어를 전환합니다. 즉시 적용됩니다.",
+    "uploads": {
+      "hint": "auto(기본: SQLite와 같은 데이터 디렉터리 아래 uploads), 상대 경로 또는 절대 경로. 저장 후 즉시 적용되며 재시작이 필요 없습니다. 데스크톱에서는 폴더를 선택할 수 있습니다.",
+      "resolved": "현재 경로: {path}"
+    },
     "fields": {
       "agent": {
         "max_steps": "Agent 최대 단계",
@@ -162,6 +168,9 @@
         "theme": "테마",
         "font_size": "UI 글꼴 크기",
         "send_on_enter": "Enter로 보내기"
+      },
+      "uploads": {
+        "dir": "업로드 디렉터리"
       }
     },
     "enums": {
@@ -527,7 +536,11 @@
     "prevFile": "이전 파일",
     "nextFile": "다음 파일",
     "diffCount": "변경 {i}/{n}",
-    "openFromSidebar": "사이드바에서 파일 열기"
+    "openFromSidebar": "사이드바에서 파일 열기",
+    "splitRight": "편집기 오른쪽 분할",
+    "splitDown": "편집기 아래 분할",
+    "closeSplit": "분할 닫기",
+    "splitEmpty": "이 창에서 파일 열기"
   },
   "search": {
     "title": "검색",

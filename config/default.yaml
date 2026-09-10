@@ -22,7 +22,9 @@ paths:
   checkpoint_db: auto
 
 uploads:
-  dir: uploads
+  # auto → {paths.data_dir}/uploads（与 SQLite 同属数据目录）
+  # 也可写绝对路径，或相对 data_dir 的路径；环境变量 CODE_AGENT_UPLOADS_DIR 可覆盖
+  dir: auto
 
 agent:
   max_steps: 80

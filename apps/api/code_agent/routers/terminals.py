@@ -15,6 +15,8 @@ router = APIRouter(prefix="/api/terminals", tags=["terminals"])
 class TerminalIn(BaseModel):
     workspace_id: str
     title: str | None = None
+    # Workspace-relative directory to start in (file parent or folder path).
+    cwd: str | None = None
 
 
 @router.get("")
@@ -37,7 +39,7 @@ async def new_terminal(body: TerminalIn):
     ws = await Workspace.get_or_none(id=body.workspace_id)
     if not ws:
         raise HTTPException(status_code=404, detail={"code": "workspace.not_found"})
-    row = await create_terminal(body.workspace_id, body.title)
+    row = await create_terminal(body.workspace_id, body.title, cwd=body.cwd)
     return {"id": str(row.id), "title": row.title, "cwd": row.cwd, "alive": True}
 
 
@@ -75,7 +77,7 @@ async def terminal_ws(websocket: WebSocket, terminal_id: str):
     rows = int(settings.get("terminal.default_rows") or 32)
     ws = await Workspace.get_or_none(id=row.workspace_id)
     if ws is not None:
-        handle = await pty_manager.attach_workspace(terminal_id, ws, cols, rows)
+        handle = await pty_manager.attach_workspace(terminal_id, ws, cols, rows, cwd=row.cwd)
     else:
         handle = pty_manager.attach(terminal_id, row.cwd, cols, rows)
     handle.subscribers.append(websocket)

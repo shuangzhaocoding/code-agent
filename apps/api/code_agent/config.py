@@ -77,13 +77,16 @@ def _apply_env(cfg: dict[str, Any]) -> dict[str, Any]:
     return cfg
 
 
-def _resolve_uploads_dir(cfg: dict[str, Any]) -> Path:
-    raw = cfg.get("uploads", {}).get("dir", "uploads")
-    path = Path(str(raw)).expanduser()
+def _resolve_uploads_dir(cfg: dict[str, Any], data_dir: Path) -> Path:
+    """Resolve chat upload storage. Relative paths are under data_dir (same root as SQLite)."""
+    raw = cfg.get("uploads", {}).get("dir", "auto")
+    text = str(raw or "auto").strip() or "auto"
+    if text.lower() in {"auto", "."}:
+        return data_dir / "uploads" if text.lower() == "auto" else data_dir
+    path = Path(text).expanduser()
     if not path.is_absolute():
-        path = REPO_ROOT / path
+        path = data_dir / path
     return path
-
 
 def default_user_config_path() -> Path:
     cfg = _load_yaml(DEFAULT_YAML)
@@ -160,10 +163,15 @@ class Settings:
         self._cfg = cfg
         self.data_dir = Path(cfg["paths"]["data_dir"]).expanduser()
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        self.uploads_dir = _resolve_uploads_dir(cfg)
-        self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        self.refresh_uploads_dir()
         (self.data_dir.parent / "plugins").mkdir(parents=True, exist_ok=True)
         (self.data_dir.parent / "skills").mkdir(parents=True, exist_ok=True)
+
+    def refresh_uploads_dir(self) -> Path:
+        """Re-resolve uploads_dir from live _cfg (hot-reload, no process restart)."""
+        self.uploads_dir = _resolve_uploads_dir(self._cfg, self.data_dir)
+        self.uploads_dir.mkdir(parents=True, exist_ok=True)
+        return self.uploads_dir
 
     def get(self, dotted: str, default: Any = None) -> Any:
         cur: Any = self._cfg
@@ -235,6 +243,8 @@ STORAGE_SETTING_KEYS = frozenset(
     }
 )
 
+UPLOADS_SETTING_KEYS = frozenset({"uploads.dir"})
+
 SETTINGS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -300,6 +310,14 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "type": "boolean",
             "title": "Enter 发送",
             "default": True,
+        },
+        "uploads.dir": {
+            "type": "string",
+            "title": "上传目录",
+            "format": "directory",
+            "default": "auto",
+            "example": "auto",
+            "description": "聊天附件保存目录。auto 为数据目录下 uploads；保存后立即生效，无需重启。",
         },
         "storage.database": {
             "type": "string",

@@ -9,6 +9,7 @@ import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import FilePreviewHost from '@/preview/FilePreviewHost.vue'
 import { isPreviewKind } from '@/preview/classify'
 import { langOf } from '@/utils/editorLang'
+import { canFormatPath, formatDocumentText } from '@/utils/formatDocument'
 import { t } from '@/i18n'
 
 const store = useAppStore()
@@ -20,8 +21,17 @@ const mdPreview = ref(false)
 const htmlPreview = ref(false)
 const tabMenu = ref<{ x: number; y: number; path: string } | null>(null)
 const editorMenu = ref<{ x: number; y: number } | null>(null)
+const secondaryHost = ref<HTMLDivElement | null>(null)
+const dragTabPath = ref<string | null>(null)
+const dropTabPath = ref<string | null>(null)
+/** none | right (side-by-side) | down (stacked) */
+const splitMode = ref<'none' | 'right' | 'down'>('none')
+const focusedPane = ref<'primary' | 'secondary'>('primary')
+const secondaryPath = ref<string | null>(null)
+const primaryPath = ref<string | null>(null)
 let editorCtxDisposable: import('monaco-editor').IDisposable | null = null
 let editor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
+let secondaryEditor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
 let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = null
 let monacoMod: typeof import('monaco-editor') | null = null
 let reviewNavDisposables: import('monaco-editor').IDisposable[] = []
@@ -107,7 +117,27 @@ function isMarkdownFile(path: string) {
 const canMarkdownPreview = computed(
   () => Boolean(store.activePath && store.openFile?.kind === 'text' && isMarkdownFile(store.activePath)),
 )
-const showMarkdownPreview = computed(() => mdPreview.value && canMarkdownPreview.value && !review.value)
+
+/** Primary pane file (stable when secondary pane is focused). */
+const primaryFile = computed(() => {
+  const path =
+    splitMode.value === 'none' ? store.activePath : primaryPath.value || store.activePath
+  return path ? store.openFiles.find((f) => f.path === path) ?? null : null
+})
+const primaryCanHtmlPreview = computed(() => Boolean(primaryFile.value?.kind === 'html' && !review.value))
+const primaryShowHtmlPreview = computed(() => htmlPreview.value && primaryCanHtmlPreview.value)
+const primaryShowFilePreview = computed(() => {
+  const f = primaryFile.value
+  if (!f) return false
+  if (isPreviewKind(f.kind) && f.kind !== 'html') return true
+  return primaryShowHtmlPreview.value
+})
+const primaryShowMarkdownPreview = computed(() => {
+  const f = primaryFile.value
+  return Boolean(
+    mdPreview.value && f && f.kind === 'text' && isMarkdownFile(f.path) && !review.value,
+  )
+})
 
 function uriOf(path: string, original = false) {
   return monacoMod!.Uri.from({
@@ -157,6 +187,45 @@ const editorOptions = {
   contextmenu: false,
 }
 
+function detachModelExcept(
+  model: import('monaco-editor').editor.ITextModel,
+  keep: import('monaco-editor').editor.IStandaloneCodeEditor | null,
+) {
+  if (editor && editor !== keep && editor.getModel() === model) editor.setModel(null)
+  if (secondaryEditor && secondaryEditor !== keep && secondaryEditor.getModel() === model) {
+    secondaryEditor.setModel(null)
+  }
+}
+
+function showPathOn(
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor | null,
+  path: string | null,
+  opts?: { allowReview?: boolean },
+) {
+  if (!monacoMod || !ed) return
+  if (opts?.allowReview && review.value && path) {
+    showDiff(path, review.value.before, review.value.after)
+    return
+  }
+  const file = path ? store.openFiles.find((f) => f.path === path) : null
+  if (!path || !file) {
+    ed.setModel(null)
+    return
+  }
+  if (isPreviewKind(file.kind) && (file.kind !== 'html' || htmlPreview.value)) {
+    ed.setModel(null)
+    return
+  }
+  const model = ensureModel(path, file.content ?? '')
+  if (!model) return
+  detachModelExcept(model, ed)
+  ed.setModel(model)
+  ed.updateOptions({ readOnly: Boolean(file.readonly) })
+  bindEditorContextMenu(ed)
+  if (ed === editor) applySearchReveal(path)
+  requestAnimationFrame(() => ed.layout())
+}
+
 function showPath(path: string | null) {
   if (!monacoMod) return
   if (review.value && path) {
@@ -166,23 +235,145 @@ function showPath(path: string | null) {
   diffEditor?.setModel(null)
   clearReviewNavigation()
   clearDiffReveal()
-  if (!editor) return
-  const file = path ? store.openFiles.find((f) => f.path === path) : null
-  if (!path || !file) {
-    editor.setModel(null)
+  if (splitMode.value !== 'none' && focusedPane.value === 'secondary') {
+    secondaryPath.value = path
+    showPathOn(secondaryEditor, path)
     return
   }
-  // Binary / media previews, or HTML while in preview mode — hide Monaco
-  if (isPreviewKind(file.kind) && (file.kind !== 'html' || htmlPreview.value)) {
-    editor.setModel(null)
+  primaryPath.value = path
+  showPathOn(editor, path, { allowReview: true })
+}
+
+function panePath(pane: 'primary' | 'secondary') {
+  if (pane === 'secondary') return secondaryPath.value
+  return primaryPath.value ?? store.activePath
+}
+
+function focusPane(pane: 'primary' | 'secondary') {
+  if (splitMode.value === 'none' && pane === 'secondary') return
+  focusedPane.value = pane
+  const path = panePath(pane)
+  if (path && store.activePath !== path) store.activateFile(path)
+  else if (path) showPath(path)
+  const ed = pane === 'secondary' ? secondaryEditor : editor
+  ed?.focus()
+}
+
+function activateTab(path: string) {
+  if (splitMode.value !== 'none' && focusedPane.value === 'secondary') {
+    secondaryPath.value = path
+    focusedPane.value = 'secondary'
+    store.activateFile(path)
+    showPathOn(secondaryEditor, path)
     return
   }
-  const model = ensureModel(path, file.content ?? '')
-  if (model) editor.setModel(model)
-  editor.updateOptions({ readOnly: Boolean(file.readonly) })
-  bindEditorContextMenu(editor)
-  applySearchReveal(path)
+  focusedPane.value = 'primary'
+  primaryPath.value = path
+  store.activateFile(path)
+}
+
+async function ensureSecondaryEditor() {
+  if (!monacoMod || secondaryEditor || !secondaryHost.value) return
+  secondaryEditor = monacoMod.editor.create(secondaryHost.value, {
+    value: '',
+    language: 'plaintext',
+    theme: 'ca-editor',
+    ...editorOptions,
+  })
+  bindEditorContextMenu(secondaryEditor)
+  secondaryEditor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
+    void onEditorSave()
+  })
+  secondaryEditor.addCommand(
+    monacoMod.KeyMod.Shift | monacoMod.KeyMod.Alt | monacoMod.KeyCode.KeyF,
+    () => {
+      void formatActiveDocument()
+    },
+  )
+  secondaryEditor.onDidFocusEditorText(() => {
+    focusedPane.value = 'secondary'
+    if (secondaryPath.value) store.activateFile(secondaryPath.value)
+  })
+}
+
+function disposeSecondaryEditor() {
+  if (secondaryEditor) {
+    const model = secondaryEditor.getModel()
+    secondaryEditor.setModel(null)
+    secondaryEditor.dispose()
+    secondaryEditor = null
+    void model
+  }
+}
+
+async function splitEditor(mode: 'right' | 'down', seedPath?: string) {
+  if (review.value) return
+  const current = store.activePath
+  primaryPath.value = current
+  const seed =
+    seedPath ||
+    store.openFiles.find((f) => f.path !== current)?.path ||
+    current
+  secondaryPath.value = seed || null
+  splitMode.value = mode
+  focusedPane.value = 'secondary'
+  await nextTick()
+  await ensureSecondaryEditor()
+  showPathOn(editor, primaryPath.value)
+  showPathOn(secondaryEditor, secondaryPath.value)
+  if (secondaryPath.value) store.activateFile(secondaryPath.value)
+  requestAnimationFrame(() => {
+    editor?.layout()
+    secondaryEditor?.layout()
+  })
+}
+
+function closeSplit(keep: 'primary' | 'secondary' = 'primary') {
+  if (splitMode.value === 'none') return
+  const keepPath = keep === 'secondary' ? secondaryPath.value : primaryPath.value
+  disposeSecondaryEditor()
+  splitMode.value = 'none'
+  focusedPane.value = 'primary'
+  secondaryPath.value = null
+  primaryPath.value = keepPath
+  if (keepPath) store.activateFile(keepPath)
+  showPathOn(editor, keepPath)
   requestAnimationFrame(() => editor?.layout())
+}
+
+function onTabDragStart(path: string, e: DragEvent) {
+  dragTabPath.value = path
+  dropTabPath.value = null
+  e.dataTransfer?.setData('text/plain', path)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onTabDragOver(path: string, e: DragEvent) {
+  if (!dragTabPath.value || dragTabPath.value === path) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropTabPath.value = path
+}
+
+function onTabDragLeave(path: string) {
+  if (dropTabPath.value === path) dropTabPath.value = null
+}
+
+function onTabDrop(path: string, e: DragEvent) {
+  e.preventDefault()
+  const fromPath = dragTabPath.value || e.dataTransfer?.getData('text/plain')
+  dragTabPath.value = null
+  dropTabPath.value = null
+  if (!fromPath || fromPath === path) return
+  const from = store.openFiles.findIndex((f) => f.path === fromPath)
+  const to = store.openFiles.findIndex((f) => f.path === path)
+  if (from < 0 || to < 0) return
+  store.reorderOpenFiles(from, to)
+}
+
+function onTabDragEnd() {
+  dragTabPath.value = null
+  dropTabPath.value = null
 }
 
 function clearSearchDecorations() {
@@ -352,7 +543,8 @@ async function onEditorSave() {
   const path = store.activePath
   const file = store.openFile
   if (!path || !file || file.readonly) return
-  const model = editor?.getModel()
+  const ed = activeEditor()
+  const model = ed?.getModel()
   if (model) store.updateOpenContent(path, model.getValue())
   await store.saveOpenFile()
 }
@@ -372,10 +564,21 @@ onMounted(async () => {
     ...editorOptions,
   })
   bindEditorContextMenu(editor)
+  editor.onDidFocusEditorText(() => {
+    focusedPane.value = 'primary'
+    if (primaryPath.value) store.activateFile(primaryPath.value)
+  })
   editor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
     void onEditorSave()
   })
+  editor.addCommand(
+    monacoMod.KeyMod.Shift | monacoMod.KeyMod.Alt | monacoMod.KeyCode.KeyF,
+    () => {
+      void formatActiveDocument()
+    },
+  )
   host.value.addEventListener('copy', onEditorCopy)
+  primaryPath.value = store.activePath
   showPath(store.activePath)
   window.addEventListener('ca-theme', onTheme as EventListener)
   window.addEventListener('ca-file-reload', onReload as EventListener)
@@ -508,12 +711,27 @@ watch(
 )
 
 watch(
+  () => review.value?.blockId,
+  (id) => {
+    if (id && splitMode.value !== 'none') closeSplit('primary')
+  },
+)
+
+watch(
   () => store.openFiles.map((f) => f.path).join('\0'),
   () => {
+    if (secondaryPath.value && !store.openFiles.some((f) => f.path === secondaryPath.value)) {
+      secondaryPath.value = store.openFiles.find((f) => f.path !== primaryPath.value)?.path ?? null
+      if (splitMode.value !== 'none') showPathOn(secondaryEditor, secondaryPath.value)
+    }
+    if (primaryPath.value && !store.openFiles.some((f) => f.path === primaryPath.value)) {
+      primaryPath.value = store.activePath
+    }
     const keep = new Set(store.openFiles.map((f) => f.path))
     for (const [path, model] of models) {
       if (!keep.has(path)) {
         if (editor?.getModel() === model) editor.setModel(null)
+        if (secondaryEditor?.getModel() === model) secondaryEditor.setModel(null)
         model.dispose()
         models.delete(path)
       }
@@ -535,6 +753,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onReviewKey)
   editorCtxDisposable?.dispose()
   editorCtxDisposable = null
+  disposeSecondaryEditor()
   for (const model of models.values()) model.dispose()
   for (const model of origModels.values()) model.dispose()
   models.clear()
@@ -587,7 +806,9 @@ async function copyText(text: string) {
 }
 
 function activeEditor() {
-  return review.value ? diffEditor?.getModifiedEditor() || null : editor
+  if (review.value) return diffEditor?.getModifiedEditor() || null
+  if (splitMode.value !== 'none' && focusedPane.value === 'secondary') return secondaryEditor
+  return editor
 }
 
 function editorHasSelection() {
@@ -622,6 +843,26 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
     { id: 'sep-file', separator: true },
     { id: 'add-to-chat', label: t('editor.addToChat'), icon: 'chat' },
     { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
+    { id: 'open-terminal', label: t('editor.openInTerminal'), icon: 'terminal' },
+    { id: 'sep-split', separator: true },
+    {
+      id: 'split-right',
+      label: t('editor.splitRight'),
+      icon: 'panel-right',
+      disabled: Boolean(review.value),
+    },
+    {
+      id: 'split-down',
+      label: t('editor.splitDown'),
+      icon: 'panel-bottom',
+      disabled: Boolean(review.value),
+    },
+    {
+      id: 'close-split',
+      label: t('editor.closeSplit'),
+      icon: 'close',
+      disabled: splitMode.value === 'none',
+    },
     { id: 'sep-path', separator: true },
     { id: 'copy-relative', label: t('editor.copyRelativePath'), icon: 'path-relative' },
     { id: 'copy-absolute', label: t('editor.copyAbsolutePath'), icon: 'path-absolute' },
@@ -651,6 +892,16 @@ const tabMenuActions: Record<string, (path: string) => void | Promise<void>> = {
     await store.revealInTree(path)
     window.dispatchEvent(new Event('ca-open-explorer'))
   },
+  'open-terminal': (path) => {
+    window.dispatchEvent(new CustomEvent('ca-open-terminal', { detail: { cwd: store.parentPath(path) } }))
+  },
+  'split-right': async (path) => {
+    await splitEditor('right', path)
+  },
+  'split-down': async (path) => {
+    await splitEditor('down', path)
+  },
+  'close-split': () => closeSplit('primary'),
   'copy-relative': async (path) => copyText(path),
   'copy-absolute': async (path) => copyText(toAbsolutePath(path)),
   close: (path) => store.closeFile(path),
@@ -668,31 +919,87 @@ async function onTabMenuSelect(id: string) {
 
 const editorMenuItems = computed((): ContextMenuItem[] => {
   if (!editorMenu.value || !store.activePath) return []
+  const path = store.activePath
   const hasSel = editorHasSelection()
   const readOnly = editorReadOnly()
   const file = store.openFile
-  return [
-    { id: 'cut', label: t('editor.cut'), icon: 'cut', disabled: readOnly || !hasSel },
-    { id: 'copy', label: t('editor.copy'), icon: 'copy', disabled: !hasSel },
-    { id: 'paste', label: t('editor.paste'), icon: 'paste', disabled: readOnly },
-    { id: 'sep-edit', separator: true },
+  const inReview = Boolean(review.value)
+  const items: ContextMenuItem[] = []
+  if (inReview && review.value) {
+    items.push(
+      { id: 'accept-block', label: t('editor.acceptBlock'), icon: 'check' },
+      { id: 'reject-block', label: t('editor.rejectBlock'), icon: 'close', danger: true },
+      { id: 'sep-review', separator: true },
+    )
+  }
+  if (!inReview) {
+    items.push(
+      { id: 'cut', label: t('editor.cut'), icon: 'cut', disabled: readOnly || !hasSel },
+      { id: 'copy', label: t('editor.copy'), icon: 'copy', disabled: !hasSel },
+      { id: 'paste', label: t('editor.paste'), icon: 'paste', disabled: readOnly },
+      { id: 'sep-edit', separator: true },
+      {
+        id: 'format',
+        label: t('editor.formatDocument'),
+        icon: 'sparkles',
+        disabled: readOnly || !canFormatPath(path),
+      },
+      { id: 'sep-format', separator: true },
+    )
+  } else {
+    items.push(
+      { id: 'copy', label: t('editor.copy'), icon: 'copy', disabled: !hasSel },
+      { id: 'sep-edit', separator: true },
+    )
+  }
+  items.push(
     { id: 'add-selection', label: t('editor.addSelectionToChat'), icon: 'chat-plus', disabled: !hasSel },
     { id: 'add-to-chat', label: t('editor.addToChat'), icon: 'chat' },
     { id: 'sep-nav', separator: true },
     { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
+    { id: 'open-terminal', label: t('editor.openInTerminal'), icon: 'terminal' },
     { id: 'copy-relative', label: t('editor.copyRelativePath'), icon: 'path-relative' },
     { id: 'copy-absolute', label: t('editor.copyAbsolutePath'), icon: 'path-absolute' },
     { id: 'sep-file', separator: true },
-    { id: 'save', label: t('editor.save'), icon: 'save', disabled: !file || file.readonly || !file.dirty },
-    { id: 'reload', label: t('editor.reload'), icon: 'refresh' },
+    { id: 'save', label: t('editor.save'), icon: 'save', disabled: !file || file.readonly || !file.dirty || inReview },
+    { id: 'reload', label: t('editor.reload'), icon: 'refresh', disabled: inReview },
     { id: 'find', label: t('editor.find'), icon: 'search' },
-  ]
+  )
+  return items
 })
+
+async function formatActiveDocument() {
+  const path = store.activePath
+  const file = store.openFile
+  const ed = activeEditor()
+  if (!path || !file || !ed || editorReadOnly() || review.value) return
+  if (!canFormatPath(path)) return
+  const model = ed.getModel()
+  if (!model) return
+  const content = model.getValue()
+  const formatted = await formatDocumentText(path, content)
+  if (formatted == null || formatted === content) return
+  const full = model.getFullModelRange()
+  ed.pushUndoStop()
+  ed.executeEdits('format', [{ range: full, text: formatted, forceMoveMarkers: true }])
+  ed.pushUndoStop()
+  store.updateOpenContent(path, formatted)
+}
 
 async function onEditorMenuSelect(id: string) {
   const path = store.activePath
   if (!path) return
   const ed = activeEditor()
+  if (id === 'accept-block') {
+    const current = review.value
+    if (current) await store.acceptReview(current.path, current.blockId)
+    return
+  }
+  if (id === 'reject-block') {
+    const current = review.value
+    if (current) await store.rejectReview(current.path, current.blockId)
+    return
+  }
   if (id === 'cut') {
     const text = editorSelectionText()
     if (!text || editorReadOnly() || !ed) return
@@ -718,6 +1025,10 @@ async function onEditorMenuSelect(id: string) {
     }
     return
   }
+  if (id === 'format') {
+    await formatActiveDocument()
+    return
+  }
   if (id === 'add-selection') {
     const text = editorSelectionText()
     if (!text) return
@@ -734,6 +1045,11 @@ async function onEditorMenuSelect(id: string) {
   if (id === 'reveal') {
     await store.revealInTree(path)
     window.dispatchEvent(new Event('ca-open-explorer'))
+    return
+  }
+  if (id === 'open-terminal') {
+    const dir = store.parentPath(path)
+    window.dispatchEvent(new CustomEvent('ca-open-terminal', { detail: { cwd: dir } }))
     return
   }
   if (id === 'copy-relative') {
@@ -780,14 +1096,28 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           role="tab"
           class="ftab"
           :data-path="file.path"
-          :class="{ active: store.activePath === file.path }"
+          :class="{
+            active: store.activePath === file.path,
+            dragging: dragTabPath === file.path,
+            'drop-before': dropTabPath === file.path && dragTabPath && dragTabPath !== file.path,
+            'in-other-pane':
+              splitMode !== 'none' &&
+              file.path !== store.activePath &&
+              (file.path === primaryPath || file.path === secondaryPath),
+          }"
           :title="file.path"
           :aria-selected="store.activePath === file.path"
+          :draggable="true"
           tabindex="0"
-          @click="store.activateFile(file.path)"
-          @keydown.enter.prevent="store.activateFile(file.path)"
+          @click="activateTab(file.path)"
+          @keydown.enter.prevent="activateTab(file.path)"
           @auxclick="onTabAux(file.path, $event)"
           @contextmenu="onTabContext(file.path, $event)"
+          @dragstart="onTabDragStart(file.path, $event)"
+          @dragover="onTabDragOver(file.path, $event)"
+          @dragleave="onTabDragLeave(file.path)"
+          @drop="onTabDrop(file.path, $event)"
+          @dragend="onTabDragEnd"
         >
           <FileTreeIcon kind="file" :path="file.path" :size="16" />
           <span class="name">{{ fileName(file.path) }}{{ file.dirty ? ' •' : '' }}</span>
@@ -796,6 +1126,35 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
             <AppIcon name="close" :size="12" :stroke-width="1.75" />
           </button>
         </div>
+      </div>
+      <div class="file-bar-tools">
+        <button
+          type="button"
+          class="ghost-icon-btn"
+          :title="t('editor.splitRight')"
+          :disabled="!!review || store.openFiles.length === 0"
+          @click="splitEditor('right')"
+        >
+          <AppIcon name="panel-right" :size="15" :stroke-width="1.75" />
+        </button>
+        <button
+          type="button"
+          class="ghost-icon-btn"
+          :title="t('editor.splitDown')"
+          :disabled="!!review || store.openFiles.length === 0"
+          @click="splitEditor('down')"
+        >
+          <AppIcon name="panel-bottom" :size="15" :stroke-width="1.75" />
+        </button>
+        <button
+          v-if="splitMode !== 'none'"
+          type="button"
+          class="ghost-icon-btn"
+          :title="t('editor.closeSplit')"
+          @click="closeSplit('primary')"
+        >
+          <AppIcon name="close" :size="15" :stroke-width="1.75" />
+        </button>
       </div>
       <div v-if="canMarkdownPreview" class="md-toggle" role="group" aria-label="Markdown 预览">
         <button type="button" class="md-toggle-btn" :class="{ 'is-on': !mdPreview }" @click="mdPreview = false">Markdown</button>
@@ -869,7 +1228,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           type="button"
           class="action-btn is-reject"
           :title="t('editor.reject')"
-          @click="store.rejectReview(review.path)"
+          @click="store.rejectReview(review.path, review.blockId)"
         >
           <AppIcon name="close" :size="14" :stroke-width="1.75" />
           <span>{{ t('editor.reject') }}</span>
@@ -878,7 +1237,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           type="button"
           class="action-btn is-accept"
           :title="t('editor.accept')"
-          @click="store.acceptReview(review.path)"
+          @click="store.acceptReview(review.path, review.blockId)"
         >
           <AppIcon name="check" :size="14" :stroke-width="1.75" />
           <span>{{ t('editor.accept') }}</span>
@@ -886,23 +1245,53 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
       </div>
       </div>
     </div>
-    <div class="host-wrap">
-      <FilePreviewHost
-        v-if="showFilePreview && store.openFile"
-        :file="store.openFile"
-        class="host"
-      />
-      <MarkdownPreview
-        v-else-if="showMarkdownPreview && store.openFile"
-        :content="store.openFile.content"
-        :path="store.openFile.path"
-        class="host"
-      />
-      <div ref="host" class="host" :class="{ hidden: !!review || showMarkdownPreview || showFilePreview }" />
-      <div ref="diffHost" class="host" :class="{ hidden: !review }" />
-      <div v-if="!store.openFile" class="empty">
-        <AppIcon name="file" :size="28" />
-        <p>从侧栏打开文件</p>
+    <div
+      class="host-wrap"
+      :class="{
+        'split-right': splitMode === 'right',
+        'split-down': splitMode === 'down',
+      }"
+    >
+      <div
+        class="editor-pane"
+        :class="{ focused: splitMode !== 'none' && focusedPane === 'primary' }"
+        @mousedown="focusPane('primary')"
+      >
+        <FilePreviewHost
+          v-if="primaryShowFilePreview && primaryFile && !review"
+          :file="primaryFile"
+          class="host"
+        />
+        <MarkdownPreview
+          v-else-if="primaryShowMarkdownPreview && primaryFile"
+          :content="primaryFile.content"
+          :path="primaryFile.path"
+          class="host"
+        />
+        <div
+          ref="host"
+          class="host"
+          :class="{
+            hidden: !!review || primaryShowMarkdownPreview || primaryShowFilePreview,
+          }"
+        />
+        <div ref="diffHost" class="host" :class="{ hidden: !review || splitMode !== 'none' }" />
+        <div v-if="!panePath('primary') && !review" class="empty">
+          <AppIcon name="file" :size="28" />
+          <p>{{ t('editor.openFromSidebar') }}</p>
+        </div>
+      </div>
+      <div
+        v-if="splitMode !== 'none'"
+        class="editor-pane secondary"
+        :class="{ focused: focusedPane === 'secondary' }"
+        @mousedown="focusPane('secondary')"
+      >
+        <div ref="secondaryHost" class="host" />
+        <div v-if="!secondaryPath" class="empty">
+          <AppIcon name="file" :size="28" />
+          <p>{{ t('editor.splitEmpty') }}</p>
+        </div>
       </div>
     </div>
     <ContextMenu
@@ -993,6 +1382,26 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
 }
 .ftab-close:hover {
   opacity: 1 !important;
+}
+.ftab.dragging {
+  opacity: 0.45;
+}
+.ftab.drop-before {
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.ftab.in-other-pane {
+  color: var(--text-h);
+  opacity: 0.85;
+}
+.file-bar-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.file-bar-tools .ghost-icon-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
 }
 .name {
   overflow: hidden;
@@ -1175,9 +1584,37 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   min-height: 0;
   position: relative;
   background: var(--editor-bg);
+  display: flex;
+}
+.host-wrap.split-right {
+  flex-direction: row;
+}
+.host-wrap.split-down {
+  flex-direction: column;
+}
+.editor-pane {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  outline: none;
+}
+.editor-pane.secondary {
+  border-left: var(--border-width) solid var(--border);
+}
+.host-wrap.split-down .editor-pane.secondary {
+  border-left: 0;
+  border-top: var(--border-width) solid var(--border);
+}
+.editor-pane.focused {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 .host {
   height: 100%;
+  flex: 1;
+  min-height: 0;
   background: var(--editor-bg);
 }
 .host.hidden { display: none; }
@@ -1192,6 +1629,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   color: var(--text-muted);
   font-size: 13px;
   background: var(--editor-bg);
+  pointer-events: none;
 }
 .empty p { margin: 0; }
 </style>

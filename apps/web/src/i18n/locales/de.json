@@ -138,9 +138,15 @@
       "terminal": "Terminal",
       "llm": "Modelle",
       "ui": "Oberfläche",
-      "appearance": "Darstellung"
+      "appearance": "Darstellung",
+      "uploads": "Uploads",
+      "storage": "Speicher"
     },
     "languageLead": "Oberflächensprache wechseln. Wirkt sofort.",
+    "uploads": {
+      "hint": "auto (Standard: uploads unter dem SQLite-Datenverzeichnis), relativer oder absoluter Pfad. Speichern wirkt sofort ohne Neustart. Desktop kann Ordner wählen.",
+      "resolved": "Aktueller Pfad: {path}"
+    },
     "fields": {
       "agent": {
         "max_steps": "Max. Agent-Schritte",
@@ -162,6 +168,9 @@
         "theme": "Design",
         "font_size": "UI-Schriftgröße",
         "send_on_enter": "Senden mit Enter"
+      },
+      "uploads": {
+        "dir": "Upload-Verzeichnis"
       }
     },
     "enums": {
@@ -528,7 +537,11 @@
     "prevFile": "Vorherige Datei",
     "nextFile": "Nächste Datei",
     "diffCount": "Änderung {i}/{n}",
-    "openFromSidebar": "Datei in der Seitenleiste öffnen"
+    "openFromSidebar": "Datei in der Seitenleiste öffnen",
+    "splitRight": "Editor rechts teilen",
+    "splitDown": "Editor unten teilen",
+    "closeSplit": "Teilung schließen",
+    "splitEmpty": "Datei in diesem Bereich öffnen"
   },
   "search": {
     "title": "Suche",

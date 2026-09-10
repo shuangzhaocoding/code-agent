@@ -1336,6 +1336,21 @@ export const useAppStore = defineStore('app', () => {
     activePath.value = null
   }
 
+  function reorderOpenFiles(fromIndex: number, toIndex: number) {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return
+    const list = [...openFiles.value]
+    if (fromIndex >= list.length || toIndex >= list.length) return
+    const [item] = list.splice(fromIndex, 1)
+    list.splice(toIndex, 0, item)
+    openFiles.value = list
+  }
+
+  function moveOpenFile(path: string, toIndex: number) {
+    const from = openFiles.value.findIndex((f) => f.path === path)
+    if (from < 0) return
+    reorderOpenFiles(from, Math.max(0, Math.min(toIndex, openFiles.value.length - 1)))
+  }
+
   function updateOpenContent(path: string, content: string) {
     const file = openFiles.value.find((f) => f.path === path)
     if (!file || file.readonly || !isEditableKind(file.kind) || file.content === content) return
@@ -2203,6 +2218,8 @@ export const useAppStore = defineStore('app', () => {
     closeFilesToTheRight,
     closeFilesToTheLeft,
     closeAllFiles,
+    reorderOpenFiles,
+    moveOpenFile,
     updateOpenContent,
     saveOpenFile,
     reloadOpenFile,

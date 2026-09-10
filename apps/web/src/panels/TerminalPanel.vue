@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import { currentTheme, type Theme } from '@/theme'
 import AppIcon from '@/components/AppIcon.vue'
+import { takeTerminalCwd } from '@/utils/terminalOpen'
 
 const store = useAppStore()
 
@@ -159,11 +160,16 @@ function activateTab(id: string) {
   })
 }
 
-async function addTerminal() {
+async function addTerminal(cwd?: string) {
   if (!store.workspaceId) return
+  const body: { workspace_id: string; title?: string; cwd?: string } = {
+    workspace_id: store.workspaceId,
+    title: cwd ? undefined : `Terminal ${tabs.length + 1}`,
+  }
+  if (cwd) body.cwd = cwd
   const row = await api<{ id: string; title: string }>('/api/terminals', {
     method: 'POST',
-    body: JSON.stringify({ workspace_id: store.workspaceId, title: `Terminal ${tabs.length + 1}` }),
+    body: JSON.stringify(body),
   })
   const entry: TermEntry = {
     id: row.id,
@@ -176,6 +182,16 @@ async function addTerminal() {
   createAndMount(entry)
   activateTab(entry.id)
   await connectEntry(entry)
+}
+
+async function flushQueuedTerminal() {
+  const queued = takeTerminalCwd()
+  if (queued === undefined) return
+  try {
+    await addTerminal(queued || undefined)
+  } catch {
+    /* ignore */
+  }
 }
 
 async function removeTerminal(id: string) {
@@ -243,7 +259,9 @@ function onDragStart(e: MouseEvent) {
 
 onMounted(async () => {
   window.addEventListener('ca-theme', onTheme as EventListener)
+  window.addEventListener('ca-terminal-cwd', flushQueuedTerminal)
   await loadExisting()
+  await flushQueuedTerminal()
 })
 
 watch(() => store.workspaceId, async () => {
@@ -260,6 +278,7 @@ watch(() => store.workspaceId, async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('ca-theme', onTheme as EventListener)
+  window.removeEventListener('ca-terminal-cwd', flushQueuedTerminal)
   for (const entry of tabs) {
     entry.ws?.close()
     entry.observer?.disconnect()

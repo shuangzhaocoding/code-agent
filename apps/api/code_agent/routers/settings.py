@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from code_agent.config import SETTINGS_SCHEMA, STORAGE_SETTING_KEYS, merge_user_config, settings
+from code_agent.config import SETTINGS_SCHEMA, STORAGE_SETTING_KEYS, UPLOADS_SETTING_KEYS, merge_user_config, settings
 from code_agent.db.models import Setting
 from code_agent.plugins.base import registry
 
@@ -32,12 +32,14 @@ async def get_settings():
         "config": settings.raw(),
         "runtime": runtime_public(),
         "storage": storage_public(),
+        "uploads_resolved": str(settings.uploads_dir),
     }
 
 
 @router.patch("/settings")
 async def patch_settings(body: dict[str, Any]):
     storage_patch: dict[str, Any] = {}
+    uploads_patch: dict[str, Any] = {}
     for key, value in body.items():
         if key not in SETTINGS_SCHEMA["properties"]:
             continue
@@ -54,8 +56,13 @@ async def patch_settings(body: dict[str, Any]):
             bucket[parts[1]] = value
         if key in STORAGE_SETTING_KEYS and len(parts) == 2:
             storage_patch[parts[1]] = value
+        if key in UPLOADS_SETTING_KEYS and len(parts) == 2:
+            uploads_patch[parts[1]] = value
     if storage_patch:
         merge_user_config("storage", storage_patch)
+    if uploads_patch:
+        merge_user_config("uploads", uploads_patch)
+        settings.refresh_uploads_dir()
     return await get_settings()
 
 

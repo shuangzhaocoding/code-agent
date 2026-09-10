@@ -34,6 +34,7 @@ async def _load_stored_settings() -> None:
         if len(parts) != 2:
             continue
         settings._cfg.setdefault(parts[0], {})[parts[1]] = row.value_json
+    settings.refresh_uploads_dir()
 
 
 async def _seed_llm_from_env() -> None:
