@@ -18,6 +18,8 @@
     "edit": "Bearbeiten",
     "copy": "Kopieren",
     "copied": "Kopiert",
+    "cut": "Ausschneiden",
+    "paste": "Einfügen",
     "refresh": "Aktualisieren",
     "search": "Suchen",
     "filter": "Filtern",
@@ -308,6 +310,8 @@
     "mentionTabs": "Erwähnungstyp",
     "mentionTabFiles": "Dateien",
     "mentionTabSkills": "Skills",
+    "mentionSearchFiles": "Dateien suchen…",
+    "mentionSearchSkills": "Skills suchen…",
     "mentionFilesEmpty": "Keine passenden Dateien",
     "mentionSkillsEmpty": "Keine Skills verfügbar",
     "mentionSkillNoDesc": "Keine Beschreibung",
@@ -485,7 +489,11 @@
     "deleteSummary": "{path} löschen? Das kann nicht rückgängig gemacht werden.",
     "fileName": "Dateiname",
     "dirName": "Ordnername",
-    "addToChat": "Zum Chat hinzufügen"
+    "addToChat": "Zum Chat hinzufügen",
+    "addToNewChat": "Zu neuem Chat hinzufügen",
+    "copyRelativePath": "Relativen Pfad kopieren",
+    "copyAbsolutePath": "Absoluten Pfad kopieren",
+    "copyFail": "Kopieren fehlgeschlagen"
   },
   "editor": {
     "close": "Schließen",

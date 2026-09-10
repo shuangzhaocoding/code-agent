@@ -18,6 +18,8 @@
     "edit": "편집",
     "copy": "복사",
     "copied": "복사됨",
+    "cut": "잘라내기",
+    "paste": "붙여넣기",
     "refresh": "새로고침",
     "search": "검색",
     "filter": "필터",
@@ -307,6 +309,8 @@
     "mentionTabs": "멘션 유형",
     "mentionTabFiles": "파일",
     "mentionTabSkills": "Skill",
+    "mentionSearchFiles": "파일 검색…",
+    "mentionSearchSkills": "Skill 검색…",
     "mentionFilesEmpty": "일치하는 파일 없음",
     "mentionSkillsEmpty": "사용 가능한 Skill 없음",
     "mentionSkillNoDesc": "설명 없음",
@@ -484,7 +488,11 @@
     "deleteSummary": "{path}을(를) 삭제할까요? 되돌릴 수 없습니다.",
     "fileName": "파일 이름",
     "dirName": "폴더 이름",
-    "addToChat": "채팅에 추가"
+    "addToChat": "채팅에 추가",
+    "addToNewChat": "새 채팅에 추가",
+    "copyRelativePath": "상대 경로 복사",
+    "copyAbsolutePath": "절대 경로 복사",
+    "copyFail": "복사 실패"
   },
   "editor": {
     "close": "닫기",

@@ -18,6 +18,8 @@
     "edit": "Edit",
     "copy": "Copy",
     "copied": "Copied",
+    "cut": "Cut",
+    "paste": "Paste",
     "refresh": "Refresh",
     "search": "Search",
     "filter": "Filter",
@@ -343,6 +345,8 @@
     "mentionTabs": "Mention type",
     "mentionTabFiles": "Files",
     "mentionTabSkills": "Skills",
+    "mentionSearchFiles": "Search files…",
+    "mentionSearchSkills": "Search skills…",
     "mentionFilesEmpty": "No matching files",
     "mentionSkillsEmpty": "No skills available",
     "mentionSkillNoDesc": "No description",
@@ -520,7 +524,11 @@
     "deleteSummary": "Delete {path}? This cannot be undone.",
     "fileName": "File name",
     "dirName": "Folder name",
-    "addToChat": "Add to chat"
+    "addToChat": "Add to chat",
+    "addToNewChat": "Add to new chat",
+    "copyRelativePath": "Copy relative path",
+    "copyAbsolutePath": "Copy absolute path",
+    "copyFail": "Failed to copy"
   },
   "editor": {
     "close": "Close",

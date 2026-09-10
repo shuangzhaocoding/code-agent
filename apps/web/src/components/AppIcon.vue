@@ -28,6 +28,7 @@ export type AppIconName =
   | 'check'
   | 'dot'
   | 'chat'
+  | 'chat-plus'
   | 'settings'
   | 'sliders'
   | 'tune'
@@ -36,6 +37,10 @@ export type AppIconName =
   | 'refresh'
   | 'loader'
   | 'copy'
+  | 'cut'
+  | 'paste'
+  | 'path-relative'
+  | 'path-absolute'
   | 'close-others'
   | 'close-left'
   | 'close-right'
@@ -140,6 +145,11 @@ const paths: Record<string, string[]> = {
   chat: [
     'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   ],
+  'chat-plus': [
+    'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    'M12 7v6',
+    'M9 10h6',
+  ],
   sliders: [
     'M4 7h4',
     'M4 12h4',
@@ -172,6 +182,29 @@ const paths: Record<string, string[]> = {
   copy: [
     'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z',
     'M4 16V6a2 2 0 0 1 2-2h10',
+  ],
+  cut: [
+    'M6 6a2 2 0 1 0 0.01 0',
+    'M6 18a2 2 0 1 0 0.01 0',
+    'M8.5 7.5 19 18',
+    'M8.5 16.5 19 6',
+  ],
+  paste: [
+    'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2',
+    'M9 2h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z',
+  ],
+  // Same copy shell; short path lines = workspace-relative
+  'path-relative': [
+    'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z',
+    'M4 16V6a2 2 0 0 1 2-2h10',
+    'M11 13h6',
+    'M11 17h4',
+  ],
+  // Same copy shell; leading slash = absolute
+  'path-absolute': [
+    'M8 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2Z',
+    'M4 16V6a2 2 0 0 1 2-2h10',
+    'M14.5 12.5 12 18',
   ],
   // Keep current tab, dismiss neighbors with X marks
   'close-others': [

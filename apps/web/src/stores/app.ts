@@ -424,6 +424,7 @@ export const useAppStore = defineStore('app', () => {
       gitRepoOk.value = false
       sessionTreeMarks.value = {}
       ackedTreeMarks.value = {}
+      fsClipboard.value = null
       // Critical path first — git / editor restore are deferred so chat UI unlocks sooner.
       await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders()])
       void loadGitChangedPaths()
@@ -708,25 +709,108 @@ export const useAppStore = defineStore('app', () => {
       method: 'POST',
       body: JSON.stringify({ path: from, new_path: to }),
     })
-    if (openFiles.value.some((f) => f.path === from)) {
+    if (openFiles.value.some((f) => f.path === from || f.path.startsWith(`${from}/`))) {
       openFiles.value = openFiles.value.map((f) => {
-        if (f.path !== from) return f
-        const next: typeof f = { ...f, path: to }
+        if (f.path !== from && !f.path.startsWith(`${from}/`)) return f
+        const nextPath = f.path === from ? to : `${to}${f.path.slice(from.length)}`
+        const next: typeof f = { ...f, path: nextPath }
         if (isPreviewKind(f.kind) && workspaceId.value) {
-          next.previewUrl = rawFileUrl(workspaceId.value, to)
+          next.previewUrl = rawFileUrl(workspaceId.value, nextPath)
         }
         return next
       })
-      if (activePath.value === from) activePath.value = to
+      if (activePath.value === from || activePath.value?.startsWith(`${from}/`)) {
+        activePath.value =
+          activePath.value === from ? to : `${to}${activePath.value!.slice(from.length)}`
+      }
     }
     const session = { ...sessionTreeMarks.value }
-    if (session[from]) {
-      session[to] = session[from]
-      delete session[from]
-      sessionTreeMarks.value = session
+    for (const key of Object.keys(session)) {
+      if (key === from || key.startsWith(`${from}/`)) {
+        const nextKey = key === from ? to : `${to}${key.slice(from.length)}`
+        session[nextKey] = session[key]
+        delete session[key]
+      }
     }
+    sessionTreeMarks.value = session
+    await loadTree(parentPath(from) || '')
     await loadTree(parentPath(to) || '')
     void loadGitChangedPaths()
+  }
+
+  async function copyEntry(from: string, to: string) {
+    if (!workspaceId.value) return
+    await api(`/api/workspaces/${workspaceId.value}/copy`, {
+      method: 'POST',
+      body: JSON.stringify({ path: from, new_path: to }),
+    })
+    await loadTree(parentPath(to) || '')
+    const parent = parentPath(to)
+    if (parent) setExpanded(new Set([...expanded.value, parent]))
+    sessionTreeMarks.value = { ...sessionTreeMarks.value, [to]: 'added' }
+    void loadGitChangedPaths()
+  }
+
+  type FsClipboard = { mode: 'copy' | 'cut'; path: string; is_dir: boolean; workspace_id: string }
+  const fsClipboard = ref<FsClipboard | null>(null)
+
+  function setFsClipboard(mode: 'copy' | 'cut', item: { path: string; is_dir: boolean }) {
+    if (!workspaceId.value || !item.path) {
+      fsClipboard.value = null
+      return
+    }
+    fsClipboard.value = {
+      mode,
+      path: item.path,
+      is_dir: item.is_dir,
+      workspace_id: workspaceId.value,
+    }
+  }
+
+  function clearFsClipboard() {
+    fsClipboard.value = null
+  }
+
+  function uniqueChildPath(dir: string, name: string): string {
+    const base = joinPath(dir, name)
+    if (!childrenOf(dir).some((i) => i.path === base)) return base
+    const dot = name.lastIndexOf('.')
+    const hasExt = !name.startsWith('.') && dot > 0
+    const stem = hasExt ? name.slice(0, dot) : name
+    const ext = hasExt ? name.slice(dot) : ''
+    for (let i = 1; i < 1000; i++) {
+      const candidate = joinPath(dir, i === 1 ? `${stem} copy${ext}` : `${stem} copy ${i}${ext}`)
+      if (!childrenOf(dir).some((item) => item.path === candidate)) return candidate
+    }
+    return joinPath(dir, `${stem} copy ${Date.now()}${ext}`)
+  }
+
+  async function pasteFsClipboard(destDir: string) {
+    const clip = fsClipboard.value
+    if (!clip || !workspaceId.value || clip.workspace_id !== workspaceId.value) return null
+    const src = clip.path
+    const name = src.split('/').filter(Boolean).pop() || src
+    // Pasting a folder into itself / descendant is invalid.
+    if (clip.is_dir && (destDir === src || destDir.startsWith(`${src}/`))) {
+      throw new Error('Cannot paste into itself')
+    }
+    await loadTree(destDir)
+    let dest = uniqueChildPath(destDir, name)
+    // When cutting into the same directory with unique name, still ok (creates "copy" name only on conflict).
+    // If cut and same parent and name free... uniqueChildPath returns same path if free - moving onto itself is no-op.
+    if (clip.mode === 'cut' && dest === src) {
+      clearFsClipboard()
+      return src
+    }
+    if (clip.mode === 'copy') {
+      await copyEntry(src, dest)
+    } else {
+      // If unique renamed due to conflict while cutting, rename to that path.
+      await renameEntry(src, dest)
+      clearFsClipboard()
+    }
+    if (destDir) setExpanded(new Set([...expanded.value, destDir]))
+    return dest
   }
 
   async function deleteEntry(relPath: string) {
@@ -2062,7 +2146,12 @@ export const useAppStore = defineStore('app', () => {
     joinPath,
     createEntry,
     renameEntry,
+    copyEntry,
     deleteEntry,
+    fsClipboard,
+    setFsClipboard,
+    clearFsClipboard,
+    pasteFsClipboard,
     openPath,
     openPathAtLine,
     openAgentFile,

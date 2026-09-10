@@ -48,7 +48,7 @@ async def run_agent_graph(
 
     from code_agent.llm.hub import model_has_vision
 
-    model, model_row, switch_info = await resolve_chat_model(
+    model, model_row, _switch_info = await resolve_chat_model(
         conv.model_id,
         thinking_level,
         need_vision=need_vision,
@@ -61,31 +61,6 @@ async def run_agent_graph(
     vision = model_has_vision(model_row)
     if need_vision and not vision:
         raise RuntimeError("model.unsupported_vision")
-
-    if switch_info and switch_info.get("reason") == "vision":
-        snap = dict(run.model_snapshot or {})
-        snap["auto_vision_switch"] = switch_info
-        snap["effective_model_id"] = str(model_row.id)
-        snap["effective_model"] = model_row.model_id
-        run.model_snapshot = snap
-        await run.save(update_fields=["model_snapshot"])
-        notice_id = new_id()
-        notice = (
-            f"已自动切换到视觉模型 **{switch_info['to_name']}**"
-            f"（`{switch_info['to_model_id']}`），"
-            f"原模型 `{switch_info['from_name']}` 不支持图片理解。"
-        )
-        await broker.publish(
-            run_id,
-            "block.started",
-            {
-                "block_id": notice_id,
-                "block_type": "assistant.markdown",
-                "meta": {"kind": "model_switch", "auto_vision_switch": switch_info},
-            },
-        )
-        await broker.publish(run_id, "block.delta", {"block_id": notice_id, "text": notice})
-        await broker.publish(run_id, "block.completed", {"block_id": notice_id, "status": "ok"})
 
     set_tool_context(
         run_id,

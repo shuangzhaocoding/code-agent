@@ -15,6 +15,12 @@ const props = defineProps<{
 
 const store = useAppStore()
 const mark = computed(() => store.fileTreeMark(props.item.path, props.item.is_dir))
+const isCut = computed(() => {
+  const clip = store.fsClipboard
+  if (!clip || clip.mode !== 'cut' || clip.workspace_id !== store.workspaceId) return false
+  const src = clip.path
+  return props.item.path === src || props.item.path.startsWith(`${src}/`)
+})
 const emit = defineEmits<{
   context: [e: MouseEvent, item: FsItem]
   select: [item: FsItem]
@@ -60,8 +66,9 @@ function onRowClick() {
     <button
       type="button"
       class="row"
-      :class="{ active: store.activePath === item.path }"
+      :class="{ active: store.activePath === item.path, cut: isCut }"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
+      :aria-grabbed="isCut ? 'true' : undefined"
       @click="onRowClick"
       @contextmenu="emit('context', $event, item)"
     >
@@ -147,6 +154,18 @@ function onRowClick() {
 }
 .row:hover { background: var(--bg-muted); }
 .row.active { background: var(--primary-soft); color: var(--primary); }
+.row.cut {
+  opacity: 0.42;
+  color: var(--text-muted);
+}
+.row.cut.active {
+  opacity: 0.55;
+  color: color-mix(in srgb, var(--primary) 70%, var(--text-muted));
+}
+.row.cut :deep(.file-tree-icon),
+.row.cut .twist {
+  opacity: 0.85;
+}
 .twist {
   width: 8px;
   height: 8px;

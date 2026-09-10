@@ -136,6 +136,11 @@ class EntryRename(BaseModel):
     new_path: str
 
 
+class EntryCopy(BaseModel):
+    path: str
+    new_path: str
+
+
 class MkdirIn(BaseModel):
     parent: str
     name: str
@@ -668,6 +673,27 @@ async def rename_entry(workspace_id: str, body: EntryRename):
         raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
     await backend.rename(body.path, body.new_path)
     return {"ok": True, "path": body.new_path}
+
+
+@router.post("/{workspace_id}/copy")
+async def copy_entry(workspace_id: str, body: EntryCopy):
+    src = (body.path or "").strip()
+    dest = (body.new_path or "").strip()
+    if not src or not dest or src in {".", "/"} or dest in {".", "/"}:
+        raise HTTPException(status_code=400, detail={"code": "path.invalid"})
+    if is_protected(src) or is_protected(dest):
+        raise HTTPException(status_code=403, detail={"code": "path.protected"})
+    # Prevent copying a directory into itself / a descendant.
+    if dest == src or dest.startswith(f"{src.rstrip('/')}/"):
+        raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "Cannot copy into itself"})
+    ws = await _get_ws(workspace_id)
+    backend = await get_workspace_backend(ws)
+    if not await backend.exists(src):
+        raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+    if await backend.exists(dest):
+        raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
+    await backend.copy(src, dest)
+    return {"ok": True, "path": dest}
 
 
 @router.delete("/{workspace_id}/entries")

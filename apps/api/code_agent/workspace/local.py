@@ -79,6 +79,23 @@ class LocalWorkspaceBackend:
 
         await run_sync(_rename)
 
+    async def copy(self, src: str, dest: str) -> None:
+        sp = path_tools.resolve_in_workspace(self.root_path, src)
+        dp = path_tools.resolve_in_workspace(self.root_path, dest)
+
+        def _copy() -> None:
+            if not sp.exists():
+                raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+            if dp.exists():
+                raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
+            dp.parent.mkdir(parents=True, exist_ok=True)
+            if sp.is_dir():
+                shutil.copytree(sp, dp)
+            else:
+                shutil.copy2(sp, dp)
+
+        await run_sync(_copy)
+
     async def delete(self, rel: str) -> None:
         path = path_tools.resolve_in_workspace(self.root_path, rel)
 

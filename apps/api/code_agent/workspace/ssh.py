@@ -210,6 +210,32 @@ class SshWorkspaceBackend:
                 pass
         await sftp.rename(sp, dp)
 
+    async def copy(self, src: str, dest: str) -> None:
+        if not await self.exists(src):
+            raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+        if await self.exists(dest):
+            raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "Already exists"})
+        sp = await self._abs(src)
+        dp = await self._abs(dest)
+        parent = posixpath.dirname(dp)
+        if parent and parent != "/":
+            sftp = await self._sftp()
+            try:
+                await sftp.makedirs(parent)
+            except Exception:
+                pass
+        # Prefer remote cp so directories recurse with permissions preserved.
+        code, _out, err = await self.run_command(
+            f"cp -a -- {shlex.quote(sp)} {shlex.quote(dp)}",
+            cwd=".",
+            timeout=300,
+        )
+        if code != 0:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "copy.failed", "message": (err or "copy failed").strip()[:500]},
+            )
+
     async def delete(self, rel: str) -> None:
         sftp = await self._sftp()
         target = await self._abs(rel)

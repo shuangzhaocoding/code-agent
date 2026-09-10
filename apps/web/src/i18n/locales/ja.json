@@ -18,6 +18,8 @@
     "edit": "編集",
     "copy": "コピー",
     "copied": "コピーしました",
+    "cut": "切り取り",
+    "paste": "貼り付け",
     "refresh": "更新",
     "search": "検索",
     "filter": "絞り込み",
@@ -307,6 +309,8 @@
     "mentionTabs": "メンション種別",
     "mentionTabFiles": "ファイル",
     "mentionTabSkills": "Skill",
+    "mentionSearchFiles": "ファイルを検索…",
+    "mentionSearchSkills": "Skill を検索…",
     "mentionFilesEmpty": "一致するファイルがありません",
     "mentionSkillsEmpty": "利用可能な Skill がありません",
     "mentionSkillNoDesc": "説明なし",
@@ -484,7 +488,11 @@
     "deleteSummary": "{path} を削除しますか？元に戻せません。",
     "fileName": "ファイル名",
     "dirName": "フォルダー名",
-    "addToChat": "チャットに追加"
+    "addToChat": "チャットに追加",
+    "addToNewChat": "新しいチャットに追加",
+    "copyRelativePath": "相対パスをコピー",
+    "copyAbsolutePath": "絶対パスをコピー",
+    "copyFail": "コピーに失敗しました"
   },
   "editor": {
     "close": "閉じる",

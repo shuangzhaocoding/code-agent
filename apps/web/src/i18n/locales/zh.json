@@ -18,6 +18,8 @@
     "edit": "编辑",
     "copy": "复制",
     "copied": "已复制",
+    "cut": "剪切",
+    "paste": "粘贴",
     "refresh": "刷新",
     "search": "搜索",
     "filter": "筛选",
@@ -343,6 +345,8 @@
     "mentionTabs": "提及类型",
     "mentionTabFiles": "文件",
     "mentionTabSkills": "Skill",
+    "mentionSearchFiles": "搜索文件…",
+    "mentionSearchSkills": "搜索 Skill…",
     "mentionFilesEmpty": "没有匹配的文件",
     "mentionSkillsEmpty": "没有可用的 Skill",
     "mentionSkillNoDesc": "暂无描述",
@@ -520,7 +524,11 @@
     "deleteSummary": "确定删除 {path}？此操作不可撤销。",
     "fileName": "文件名",
     "dirName": "目录名",
-    "addToChat": "添加到对话"
+    "addToChat": "添加到对话框",
+    "addToNewChat": "添加到新聊天",
+    "copyRelativePath": "复制相对路径",
+    "copyAbsolutePath": "复制绝对路径",
+    "copyFail": "复制失败"
   },
   "editor": {
     "close": "关闭",

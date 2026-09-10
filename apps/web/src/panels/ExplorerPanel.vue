@@ -179,6 +179,96 @@ function addToChat() {
   window.dispatchEvent(new Event('ca-focus-agent'))
 }
 
+async function addToNewChat() {
+  const item = menu.value?.item
+  if (!item) return
+  const detail = { name: item.name, path: item.path, is_dir: item.is_dir }
+  closeMenu()
+  window.dispatchEvent(new Event('ca-focus-agent'))
+  try {
+    await store.newChat()
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+    return
+  }
+  await nextTick()
+  await nextTick()
+  window.dispatchEvent(new CustomEvent('ca-add-chat-mention', { detail }))
+  window.dispatchEvent(new Event('ca-focus-agent'))
+}
+
+function toAbsolutePath(rel: string): string {
+  const root = (store.workspace?.root_path || '').trim()
+  if (!root) return rel
+  if (!rel) return root
+  const winStyle = /^[A-Za-z]:[\\/]/.test(root) || root.includes('\\')
+  const sep = winStyle ? '\\' : '/'
+  const normalizedRoot = root.replace(/[\\/]+$/, '')
+  const normalizedRel = rel.replace(/^[\\/]+/, '').replace(/[\\/]+/g, sep)
+  return `${normalizedRoot}${sep}${normalizedRel}`
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    error.value = t('explorer.copyFail')
+  }
+}
+
+async function copyRelativePath() {
+  const item = menu.value?.item
+  if (!item) return
+  closeMenu()
+  await copyText(item.path)
+}
+
+async function copyAbsolutePath() {
+  const item = menu.value?.item
+  if (!item) return
+  closeMenu()
+  await copyText(toAbsolutePath(item.path))
+}
+
+function onCopyEntry() {
+  const item = menu.value?.item
+  if (!item) return
+  store.setFsClipboard('copy', item)
+  closeMenu()
+}
+
+function onCutEntry() {
+  const item = menu.value?.item
+  if (!item) return
+  store.setFsClipboard('cut', item)
+  closeMenu()
+}
+
+async function onPasteEntry() {
+  closeMenu()
+  const dir = targetDir()
+  try {
+    await store.pasteFsClipboard(dir)
+    error.value = ''
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+const canPaste = computed(() => {
+  const clip = store.fsClipboard
+  if (!clip || !store.workspaceId || clip.workspace_id !== store.workspaceId) return false
+  const dir = menu.value
+    ? menu.value.item
+      ? menu.value.item.is_dir
+        ? menu.value.item.path
+        : store.parentPath(menu.value.item.path)
+      : ''
+    : targetDir()
+  if (clip.is_dir && (dir === clip.path || dir.startsWith(`${clip.path}/`))) return false
+  return true
+})
+
 function searchIn(path: string) {
   closeMenu()
   store.openSearch(path ? { include: path } : { clearInclude: true, include: null })
@@ -251,6 +341,7 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
       />
     </div>
     <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+      <!-- 新建 -->
       <button type="button" @click="startCreate('file')">
         <AppIcon class="ctx-ico" name="file-plus" :size="15" />
         <span>{{ t('explorer.newFile') }}</span>
@@ -259,22 +350,68 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
         <AppIcon class="ctx-ico" name="folder-plus" :size="15" />
         <span>{{ t('explorer.newDir') }}</span>
       </button>
-      <button v-if="menu.item && !menu.item.is_dir" type="button" @click="onDownload">
-        <AppIcon class="ctx-ico" name="download" :size="15" />
-        <span>{{ t('common.download') }}</span>
-      </button>
-      <button v-if="menu.item" type="button" @click="addToChat">
-        <AppIcon class="ctx-ico" name="chat" :size="15" />
-        <span>{{ t('explorer.addToChat') }}</span>
-      </button>
-      <button v-if="menu.item" type="button" @click="startRename">
-        <AppIcon class="ctx-ico" name="pencil" :size="15" />
-        <span>{{ t('common.rename') }}</span>
-      </button>
-      <button v-if="menu.item" type="button" class="danger" @click="onDelete">
-        <AppIcon class="ctx-ico" name="trash" :size="15" />
-        <span>{{ t('common.delete') }}</span>
-      </button>
+
+      <!-- 对话 -->
+      <template v-if="menu.item">
+        <div class="ctx-sep" />
+        <button type="button" @click="addToChat">
+          <AppIcon class="ctx-ico" name="chat" :size="15" />
+          <span>{{ t('explorer.addToChat') }}</span>
+        </button>
+        <button type="button" @click="addToNewChat">
+          <AppIcon class="ctx-ico" name="chat-plus" :size="15" />
+          <span>{{ t('explorer.addToNewChat') }}</span>
+        </button>
+      </template>
+
+      <!-- 剪贴板：复制 / 剪切 / 粘贴 -->
+      <template v-if="menu.item || canPaste">
+        <div class="ctx-sep" />
+        <button v-if="menu.item" type="button" @click="onCopyEntry">
+          <AppIcon class="ctx-ico" name="copy" :size="15" />
+          <span>{{ t('common.copy') }}</span>
+        </button>
+        <button v-if="menu.item" type="button" @click="onCutEntry">
+          <AppIcon class="ctx-ico" name="cut" :size="15" />
+          <span>{{ t('common.cut') }}</span>
+        </button>
+        <button v-if="canPaste" type="button" @click="onPasteEntry">
+          <AppIcon class="ctx-ico" name="paste" :size="15" />
+          <span>{{ t('common.paste') }}</span>
+        </button>
+      </template>
+
+      <!-- 复制路径 -->
+      <template v-if="menu.item">
+        <div class="ctx-sep" />
+        <button type="button" @click="copyRelativePath">
+          <AppIcon class="ctx-ico" name="path-relative" :size="15" />
+          <span>{{ t('explorer.copyRelativePath') }}</span>
+        </button>
+        <button type="button" @click="copyAbsolutePath">
+          <AppIcon class="ctx-ico" name="path-absolute" :size="15" />
+          <span>{{ t('explorer.copyAbsolutePath') }}</span>
+        </button>
+      </template>
+
+      <!-- 文件操作 -->
+      <template v-if="menu.item">
+        <div class="ctx-sep" />
+        <button v-if="!menu.item.is_dir" type="button" @click="onDownload">
+          <AppIcon class="ctx-ico" name="download" :size="15" />
+          <span>{{ t('common.download') }}</span>
+        </button>
+        <button type="button" @click="startRename">
+          <AppIcon class="ctx-ico" name="pencil" :size="15" />
+          <span>{{ t('common.rename') }}</span>
+        </button>
+        <button type="button" class="danger" @click="onDelete">
+          <AppIcon class="ctx-ico" name="trash" :size="15" />
+          <span>{{ t('common.delete') }}</span>
+        </button>
+      </template>
+
+      <!-- 搜索 -->
       <div class="ctx-sep" />
       <button v-if="menuDir" type="button" @click="searchIn(menuDir)">
         <AppIcon class="ctx-ico" name="search" :size="15" />

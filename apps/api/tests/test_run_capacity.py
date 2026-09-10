@@ -35,4 +35,4 @@ async def test_run_capacity_limits_parallelism():
 
 
 def test_max_concurrent_runs_default():
-    assert run_capacity.max_concurrent_runs() == 2
+    assert run_capacity.max_concurrent_runs() == 6

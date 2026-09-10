@@ -69,10 +69,12 @@ async def resolve_chat_model(
 ):
     """Resolve runtime chat model.
 
-    May auto-switch:
-    - reasoner ↔ chat based on thinking level (same provider pair)
-    - to a vision-capable model when need_vision and current model cannot see images
+    May auto-switch reasoner ↔ chat based on thinking level (same provider pair).
+    Does not auto-switch to a vision model; callers must select one when images are required.
+
+    ``need_vision`` / ``prefer_tools`` are kept for call-site compatibility and are unused.
     """
+    _ = (need_vision, prefer_tools)
     level = normalize_thinking_level(thinking_level)
     thinking = thinking_enabled(level)
     chat, row = await get_chat_model(model_pk)
@@ -99,28 +101,6 @@ async def resolve_chat_model(
             if _looks_reasoner(sibling.model_id) == want_reasoner:
                 return sibling
         return None
-
-    # Vision first: images require a vision model for the whole turn
-    if need_vision and not model_has_vision(row):
-        pick = await pick_vision_model(
-            preferred_provider_id=row.provider_id,
-            prefer_tools=prefer_tools,
-            exclude_id=row.id,
-        )
-        if pick:
-            switch_info = {
-                "reason": "vision",
-                "from_id": str(row.id),
-                "from_model_id": row.model_id,
-                "from_name": row.display_name or row.model_id,
-                "to_id": str(pick.id),
-                "to_model_id": pick.model_id,
-                "to_name": pick.display_name or pick.model_id,
-            }
-            chat, row = await get_chat_model(str(pick.id))
-            if not row:
-                return None, None, switch_info
-            siblings = await LlmModel.filter(provider_id=row.provider_id, enabled=True)
 
     caps = row.capabilities_json or {}
     can_think = supports_thinking(caps)

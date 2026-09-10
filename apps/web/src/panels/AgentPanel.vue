@@ -302,9 +302,12 @@ type SkillMentionItem = {
 const mentionOpen = ref(false)
 const mentionTab = ref<'files' | 'skills'>('files')
 const mentionQuery = ref('')
+const mentionSearch = ref('')
+const mentionSearchFocused = ref(false)
 const mentionDir = ref('')
 const mentionActiveIdx = ref(0)
 const mentionFiles = ref<MentionItem[]>([])
+const mentionSearchInput = ref<HTMLInputElement | null>(null)
 
 function resolvePinnedMentionItem(): MentionItem | null {
   const path = store.activePath
@@ -317,14 +320,16 @@ function resolvePinnedMentionItem(): MentionItem | null {
   return { name, path, is_dir: !isFile }
 }
 
+const mentionFilter = computed(() => mentionSearch.value.trim().toLowerCase())
+
 const mentionItems = computed(() => {
   const dir = mentionDir.value
-  const q = mentionQuery.value.toLowerCase()
+  const q = mentionFilter.value
   let items = store.childrenOf(dir)
-  if (q) items = items.filter((i) => i.name.toLowerCase().includes(q))
+  if (q) items = items.filter((i) => i.name.toLowerCase().includes(q) || i.path.toLowerCase().includes(q))
   if (!dir) {
     const pinned = resolvePinnedMentionItem()
-    if (pinned && (!q || pinned.name.toLowerCase().includes(q))) {
+    if (pinned && (!q || pinned.name.toLowerCase().includes(q) || pinned.path.toLowerCase().includes(q))) {
       items = [pinned, ...items.filter((i) => i.path !== pinned.path)]
     }
   }
@@ -332,7 +337,7 @@ const mentionItems = computed(() => {
 })
 
 const mentionSkillItems = computed<SkillMentionItem[]>(() => {
-  const q = mentionQuery.value.toLowerCase()
+  const q = mentionFilter.value
   return (store.skills as SkillMentionItem[])
     .filter((s) => !s.invalid_reason)
     .filter((s) => {
@@ -343,12 +348,25 @@ const mentionSkillItems = computed<SkillMentionItem[]>(() => {
 
 const activeSkillName = computed(() => store.conversationSkillName())
 
+const mentionSearchPlaceholder = computed(() =>
+  mentionTab.value === 'files' ? t('chat.mentionSearchFiles') : t('chat.mentionSearchSkills'),
+)
+
 watch(mentionOpen, (open) => {
   if (open && !store.skills.length) void store.loadSkills()
+  if (open) {
+    nextTick(() => mentionSearchInput.value?.focus())
+  } else {
+    mentionSearchFocused.value = false
+  }
 })
 
 watch(mentionDir, async (d) => {
   if (!store.childrenMap[d]) await store.loadTree(d)
+})
+
+watch(mentionFilter, () => {
+  mentionActiveIdx.value = 0
 })
 
 function getTipTapEditor(): Editor | null {
@@ -383,10 +401,14 @@ function refreshMentionTrigger() {
   const trigger = getAtTriggerFromEditor(editor)
   if (trigger) {
     mentionQuery.value = trigger.query
+    if (!mentionSearchFocused.value) {
+      mentionSearch.value = trigger.query
+    }
     if (!mentionOpen.value) {
       mentionDir.value = ''
       mentionActiveIdx.value = 0
       mentionTab.value = 'files'
+      mentionSearch.value = trigger.query
       const pinned = resolvePinnedMentionItem()
       if (pinned) void store.loadTree(store.parentPath(pinned.path) || '')
     }
@@ -436,6 +458,19 @@ function switchMentionTab(tab: 'files' | 'skills') {
   mentionTab.value = tab
   mentionActiveIdx.value = 0
   if (tab === 'skills' && !store.skills.length) void store.loadSkills()
+  nextTick(() => mentionSearchInput.value?.focus())
+}
+
+function onMentionSearchInput(e: Event) {
+  const value = (e.target as HTMLInputElement).value
+  mentionSearch.value = value
+  mentionActiveIdx.value = 0
+}
+
+function clearMentionSearch() {
+  mentionSearch.value = ''
+  mentionActiveIdx.value = 0
+  nextTick(() => mentionSearchInput.value?.focus())
 }
 
 function removeAllSkillMentions(editor: Editor) {
@@ -512,9 +547,10 @@ function insertInlineMention(item: MentionItem, replaceTrigger = false) {
 function mentionEnterDir(item: MentionItem) {
   if (!item.is_dir) return
   mentionDir.value = item.path
-  mentionQuery.value = ''
+  mentionSearch.value = ''
   mentionActiveIdx.value = 0
   store.loadTree(item.path)
+  nextTick(() => mentionSearchInput.value?.focus())
 }
 
 function mentionSelect(item: MentionItem, fromAt = true) {
@@ -575,11 +611,19 @@ function insertPasteSegments(segments: PasteSegment[]) {
   syncMentionFilesFromEditor()
 }
 
-function onAddChatMention(e: Event) {
+async function onAddChatMention(e: Event) {
   const item = (e as CustomEvent<MentionItem>).detail
   if (!item?.path) return
-  mentionSelect(item, false)
   window.dispatchEvent(new Event('ca-focus-agent'))
+  for (let i = 0; i < 12; i++) {
+    if (getTipTapEditor()) {
+      mentionSelect(item, false)
+      return
+    }
+    await nextTick()
+    await new Promise((r) => setTimeout(r, 40))
+  }
+  mentionSelect(item, false)
 }
 
 function mentionKeydown(e: KeyboardEvent) {
@@ -1322,9 +1366,36 @@ function openContextUsageDialog() {
             </button>
           </div>
 
+          <div class="mention-search" @mousedown.stop>
+            <AppIcon name="search" :size="14" :stroke-width="1.75" class="mention-search-icon" />
+            <input
+              ref="mentionSearchInput"
+              type="search"
+              class="mention-search-input"
+              :value="mentionSearch"
+              :placeholder="mentionSearchPlaceholder"
+              :aria-label="mentionSearchPlaceholder"
+              autocomplete="off"
+              spellcheck="false"
+              @focus="mentionSearchFocused = true"
+              @blur="mentionSearchFocused = false"
+              @input="onMentionSearchInput"
+              @keydown="mentionKeydown"
+            />
+            <button
+              v-if="mentionSearch"
+              type="button"
+              class="mention-search-clear"
+              :title="t('common.clear')"
+              @mousedown.prevent="clearMentionSearch"
+            >
+              <AppIcon name="close" :size="12" />
+            </button>
+          </div>
+
           <template v-if="mentionTab === 'files'">
             <div v-if="mentionDir" class="mention-dir-back">
-              <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionQuery = ''">
+              <button type="button" class="mention-back-btn" @click="mentionDir = ''; mentionSearch = ''; mentionActiveIdx = 0">
                 <AppIcon name="arrow-left" :size="12" />
                 {{ t('common.back') }}
               </button>
@@ -2208,6 +2279,53 @@ html[data-theme='dark'] .copy-toast {
 .mention-tab.active {
   color: var(--primary);
   opacity: 1;
+}
+.mention-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 8px 0;
+  padding: 0 8px;
+  height: 32px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  flex-shrink: 0;
+}
+.mention-search-icon {
+  flex: none;
+  color: var(--text-muted);
+}
+.mention-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 12px;
+  line-height: 1.2;
+}
+.mention-search-input::placeholder {
+  color: var(--text-muted);
+}
+.mention-search-clear {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.mention-search-clear:hover {
+  color: var(--text-h);
+  opacity: var(--ghost-hover-opacity);
 }
 .mention-empty {
   margin: 0;
