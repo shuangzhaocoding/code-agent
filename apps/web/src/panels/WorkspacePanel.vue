@@ -1017,6 +1017,11 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   overflow: hidden;
 }
 
+.host-block.current {
+  border-color: color-mix(in srgb, #22c55e 35%, var(--border));
+  background: color-mix(in srgb, #22c55e 6%, var(--sidebar-bg));
+}
+
 .host-row {
   display: flex;
   align-items: center;
@@ -1128,7 +1133,15 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: var(--text-h);
 }
 
+.host-block.current .host-icon {
+  color: #16a34a;
+}
+
 .host-icon.is-ssh {
+  color: #0284c7;
+}
+
+.host-block.current .host-icon.is-ssh {
   color: #0284c7;
 }
 
