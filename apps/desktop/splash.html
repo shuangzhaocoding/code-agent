@@ -5,7 +5,8 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
   <title>Code Agent</title>
   <style>
-    :root {
+    :root,
+    html[data-theme='dark'] {
       color-scheme: dark;
       --bg: #121218;
       --fg: #e8eaed;
@@ -13,6 +14,26 @@
       --accent: #5b9fff;
       --accent-soft: color-mix(in srgb, var(--accent) 28%, transparent);
       --titlebar-h: 38px;
+      --titlebar-border: rgba(255, 255, 255, 0.06);
+      --mark-bg: linear-gradient(145deg, #1a2230, #12161d);
+      --mark-border: rgba(255, 255, 255, 0.06);
+      --mark-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      --detail: #7a8088;
+      --glow: rgba(91, 159, 255, 0.12);
+    }
+    html[data-theme='light'] {
+      color-scheme: light;
+      --bg: #ffffff;
+      --fg: #18181b;
+      --muted: #71717a;
+      --accent: #4f6bff;
+      --accent-soft: color-mix(in srgb, var(--accent) 22%, transparent);
+      --titlebar-border: rgba(0, 0, 0, 0.07);
+      --mark-bg: linear-gradient(145deg, #f4f4f5, #e4e4e7);
+      --mark-border: rgba(0, 0, 0, 0.08);
+      --mark-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+      --detail: #a1a1aa;
+      --glow: rgba(79, 107, 255, 0.1);
     }
     * { box-sizing: border-box; }
     html, body {
@@ -35,7 +56,7 @@
         calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
       );
       background: var(--bg);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid var(--titlebar-border);
       -webkit-app-region: drag;
       font-size: 12px;
       font-weight: 600;
@@ -49,7 +70,7 @@
       place-items: center;
       padding: 32px;
       background:
-        radial-gradient(ellipse 70% 50% at 50% 0%, rgba(91, 159, 255, 0.12), transparent 60%),
+        radial-gradient(ellipse 70% 50% at 50% 0%, var(--glow), transparent 60%),
         var(--bg);
     }
     body.custom-titlebar .wrap {
@@ -69,11 +90,11 @@
       border-radius: 14px;
       display: grid;
       place-items: center;
-      background: linear-gradient(145deg, #1a2230, #12161d);
-      border: 1px solid rgba(255, 255, 255, 0.06);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      background: var(--mark-bg);
+      border: 1px solid var(--mark-border);
+      box-shadow: var(--mark-shadow);
     }
-    .mark svg { width: 28px; height: 28px; }
+    .mark svg { width: 28px; height: 28px; stroke: var(--accent); }
     h1 {
       margin: 0;
       font-size: 20px;
@@ -103,7 +124,7 @@
     }
     #detail {
       margin: 0;
-      color: #7a8088;
+      color: var(--detail);
       font-size: 12px;
       white-space: pre-wrap;
       word-break: break-word;
@@ -120,7 +141,7 @@
   <div class="wrap">
     <div class="card">
       <div class="mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#5b9fff" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3" />
           <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
         </svg>
@@ -132,6 +153,17 @@
     </div>
   </div>
   <script>
+    function applySplashTheme(theme) {
+      const next = theme === 'light' ? 'light' : 'dark'
+      document.documentElement.setAttribute('data-theme', next)
+    }
+    window.setSplashTheme = applySplashTheme
+    try {
+      const q = new URLSearchParams(location.search)
+      applySplashTheme(q.get('theme') || 'dark')
+    } catch {
+      applySplashTheme('dark')
+    }
     if (window.codeAgentDesktop && window.codeAgentDesktop.customTitleBar) {
       document.body.classList.add('custom-titlebar')
     }

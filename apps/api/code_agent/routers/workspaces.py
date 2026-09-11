@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,7 @@ from code_agent.workspace.ssh_pool import SshAuth
 router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 RAW_FILE_MAX_BYTES = 80 * 1024 * 1024
+UPLOAD_MAX_BYTES = 80 * 1024 * 1024
 
 
 def _content_disposition(disposition: str, filename: str) -> str:
@@ -667,6 +668,38 @@ async def put_file(workspace_id: str, path: str, body: FilePut):
     backend = await get_workspace_backend(ws)
     await backend.write_text(path, body.content)
     return {"ok": True, "path": path}
+
+
+@router.post("/{workspace_id}/upload")
+async def upload_workspace_file(
+    workspace_id: str,
+    path: str,
+    file: UploadFile = File(...),
+):
+    """Upload a local file into the workspace (binary-safe)."""
+    rel = (path or "").strip().replace("\\", "/").lstrip("/")
+    if not rel or rel in {".", ".."} or ".." in rel.split("/"):
+        raise HTTPException(status_code=400, detail={"code": "path.invalid"})
+    if is_protected(rel):
+        raise HTTPException(status_code=403, detail={"code": "path.protected"})
+    name = posixpath.basename(rel)
+    if not name or name in {".", ".."}:
+        raise HTTPException(status_code=400, detail={"code": "path.invalid"})
+
+    data = await file.read()
+    if len(data) > UPLOAD_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "upload.too_large",
+                "message": f"File exceeds {UPLOAD_MAX_BYTES} bytes",
+            },
+        )
+
+    ws = await _get_ws(workspace_id)
+    backend = await get_workspace_backend(ws)
+    await backend.write_bytes(rel, data)
+    return {"ok": True, "path": rel, "size": len(data)}
 
 
 @router.post("/{workspace_id}/entries")

@@ -17,6 +17,32 @@ const CHROME = {
 /** @type {'light' | 'dark'} */
 let chromeTheme = 'dark'
 
+function themeStorePath() {
+  return path.join(app.getPath('userData'), 'chrome-theme')
+}
+
+function loadStoredChromeTheme() {
+  try {
+    const raw = fs.readFileSync(themeStorePath(), 'utf8').trim()
+    if (raw === 'light' || raw === 'dark') return raw
+  } catch {
+    /* first run */
+  }
+  try {
+    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  } catch {
+    return 'dark'
+  }
+}
+
+function persistChromeTheme(theme) {
+  try {
+    fs.writeFileSync(themeStorePath(), theme, 'utf8')
+  } catch {
+    /* ignore quota / perms */
+  }
+}
+
 const SPLIT_SERVICES = [
   { name: 'api', args: ['-m', 'code_agent', 'api'] },
   { name: 'worker', args: ['-m', 'code_agent', 'worker'] },
@@ -116,6 +142,7 @@ function applyWindowChrome(theme) {
   const next = theme === 'light' ? 'light' : 'dark'
   chromeTheme = next
   nativeTheme.themeSource = next
+  persistChromeTheme(next)
   const colors = CHROME[next]
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.setBackgroundColor(colors.background)
@@ -130,6 +157,12 @@ function applyWindowChrome(theme) {
       // ignore unsupported hosts
     }
   }
+  mainWindow.webContents
+    .executeJavaScript(
+      `window.setSplashTheme && window.setSplashTheme(${JSON.stringify(next)})`,
+      true,
+    )
+    .catch(() => {})
 }
 
 function windowChromeOptions() {
@@ -153,6 +186,29 @@ function windowChromeOptions() {
   return {}
 }
 
+function toggleDevTools(win = mainWindow) {
+  const target = win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow()
+  if (!target || target.isDestroyed()) return
+  const wc = target.webContents
+  if (wc.isDevToolsOpened()) wc.closeDevTools()
+  else wc.openDevTools({ mode: 'detach' })
+}
+
+function bindDevToolsShortcuts(win) {
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return
+    const key = String(input.key || '').toLowerCase()
+    const isF12 = key === 'f12'
+    const isChord =
+      process.platform === 'darwin'
+        ? key === 'i' && input.meta && input.alt
+        : key === 'i' && input.control && input.shift
+    if (!isF12 && !isChord) return
+    event.preventDefault()
+    toggleDevTools(win)
+  })
+}
+
 function createWindow() {
   const colors = CHROME[chromeTheme]
   mainWindow = new BrowserWindow({
@@ -173,6 +229,8 @@ function createWindow() {
     },
   })
 
+  bindDevToolsShortcuts(mainWindow)
+
   mainWindow.once('ready-to-show', () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
   })
@@ -182,7 +240,7 @@ function createWindow() {
     return { action: 'deny' }
   })
 
-  mainWindow.loadFile(splashPath())
+  mainWindow.loadFile(splashPath(), { query: { theme: chromeTheme } })
   mainWindow.on('closed', () => {
     mainWindow = null
   })
@@ -369,10 +427,11 @@ if (!gotLock) {
     applyWindowChrome(theme === 'light' ? 'light' : 'dark')
     return chromeTheme
   })
+  ipcMain.handle('desktop:get-theme', () => chromeTheme)
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).
-    // In-app TopMenuBar owns menus; OS title bar chrome follows app theme via desktop:set-theme.
     Menu.setApplicationMenu(null)
+    chromeTheme = loadStoredChromeTheme()
     nativeTheme.themeSource = chromeTheme
     return boot()
   })

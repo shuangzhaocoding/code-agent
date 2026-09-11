@@ -56,6 +56,15 @@ class LocalWorkspaceBackend:
 
         await run_sync(_write)
 
+    async def write_bytes(self, rel: str, content: bytes) -> None:
+        path = path_tools.resolve_in_workspace(self.root_path, rel)
+
+        def _write() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+        await run_sync(_write)
+
     async def mkdir(self, rel: str) -> None:
         path = path_tools.resolve_in_workspace(self.root_path, rel)
         await run_sync(path.mkdir, parents=True, exist_ok=False)

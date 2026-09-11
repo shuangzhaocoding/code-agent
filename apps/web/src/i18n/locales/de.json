@@ -77,6 +77,12 @@
     },
     "positionLabel": "Position der Menüleiste",
     "positionLead": "Menüleiste oben, links, rechts oder unten im Fenster anzeigen.",
+    "positionsShort": {
+      "top": "Oben",
+      "left": "Links",
+      "right": "Rechts",
+      "bottom": "Unten"
+    },
     "items": {
       "openWorkspace": "Arbeitsbereich öffnen…",
       "newChat": "Neuer Chat",
@@ -89,6 +95,16 @@
       "keyboardShortcuts": "Tastenkürzel…",
       "about": "Info"
     }
+  },
+  "shortcuts": {
+    "title": "Tastenkürzel",
+    "commandPalette": "Befehlspalette",
+    "commandPaletteAlt": "Befehlspalette (alt)",
+    "openFile": "Datei öffnen",
+    "searchFiles": "In Dateien suchen",
+    "save": "Datei speichern",
+    "newChat": "Neuer Chat",
+    "close": "Overlay / Menü schließen"
   },
   "time": {
     "justNow": "Gerade eben",
@@ -111,7 +127,12 @@
     "settings": "Einstellungen",
     "workspace": "Arbeitsbereich",
     "trajectory": "Verlauf",
-    "file": "Dateien"
+    "file": "Dateien",
+    "tab": {
+      "maximize": "Gruppe maximieren",
+      "restore": "Gruppe wiederherstellen",
+      "dirty": "Ungespeicherte Dateien"
+    }
   },
   "sidebar": {
     "aria": "Sitzung und Arbeitsbereich",
@@ -153,7 +174,52 @@
     "sshPathPlaceholder": "Remote-Pfad",
     "sshConnect": "Verbinden & browsen",
     "sshBrowse": "Remote-Ordner",
-    "switching": "Arbeitsbereich wird gewechselt…"
+    "switching": "Arbeitsbereich wird gewechselt…",
+    "panel": {
+      "title": "Arbeitsbereiche",
+      "collapseHosts": "Alle Hosts einklappen",
+      "expandHosts": "Alle Hosts aufklappen",
+      "open": "Öffnen",
+      "openWorkspace": "Arbeitsbereich öffnen",
+      "empty": "Noch keine Arbeitsbereiche. Öffnen Sie oben rechts einen Ordner.",
+      "local": "Lokal",
+      "remote": "Remote",
+      "editHost": "Host bearbeiten",
+      "addRemoteWorkspace": "Remote-Arbeitsbereich hinzufügen",
+      "addLocalWorkspace": "Lokalen Arbeitsbereich hinzufügen",
+      "currentHost": "Aktueller Host",
+      "newSession": "Neue Sitzung",
+      "removeWorkspace": "Arbeitsbereich entfernen",
+      "removeTitle": "Arbeitsbereich entfernen",
+      "removeSummary": "„{name}“ entfernen? Dateien auf dem Datenträger bleiben erhalten.",
+      "removeConfirm": "Entfernen",
+      "currentWorkspace": "Aktueller Arbeitsbereich",
+      "loading": "Laden…",
+      "retry": "Erneut",
+      "noSessions": "Keine Sitzungen",
+      "rename": "Umbenennen",
+      "pin": "Anheften",
+      "unpin": "Loslösen",
+      "deleteSession": "Sitzung löschen",
+      "turns": "{n} Runden",
+      "showMore": "Mehr anzeigen ({n})",
+      "showLess": "Einklappen",
+      "current": "Aktuell",
+      "host": "Host",
+      "workspaces": "Arbeitsbereiche",
+      "count": "{n}",
+      "dirs": "Ordner",
+      "dirsMore": "+{n} weitere",
+      "lastOpened": "Zuletzt geöffnet",
+      "path": "Pfad",
+      "created": "Erstellt",
+      "sessions": "Sitzungen",
+      "statusApproval": "Freigabe ausstehend",
+      "statusQueued": "In Warteschlange",
+      "statusRunning": "Läuft",
+      "opening": "Wird geöffnet…",
+      "openFailed": "Sitzung konnte nicht geöffnet werden"
+    }
   },
   "settings": {
     "title": "Einstellungen",
@@ -541,6 +607,11 @@
   "explorer": {
     "newFile": "Neue Datei",
     "newDir": "Neuer Ordner",
+    "uploadFile": "Dateien hochladen",
+    "uploading": "Wird hochgeladen…",
+    "uploadingProgress": "Lade {name} hoch ({current}/{total})",
+    "uploadDone": "{n} Datei(en) hochgeladen",
+    "uploadFail": "Hochladen fehlgeschlagen",
     "searchHere": "In diesem Ordner suchen",
     "excludeDir": "Diesen Ordner von der Suche ausschließen",
     "searchFile": "In dieser Datei suchen",

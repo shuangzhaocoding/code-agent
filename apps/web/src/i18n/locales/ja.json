@@ -77,6 +77,12 @@
     },
     "positionLabel": "メニューバーの位置",
     "positionLead": "メニューバーをウィンドウの上・左・右・下に表示します。",
+    "positionsShort": {
+      "top": "上",
+      "left": "左",
+      "right": "右",
+      "bottom": "下"
+    },
     "items": {
       "openWorkspace": "ワークスペースを開く…",
       "newChat": "新しいチャット",
@@ -89,6 +95,16 @@
       "keyboardShortcuts": "キーボードショートカット…",
       "about": "バージョン情報"
     }
+  },
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "commandPalette": "コマンドパレット",
+    "commandPaletteAlt": "コマンドパレット（代替）",
+    "openFile": "ファイルを開く",
+    "searchFiles": "ファイル内検索",
+    "save": "ファイルを保存",
+    "newChat": "新しいチャット",
+    "close": "オーバーレイ / メニューを閉じる"
   },
   "time": {
     "justNow": "たった今",
@@ -111,7 +127,12 @@
     "settings": "設定",
     "workspace": "ワークスペース",
     "trajectory": "軌跡",
-    "file": "ファイル"
+    "file": "ファイル",
+    "tab": {
+      "maximize": "グループを最大化",
+      "restore": "グループを復元",
+      "dirty": "未保存のファイルあり"
+    }
   },
   "sidebar": {
     "aria": "セッションとワークスペース",
@@ -153,7 +174,52 @@
     "sshPathPlaceholder": "リモートパス",
     "sshConnect": "接続して参照",
     "sshBrowse": "リモートフォルダー",
-    "switching": "ワークスペースを切り替えています…"
+    "switching": "ワークスペースを切り替えています…",
+    "panel": {
+      "title": "ワークスペース",
+      "collapseHosts": "すべてのホストを折りたたむ",
+      "expandHosts": "すべてのホストを展開",
+      "open": "開く",
+      "openWorkspace": "ワークスペースを開く",
+      "empty": "ワークスペースがありません。右上からフォルダーを開いてください。",
+      "local": "ローカル",
+      "remote": "リモート",
+      "editHost": "ホストを編集",
+      "addRemoteWorkspace": "リモートワークスペースを追加",
+      "addLocalWorkspace": "ローカルワークスペースを追加",
+      "currentHost": "現在のホスト",
+      "newSession": "新しいセッション",
+      "removeWorkspace": "ワークスペースを削除",
+      "removeTitle": "ワークスペースを削除",
+      "removeSummary": "「{name}」を削除しますか？ディスク上のファイルは削除されません。",
+      "removeConfirm": "削除",
+      "currentWorkspace": "現在のワークスペース",
+      "loading": "読み込み中…",
+      "retry": "再試行",
+      "noSessions": "セッションなし",
+      "rename": "名前を変更",
+      "pin": "ピン留め",
+      "unpin": "ピン留めを解除",
+      "deleteSession": "セッションを削除",
+      "turns": "{n}ターン",
+      "showMore": "さらに表示（{n}）",
+      "showLess": "折りたたむ",
+      "current": "現在",
+      "host": "ホスト",
+      "workspaces": "ワークスペース",
+      "count": "{n} 件",
+      "dirs": "フォルダー",
+      "dirsMore": "他 {n} 件",
+      "lastOpened": "最終オープン",
+      "path": "パス",
+      "created": "作成",
+      "sessions": "セッション",
+      "statusApproval": "承認待ち",
+      "statusQueued": "待機中",
+      "statusRunning": "生成中",
+      "opening": "開いています…",
+      "openFailed": "セッションを開けませんでした"
+    }
   },
   "settings": {
     "title": "設定",
@@ -540,6 +606,11 @@
   "explorer": {
     "newFile": "新しいファイル",
     "newDir": "新しいフォルダー",
+    "uploadFile": "ファイルをアップロード",
+    "uploading": "アップロード中…",
+    "uploadingProgress": "{name} をアップロード中（{current}/{total}）",
+    "uploadDone": "{n} 個のファイルをアップロードしました",
+    "uploadFail": "アップロードに失敗しました",
     "searchHere": "このフォルダー内を検索",
     "excludeDir": "このフォルダーを検索から除外",
     "searchFile": "このファイル内を検索",

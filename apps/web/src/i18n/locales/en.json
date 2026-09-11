@@ -77,6 +77,12 @@
     },
     "positionLabel": "Menu bar position",
     "positionLead": "Show the menu bar at the top, left, right, or bottom of the window.",
+    "positionsShort": {
+      "top": "Top",
+      "left": "Left",
+      "right": "Right",
+      "bottom": "Bottom"
+    },
     "items": {
       "openWorkspace": "Open Workspace…",
       "newChat": "New Chat",
@@ -89,6 +95,16 @@
       "keyboardShortcuts": "Keyboard Shortcuts…",
       "about": "About"
     }
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "commandPalette": "Command palette",
+    "commandPaletteAlt": "Command palette (alt)",
+    "openFile": "Open file",
+    "searchFiles": "Search in files",
+    "save": "Save file",
+    "newChat": "New chat",
+    "close": "Close overlay / menu"
   },
   "time": {
     "justNow": "Just now",
@@ -112,7 +128,12 @@
     "settings": "Settings",
     "workspace": "Workspace",
     "trajectory": "Trajectory",
-    "file": "Files"
+    "file": "Files",
+    "tab": {
+      "maximize": "Maximize group",
+      "restore": "Restore group",
+      "dirty": "Unsaved files"
+    }
   },
   "sidebar": {
     "aria": "Session and workspace",
@@ -155,7 +176,52 @@
     "sshConnect": "Connect & browse",
     "sshBrowse": "Remote folders",
     "sshLead": "Connect over SSH and pick a remote folder as the workspace.",
-    "switching": "Switching workspace…"
+    "switching": "Switching workspace…",
+    "panel": {
+      "title": "Workspaces",
+      "collapseHosts": "Collapse all hosts",
+      "expandHosts": "Expand all hosts",
+      "open": "Open",
+      "openWorkspace": "Open workspace",
+      "empty": "No workspaces yet. Use Open to pick a folder.",
+      "local": "Local",
+      "remote": "Remote",
+      "editHost": "Edit host",
+      "addRemoteWorkspace": "Add remote workspace",
+      "addLocalWorkspace": "Add local workspace",
+      "currentHost": "Current host",
+      "newSession": "New session",
+      "removeWorkspace": "Remove workspace",
+      "removeTitle": "Remove workspace",
+      "removeSummary": "Remove “{name}”? Files on disk will not be deleted.",
+      "removeConfirm": "Remove",
+      "currentWorkspace": "Current workspace",
+      "loading": "Loading…",
+      "retry": "Retry",
+      "noSessions": "No sessions",
+      "rename": "Rename",
+      "pin": "Pin",
+      "unpin": "Unpin",
+      "deleteSession": "Delete session",
+      "turns": "{n} turns",
+      "showMore": "Show more ({n})",
+      "showLess": "Show less",
+      "current": "Current",
+      "host": "Host",
+      "workspaces": "Workspaces",
+      "count": "{n}",
+      "dirs": "Folders",
+      "dirsMore": "+{n} more",
+      "lastOpened": "Last opened",
+      "path": "Path",
+      "created": "Created",
+      "sessions": "Sessions",
+      "statusApproval": "Awaiting approval",
+      "statusQueued": "Queued",
+      "statusRunning": "Running",
+      "opening": "Opening…",
+      "openFailed": "Failed to open session"
+    }
   },
   "settings": {
     "title": "Settings",
@@ -576,6 +642,11 @@
   "explorer": {
     "newFile": "New file",
     "newDir": "New folder",
+    "uploadFile": "Upload files",
+    "uploading": "Uploading…",
+    "uploadingProgress": "Uploading {name} ({current}/{total})",
+    "uploadDone": "Uploaded {n} file(s)",
+    "uploadFail": "Upload failed",
     "searchHere": "Search in this folder",
     "excludeDir": "Exclude this folder from search",
     "searchFile": "Search in this file",

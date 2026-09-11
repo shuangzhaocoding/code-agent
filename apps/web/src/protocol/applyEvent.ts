@@ -78,6 +78,7 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
       touched = true
       const copy = { ...b, meta: { ...b.meta } }
       if (event.type === 'block.delta') {
+        // Ignore deltas after the block was finalized; block.completed carries final text.
         if (b.status && b.status !== 'streaming') return b
         copy.text += String(payload.text || '')
         if (payload.meta) Object.assign(copy.meta, payload.meta)
@@ -85,6 +86,8 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
         copy.status = String(payload.status || 'ok')
         copy.ended_at = Date.now()
         if (payload.meta) Object.assign(copy.meta, payload.meta)
+        // Authoritative final text from server (covers missed trailing deltas).
+        if (payload.text != null) copy.text = String(payload.text)
       }
       return copy
     })

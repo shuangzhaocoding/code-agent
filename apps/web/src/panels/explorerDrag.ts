@@ -11,10 +11,16 @@ export type ExplorerDragApi = {
   dropHoverPath: Ref<string | null>
   beginDrag: (item: FsItem) => void
   endDrag: () => void
-  setDropHover: (path: string | null, destDir: string | null) => void
+  setDropHover: (path: string | null, destDir: string | null, opts?: { external?: boolean }) => void
   canDropTo: (destDir: string) => boolean
   resolveDestDir: (item: FsItem) => string
   dropTo: (destDir: string) => Promise<void>
+  dropFiles: (destDir: string, files: FileList | File[]) => Promise<void>
+}
+
+export function isOsFileDrag(e: DragEvent) {
+  const types = e.dataTransfer?.types
+  return types != null && [...types].includes('Files')
 }
 
 export const explorerDragKey: InjectionKey<ExplorerDragApi> = Symbol('explorerDrag')

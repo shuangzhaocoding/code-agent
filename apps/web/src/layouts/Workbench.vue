@@ -174,14 +174,43 @@ function onWorkbenchKey(e: KeyboardEvent) {
   }
 
   const mod = e.metaKey || e.ctrlKey
-  if (!mod || e.altKey) return
   const key = e.key.toLowerCase()
+  const target = e.target as HTMLElement | null
   const inEditable =
-    e.target instanceof HTMLElement &&
-    (!!e.target.closest('.monaco-editor, .xterm, .xterm-helper-textarea') ||
-      e.target.isContentEditable ||
-      e.target.tagName === 'INPUT' ||
-      e.target.tagName === 'TEXTAREA')
+    target instanceof HTMLElement &&
+    (!!target.closest('.monaco-editor, .xterm, .xterm-helper-textarea') ||
+      target.isContentEditable ||
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA')
+  const inTabStrip = !!target?.closest?.('.dv-tabs-and-actions-container, .dv-tab, .ptab')
+
+  // Arrow keys cycle tabs within the active group when focus is on the tab strip
+  if (!mod && !e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && inTabStrip) {
+    e.preventDefault()
+    e.stopPropagation()
+    cycleActiveGroupTab(e.key === 'ArrowRight' ? 1 : -1)
+    return
+  }
+
+  if (!mod || e.altKey) return
+
+  // Ctrl/Cmd+Tab / Ctrl/Cmd+Shift+Tab → next / previous panel
+  if (key === 'tab') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.shiftKey) dock.value?.activatePrevious({ includePanel: true })
+    else dock.value?.activateNext({ includePanel: true })
+    return
+  }
+
+  // Ctrl/Cmd+PageDown / PageUp → same as tab cycle (IDE habit)
+  if (key === 'pagedown' || key === 'pageup') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (key === 'pageup') dock.value?.activatePrevious({ includePanel: true })
+    else dock.value?.activateNext({ includePanel: true })
+    return
+  }
 
   // Ctrl/Cmd+Shift+F → search (existing)
   if (e.shiftKey && key === 'f') {
@@ -213,13 +242,28 @@ function onWorkbenchKey(e: KeyboardEvent) {
 
   // Ctrl/Cmd+P → quick open files (not Shift+P command palette)
   if (key === 'p') {
-    // Allow Monaco/editor to keep its own command if needed? Prefer IDE quick-open.
-    if (inEditable && e.target instanceof HTMLElement && e.target.closest('.xterm, .xterm-helper-textarea')) return
+    if (inEditable && target?.closest?.('.xterm, .xterm-helper-textarea')) return
     e.preventDefault()
     e.stopPropagation()
     paletteMode.value = 'files'
     paletteOpen.value = true
   }
+}
+
+function cycleActiveGroupTab(delta: number) {
+  const api = dock.value
+  const group = api?.activeGroup
+  const panels = group?.panels || []
+  if (panels.length < 2) return
+  const activeId = group?.activePanel?.id || api?.activePanel?.id
+  const index = panels.findIndex((p) => p.id === activeId)
+  if (index < 0) return
+  const next = panels[(index + delta + panels.length) % panels.length]
+  next?.api.setActive()
+  requestAnimationFrame(() => {
+    const el = document.querySelector(`.dv-tab .ptab[data-panel-id="${next.id}"]`) as HTMLElement | null
+    el?.focus()
+  })
 }
 
 const LAYOUT_SEED = 3
@@ -339,6 +383,9 @@ async function onReady(event: DockviewReadyEvent) {
   event.api.onDidLayoutChange(() => {
     persistLayout(event.api)
   })
+  event.api.onDidActivePanelChange((ev) => {
+    if (ev?.panel?.id) store.activity = ev.panel.id
+  })
 }
 
 type PanelPlace = {
@@ -450,6 +497,7 @@ const dockThemeClass = computed(() =>
         :position="menuPosition"
         :as-title-bar="menuAsTitleBar"
         :hide-brand="showDesktopStrip"
+        :hide-actions="showDesktopStrip"
         @open-panel="openPanel"
         @toggle-theme="onToggleTheme"
         @open-command-palette="openCommandPalette"

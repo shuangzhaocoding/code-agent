@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandMark from '@/components/BrandMark.vue'
 import { currentTheme, type Theme } from '@/theme'
@@ -12,6 +13,8 @@ const emit = defineEmits<{
   toggleTheme: []
   openCommandPalette: []
 }>()
+
+const { t } = useI18n()
 </script>
 
 <template>
@@ -25,7 +28,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ghost-icon-btn"
-        title="Command Palette"
+        :title="t('menu.items.commandPalette')"
         @click="emit('openCommandPalette')"
       >
         <AppIcon name="search" :size="15" :stroke-width="1.75" />
@@ -33,7 +36,7 @@ const emit = defineEmits<{
       <button
         type="button"
         class="ghost-icon-btn"
-        title="Toggle theme"
+        :title="t('theme.toggle')"
         @click="emit('toggleTheme')"
       >
         <AppIcon

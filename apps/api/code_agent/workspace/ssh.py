@@ -176,6 +176,9 @@ class SshWorkspaceBackend:
         return data.decode("utf-8", errors="replace")
 
     async def write_text(self, rel: str, content: str) -> None:
+        await self.write_bytes(rel, content.encode("utf-8"))
+
+    async def write_bytes(self, rel: str, content: bytes) -> None:
         sftp = await self._sftp()
         target = await self._abs(rel)
         parent = posixpath.dirname(target)
@@ -185,7 +188,7 @@ class SshWorkspaceBackend:
             except Exception:
                 pass
         async with sftp.open(target, "wb") as fh:
-            await fh.write(content.encode("utf-8"))
+            await fh.write(content)
 
     async def mkdir(self, rel: str) -> None:
         sftp = await self._sftp()

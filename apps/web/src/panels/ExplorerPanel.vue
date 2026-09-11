@@ -8,6 +8,7 @@ import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 import {
   explorerDragKey,
   FS_DRAG_MIME,
+  isOsFileDrag,
   type FsDragPayload,
 } from '@/panels/explorerDrag'
 
@@ -20,10 +21,15 @@ const creating = ref<{ kind: 'file' | 'dir'; dir: string; value: string; id: num
 const error = ref('')
 const renamingPath = ref<string | null>(null)
 const selectedItem = ref<FsItem | null>(null)
+const uploadInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadRatio = ref(0)
+let uploadDestDir = ''
 let createSeq = 0
 
 const dragSrc = ref<FsDragPayload | null>(null)
 const dropHoverPath = ref<string | null>(null)
+const externalDrop = ref(false)
 let dropDestDir: string | null = null
 
 function canDropTo(destDir: string, src: FsDragPayload | null = dragSrc.value) {
@@ -41,22 +47,26 @@ function beginDrag(item: FsItem) {
   dragSrc.value = { path: item.path, is_dir: item.is_dir }
   dropHoverPath.value = null
   dropDestDir = null
+  externalDrop.value = false
 }
 
 function endDrag() {
   dragSrc.value = null
   dropHoverPath.value = null
   dropDestDir = null
+  externalDrop.value = false
 }
 
-function setDropHover(path: string | null, destDir: string | null) {
-  if (destDir !== null && !canDropTo(destDir)) {
+function setDropHover(path: string | null, destDir: string | null, opts?: { external?: boolean }) {
+  if (!opts?.external && destDir !== null && !canDropTo(destDir)) {
     dropHoverPath.value = null
     dropDestDir = null
+    externalDrop.value = false
     return
   }
   dropHoverPath.value = path
   dropDestDir = destDir
+  externalDrop.value = Boolean(opts?.external)
 }
 
 async function dropTo(destDir: string) {
@@ -74,6 +84,27 @@ async function dropTo(destDir: string) {
   }
 }
 
+async function dropFiles(destDir: string, files: FileList | File[]) {
+  endDrag()
+  const list = Array.from(files || []).filter((f) => f && f.name)
+  if (!list.length) return
+  uploading.value = true
+  uploadRatio.value = 0.02
+  error.value = ''
+  try {
+    await store.uploadWorkspaceFiles(destDir, list, (info) => {
+      uploadRatio.value = Math.max(0.02, Math.min(1, info.ratio))
+    })
+    uploadRatio.value = 1
+    await new Promise((r) => setTimeout(r, 180))
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : t('explorer.uploadFail')
+  } finally {
+    uploading.value = false
+    uploadRatio.value = 0
+  }
+}
+
 provide(explorerDragKey, {
   dragSrc,
   dropHoverPath,
@@ -83,27 +114,63 @@ provide(explorerDragKey, {
   canDropTo,
   resolveDestDir,
   dropTo,
+  dropFiles,
 })
 
 function onTreeDragOver(e: DragEvent) {
   const types = e.dataTransfer?.types
   const isOurs = !!dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
-  if (!isOurs) return
-  if (!canDropTo('')) {
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+  const isFiles = isOsFileDrag(e)
+  if (!isOurs && !isFiles) return
+  if (isOurs) {
+    if (!canDropTo('')) {
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+      return
+    }
+    e.preventDefault()
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    setDropHover('', '')
     return
   }
   e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  setDropHover('', '')
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  setDropHover('', '', { external: true })
 }
 
 function onTreeDrop(e: DragEvent) {
   const types = e.dataTransfer?.types
   const isOurs = !!dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  const files = e.dataTransfer?.files
+  if (!isOurs && files?.length) {
+    e.preventDefault()
+    const dest = dropDestDir ?? ''
+    void dropFiles(dest, files)
+    return
+  }
   if (!isOurs) return
   e.preventDefault()
   void dropTo(dropDestDir ?? '')
+}
+
+function startUpload(e?: Event) {
+  e?.preventDefault()
+  e?.stopPropagation()
+  uploadDestDir = targetDir()
+  // Open the picker while the click gesture is still valid and the menu button
+  // is still in the DOM. Closing the menu first cancels the dialog in Chromium.
+  const input = uploadInput.value
+  if (!input) return
+  input.value = ''
+  input.click()
+  closeMenu()
+}
+
+async function onUploadInputChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = input.files ? Array.from(input.files) : []
+  input.value = ''
+  if (!files.length) return
+  await dropFiles(uploadDestDir, files)
 }
 
 const workspaceTitle = computed(() => store.workspace?.name || t('panels.workspace'))
@@ -481,27 +548,39 @@ onUnmounted(() => {
       <span class="explorer-title" :title="workspaceTitle">{{ workspaceTitle }}</span>
       <div class="explorer-actions">
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newFile')" @click.stop="startCreate('file')">
-          <AppIcon name="file-plus" :size="16" :stroke-width="1.75" />
+          <AppIcon name="file-plus" :size="14" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newDir')" @click.stop="startCreate('dir')">
-          <AppIcon name="folder-plus" :size="16" :stroke-width="1.75" />
+          <AppIcon name="folder-plus" :size="14" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" @click.stop="store.refreshTree()">
-          <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
+          <AppIcon name="refresh" :size="14" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.collapseAll')" @click.stop="store.collapseAllDirs()">
-          <AppIcon name="collapse-all" :size="16" :stroke-width="1.75" />
+          <AppIcon name="collapse-all" :size="14" :stroke-width="1.75" />
         </button>
         <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.expandAll')" @click.stop="store.expandAllDirs()">
-          <AppIcon name="expand-all" :size="16" :stroke-width="1.75" />
+          <AppIcon name="expand-all" :size="14" :stroke-width="1.75" />
         </button>
+      </div>
+      <div
+        v-if="uploading"
+        class="upload-progress"
+        role="progressbar"
+        :aria-valuenow="Math.round(uploadRatio * 100)"
+        aria-valuemin="0"
+        aria-valuemax="100"
+      >
+        <div class="upload-progress-bar" :style="{ width: `${Math.round(uploadRatio * 1000) / 10}%` }" />
       </div>
     </div>
     <p v-if="error" class="err">{{ error }}</p>
     <div
       ref="treeEl"
       class="tree"
-      :class="{ 'drop-over': dragSrc && dropHoverPath === '' }"
+      :class="{
+        'drop-over': dropHoverPath === '' && (dragSrc || externalDrop),
+      }"
       @dragover="onTreeDragOver"
       @drop="onTreeDrop"
     >
@@ -548,6 +627,10 @@ onUnmounted(() => {
       <button type="button" @click="startCreate('dir')">
         <AppIcon class="ctx-ico" name="folder-plus" :size="15" />
         <span>{{ t('explorer.newDir') }}</span>
+      </button>
+      <button type="button" @click="startUpload($event)">
+        <AppIcon class="ctx-ico" name="upload" :size="15" />
+        <span>{{ t('explorer.uploadFile') }}</span>
       </button>
 
       <!-- 对话 -->
@@ -633,18 +716,28 @@ onUnmounted(() => {
         <span>{{ t('explorer.searchWorkspace') }}</span>
       </button>
     </div>
+    <input
+      ref="uploadInput"
+      class="explorer-upload-input"
+      type="file"
+      multiple
+      tabindex="-1"
+      aria-hidden="true"
+      @change="onUploadInputChange"
+    />
   </div>
 </template>
 
 <style scoped>
 .panel-shell { overflow: hidden; position: relative; background: var(--sidebar-bg); }
 .explorer-bar {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 32px;
-  padding: 6px 10px;
+  min-height: 28px;
+  padding: 4px 8px;
   flex-shrink: 0;
 }
 .explorer-title {
@@ -661,14 +754,59 @@ onUnmounted(() => {
 .explorer-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 2px;
   flex-shrink: 0;
+}
+.explorer-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+.explorer-actions .icon-btn:hover:not(:disabled) {
+  background: var(--code-bg);
+  color: var(--text-h);
+  opacity: 1;
+  border-color: transparent;
 }
 .err {
   margin: 0;
   padding: 6px 12px;
   color: var(--danger);
   font-size: 12px;
+}
+.upload-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+.upload-progress-bar {
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.12s linear;
+}
+.explorer-upload-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 .tree {
   flex: 1;

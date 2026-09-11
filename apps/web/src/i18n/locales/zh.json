@@ -77,6 +77,12 @@
     },
     "positionLabel": "菜单栏位置",
     "positionLead": "选择菜单栏显示在窗口顶部、左侧、右侧或底部。",
+    "positionsShort": {
+      "top": "顶部",
+      "left": "左侧",
+      "right": "右侧",
+      "bottom": "底部"
+    },
     "items": {
       "openWorkspace": "打开工作区…",
       "newChat": "新建对话",
@@ -89,6 +95,16 @@
       "keyboardShortcuts": "键盘快捷键…",
       "about": "关于"
     }
+  },
+  "shortcuts": {
+    "title": "键盘快捷键",
+    "commandPalette": "命令面板",
+    "commandPaletteAlt": "命令面板（备选）",
+    "openFile": "打开文件",
+    "searchFiles": "在文件中搜索",
+    "save": "保存文件",
+    "newChat": "新建对话",
+    "close": "关闭弹层 / 菜单"
   },
   "time": {
     "justNow": "刚刚",
@@ -112,7 +128,12 @@
     "settings": "设置",
     "workspace": "工作空间",
     "trajectory": "轨迹",
-    "file": "文件"
+    "file": "文件",
+    "tab": {
+      "maximize": "最大化组",
+      "restore": "还原组",
+      "dirty": "有未保存的文件"
+    }
   },
   "sidebar": {
     "aria": "会话与工作区",
@@ -155,7 +176,52 @@
     "sshConnect": "连接并浏览",
     "sshBrowse": "远程目录",
     "sshLead": "通过 SSH 连接远程主机并选择目录作为工作空间。",
-    "switching": "正在切换工作空间…"
+    "switching": "正在切换工作空间…",
+    "panel": {
+      "title": "工作空间",
+      "collapseHosts": "折叠全部主机",
+      "expandHosts": "展开全部主机",
+      "open": "打开",
+      "openWorkspace": "打开工作空间",
+      "empty": "还没有工作空间，点右上角打开一个目录。",
+      "local": "本地",
+      "remote": "远程",
+      "editHost": "编辑主机",
+      "addRemoteWorkspace": "添加远程工作空间",
+      "addLocalWorkspace": "添加本地工作空间",
+      "currentHost": "当前主机",
+      "newSession": "新建会话",
+      "removeWorkspace": "移除工作空间",
+      "removeTitle": "移除工作空间",
+      "removeSummary": "确定移除「{name}」？不会删除磁盘上的文件。",
+      "removeConfirm": "移除",
+      "currentWorkspace": "当前工作空间",
+      "loading": "加载中…",
+      "retry": "重试",
+      "noSessions": "暂无会话",
+      "rename": "重命名",
+      "pin": "置顶",
+      "unpin": "取消置顶",
+      "deleteSession": "删除会话",
+      "turns": "{n}轮",
+      "showMore": "显示更多（{n}）",
+      "showLess": "收起",
+      "current": "当前",
+      "host": "主机",
+      "workspaces": "工作空间",
+      "count": "{n} 个",
+      "dirs": "目录",
+      "dirsMore": "等 {n} 个",
+      "lastOpened": "最近打开",
+      "path": "路径",
+      "created": "创建",
+      "sessions": "会话",
+      "statusApproval": "工具确认",
+      "statusQueued": "排队中",
+      "statusRunning": "生成中",
+      "opening": "正在打开…",
+      "openFailed": "打开会话失败"
+    }
   },
   "settings": {
     "title": "设置",
@@ -576,6 +642,11 @@
   "explorer": {
     "newFile": "新建文件",
     "newDir": "新建目录",
+    "uploadFile": "上传文件",
+    "uploading": "正在上传…",
+    "uploadingProgress": "正在上传 {name}（{current}/{total}）",
+    "uploadDone": "已上传 {n} 个文件",
+    "uploadFail": "上传失败",
     "searchHere": "在此目录中搜索",
     "excludeDir": "从搜索中排除此目录",
     "searchFile": "在此文件中搜索",

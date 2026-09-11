@@ -77,6 +77,12 @@
     },
     "positionLabel": "메뉴 막대 위치",
     "positionLead": "메뉴 막대를 창의 위·왼쪽·오른쪽·아래에 표시합니다.",
+    "positionsShort": {
+      "top": "위",
+      "left": "왼쪽",
+      "right": "오른쪽",
+      "bottom": "아래"
+    },
     "items": {
       "openWorkspace": "작업 공간 열기…",
       "newChat": "새 대화",
@@ -89,6 +95,16 @@
       "keyboardShortcuts": "키보드 단축키…",
       "about": "정보"
     }
+  },
+  "shortcuts": {
+    "title": "키보드 단축키",
+    "commandPalette": "명령 팔레트",
+    "commandPaletteAlt": "명령 팔레트 (대체)",
+    "openFile": "파일 열기",
+    "searchFiles": "파일에서 검색",
+    "save": "파일 저장",
+    "newChat": "새 대화",
+    "close": "오버레이 / 메뉴 닫기"
   },
   "time": {
     "justNow": "방금",
@@ -111,7 +127,12 @@
     "settings": "설정",
     "workspace": "작업 공간",
     "trajectory": "궤적",
-    "file": "파일"
+    "file": "파일",
+    "tab": {
+      "maximize": "그룹 최대화",
+      "restore": "그룹 복원",
+      "dirty": "저장되지 않은 파일"
+    }
   },
   "sidebar": {
     "aria": "세션과 작업 공간",
@@ -153,7 +174,52 @@
     "sshPathPlaceholder": "원격 경로",
     "sshConnect": "연결 후 탐색",
     "sshBrowse": "원격 폴더",
-    "switching": "작업 공간 전환 중…"
+    "switching": "작업 공간 전환 중…",
+    "panel": {
+      "title": "작업 공간",
+      "collapseHosts": "모든 호스트 접기",
+      "expandHosts": "모든 호스트 펼치기",
+      "open": "열기",
+      "openWorkspace": "작업 공간 열기",
+      "empty": "작업 공간이 없습니다. 오른쪽 위에서 폴더를 여세요.",
+      "local": "로컬",
+      "remote": "원격",
+      "editHost": "호스트 편집",
+      "addRemoteWorkspace": "원격 작업 공간 추가",
+      "addLocalWorkspace": "로컬 작업 공간 추가",
+      "currentHost": "현재 호스트",
+      "newSession": "새 세션",
+      "removeWorkspace": "작업 공간 제거",
+      "removeTitle": "작업 공간 제거",
+      "removeSummary": "「{name}」을(를) 제거할까요? 디스크의 파일은 삭제되지 않습니다.",
+      "removeConfirm": "제거",
+      "currentWorkspace": "현재 작업 공간",
+      "loading": "로드 중…",
+      "retry": "다시 시도",
+      "noSessions": "세션 없음",
+      "rename": "이름 바꾸기",
+      "pin": "고정",
+      "unpin": "고정 해제",
+      "deleteSession": "세션 삭제",
+      "turns": "{n}턴",
+      "showMore": "더 보기 ({n})",
+      "showLess": "접기",
+      "current": "현재",
+      "host": "호스트",
+      "workspaces": "작업 공간",
+      "count": "{n}개",
+      "dirs": "폴더",
+      "dirsMore": "외 {n}개",
+      "lastOpened": "최근 열림",
+      "path": "경로",
+      "created": "생성",
+      "sessions": "세션",
+      "statusApproval": "승인 대기",
+      "statusQueued": "대기 중",
+      "statusRunning": "생성 중",
+      "opening": "여는 중…",
+      "openFailed": "세션을 열지 못했습니다"
+    }
   },
   "settings": {
     "title": "설정",
@@ -540,6 +606,11 @@
   "explorer": {
     "newFile": "새 파일",
     "newDir": "새 폴더",
+    "uploadFile": "파일 업로드",
+    "uploading": "업로드 중…",
+    "uploadingProgress": "{name} 업로드 중 ({current}/{total})",
+    "uploadDone": "{n}개 파일 업로드됨",
+    "uploadFail": "업로드 실패",
     "searchHere": "이 폴더에서 검색",
     "excludeDir": "검색에서 이 폴더 제외",
     "searchFile": "이 파일에서 검색",

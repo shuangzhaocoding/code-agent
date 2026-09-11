@@ -1301,6 +1301,100 @@ export const useAppStore = defineStore('app', () => {
     await syncOpenFile(path, content, false)
   }
 
+  async function uploadWorkspaceFile(
+    relPath: string,
+    file: File,
+    onByteProgress?: (loaded: number, total: number) => void,
+  ) {
+    if (!workspaceId.value) throw new Error('No workspace')
+    const form = new FormData()
+    form.append('file', file, file.name)
+    const url = `/api/workspaces/${workspaceId.value}/upload?path=${encodeURIComponent(relPath)}`
+
+    return await new Promise<{ ok: boolean; path: string; size: number }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', url)
+      xhr.responseType = 'json'
+      xhr.upload.onprogress = (ev) => {
+        if (!ev.lengthComputable) return
+        onByteProgress?.(ev.loaded, ev.total)
+      }
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          const body = xhr.response || {}
+          resolve({
+            ok: Boolean(body.ok ?? true),
+            path: String(body.path || relPath),
+            size: Number(body.size ?? file.size),
+          })
+          return
+        }
+        let msg = xhr.statusText || 'Upload failed'
+        try {
+          const raw = typeof xhr.response === 'string' ? xhr.response : JSON.stringify(xhr.response)
+          const parsed = typeof xhr.response === 'object' && xhr.response ? xhr.response : JSON.parse(raw || '{}')
+          msg =
+            typeof parsed === 'string'
+              ? parsed
+              : JSON.stringify((parsed as { detail?: unknown }).detail || parsed) || msg
+        } catch {
+          /* keep statusText */
+        }
+        reject(new Error(msg))
+      }
+      xhr.onerror = () => reject(new Error('Upload failed'))
+      xhr.onabort = () => reject(new Error('Upload aborted'))
+      xhr.send(form)
+    })
+  }
+
+  async function uploadWorkspaceFiles(
+    destDir: string,
+    files: FileList | File[],
+    onProgress?: (info: { current: number; total: number; name: string; ratio: number }) => void,
+  ) {
+    if (!workspaceId.value) return []
+    const list = Array.from(files).filter((f) => f && f.name)
+    if (!list.length) return []
+    if (destDir) await expandDir(destDir)
+    else await loadTree('')
+
+    const weights = list.map((f) => Math.max(f.size, 1))
+    const totalWeight = weights.reduce((sum, n) => sum + n, 0)
+    let doneWeight = 0
+    const uploaded: string[] = []
+    const total = list.length
+
+    for (let i = 0; i < list.length; i++) {
+      const file = list[i]
+      const baseName = file.name.replace(/[\\/]+/g, '').trim()
+      if (!baseName || baseName === '.' || baseName === '..') continue
+      const weight = weights[i]
+      const rel = uniqueChildPath(destDir, baseName)
+      await uploadWorkspaceFile(rel, file, (loaded, totalBytes) => {
+        const part = Math.min(1, loaded / Math.max(totalBytes || weight, 1))
+        onProgress?.({
+          current: i + 1,
+          total,
+          name: baseName,
+          ratio: Math.min(0.999, (doneWeight + part * weight) / totalWeight),
+        })
+      })
+      doneWeight += weight
+      sessionTreeMarks.value = { ...sessionTreeMarks.value, [rel]: 'added' }
+      uploaded.push(rel)
+      onProgress?.({
+        current: i + 1,
+        total,
+        name: baseName,
+        ratio: Math.min(1, doneWeight / totalWeight),
+      })
+    }
+    await loadTree(destDir || '')
+    if (destDir) await expandDir(destDir)
+    return uploaded
+  }
+
   function patchReview(path: string, blockId: string, patch: Partial<FileReview>) {
     reviews.value = {
       ...reviews.value,
@@ -1935,7 +2029,8 @@ export const useAppStore = defineStore('app', () => {
         // Prefer attachedRunId over activeRunId: applyIncomingEvent may already
         // have cleared activeRunId on the terminal event.
         if (activeRunId.value && activeRunId.value !== attachedRunId) return
-        discardPendingDeltas()
+        flushPendingDeltas()
+        releaseHeldEvents()
         messages.value = settleUndecidedApprovals(messages.value, { runId: attachedRunId, decision: 'denied' })
         if (runStatus.value === 'running' || runStatus.value === 'queued') {
           runStatus.value = 'completed'
@@ -2460,6 +2555,7 @@ export const useAppStore = defineStore('app', () => {
     clearFsClipboard,
     pasteFsClipboard,
     moveFsEntry,
+    uploadWorkspaceFiles,
     openPath,
     openPathAtLine,
     openChatFilePath,

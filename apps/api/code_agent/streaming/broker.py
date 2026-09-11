@@ -36,14 +36,40 @@ class EventBroker:
 
         async with self._lock(rid):
             await self._flush_run_buffers(rid)
+            if event_type == "block.completed":
+                payload = await self._with_completed_block_text(rid, payload)
             envelope = await self._persist_event_unlocked(rid, event_type, payload)
             if event_type in {"run.completed", "run.failed", "run.cancelled"}:
-                await self._delete_delta_events(rid)
+                # Defer cleanup so split-mode DB pollers can still observe trailing deltas.
+                asyncio.create_task(self._delete_delta_events_later(rid))
                 self._assistant_cache.pop(rid, None)
                 self._run_seq.pop(rid, None)
         self._broadcast(rid, envelope)
         await publish_run_event(rid, envelope)
         return envelope
+
+    async def _with_completed_block_text(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Attach authoritative block text so clients can reconcile missed deltas."""
+        block_id = str(payload.get("block_id") or "")
+        if not block_id or "text" in payload:
+            return payload
+        msg = await Message.filter(run_id=run_id, role="assistant").first()
+        if msg is None:
+            return payload
+        for block in msg.blocks or []:
+            if str(block.get("id")) == block_id:
+                text = block.get("text")
+                if text is None:
+                    return payload
+                return {**payload, "text": str(text)}
+        return payload
+
+    async def _delete_delta_events_later(self, run_id: str, delay_s: float = 2.0) -> None:
+        try:
+            await asyncio.sleep(delay_s)
+            await self._delete_delta_events(run_id)
+        except Exception:
+            pass
 
     async def _alloc_seq(self, run_id: str, run: Run) -> int:
         if run_id not in self._run_seq:
@@ -354,6 +380,10 @@ class EventBroker:
                             seen.add(item["event_id"])
                             yield item
                         if await self._run_is_terminal(run_id):
+                            # One last catch-up poll before closing the stream.
+                            for item in await self._poll_new_events(run_id, seen):
+                                seen.add(item["event_id"])
+                                yield item
                             break
                     continue
                 if event is None:
@@ -362,6 +392,10 @@ class EventBroker:
                     seen.add(event["event_id"])
                     yield event
                 if event.get("type") in {"run.completed", "run.failed", "run.cancelled"}:
+                    if remote:
+                        for item in await self._poll_new_events(run_id, seen):
+                            seen.add(item["event_id"])
+                            yield item
                     return
         finally:
             if redis_task is not None:

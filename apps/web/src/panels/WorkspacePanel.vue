@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type Conversation, type Workspace } from '@/stores/app'
 import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
@@ -7,6 +8,7 @@ import WorkspaceSwitch from '@/components/WorkspaceSwitch.vue'
 import type { WorkspaceSwitchPrefill } from '@/components/WorkspaceSwitch.vue'
 import WorkspaceEditDialog from '@/components/WorkspaceEditDialog.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
+import { useToast } from '@/composables/useToast'
 import { formatRelativeTime, formatWorkspaceOpenedAt } from '@/utils/relativeTime'
 
 const PREVIEW_LIMIT = 5
@@ -18,6 +20,8 @@ type WorkspaceHostGroup = {
   workspaces: Workspace[]
 }
 
+const { t } = useI18n()
+const toast = useToast()
 const store = useAppStore()
 const pins = useSessionPins()
 const showOpen = ref(false)
@@ -37,6 +41,7 @@ const editingTitle = ref('')
 const pinTick = ref(0)
 
 const hoverId = ref<string | null>(null)
+const hoverHostKey = ref<string | null>(null)
 const hoverReady = ref(false)
 const tipStyle = ref<Record<string, string>>({})
 const tipEl = ref<HTMLElement | null>(null)
@@ -94,7 +99,7 @@ function hostEndpoint(ws: Workspace) {
 }
 
 function hostLabel(ws: Workspace) {
-  if (!isSsh(ws)) return '本地'
+  if (!isSsh(ws)) return t('workspace.panel.local')
   const custom = (ws.ssh_display_name || '').trim()
   return custom || hostEndpoint(ws)
 }
@@ -134,8 +139,24 @@ function isHostOpen(key: string) {
 
 function toggleHost(key: string) {
   const next = new Set(collapsedHosts.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
+  const collapsing = !next.has(key)
+  if (collapsing) {
+    next.add(key)
+    // Collapse sessions under this host when folding the host
+    const group = workspaceGroups.value.find((g) => g.key === key)
+    if (group?.workspaces.length) {
+      const expanded = new Set(expandedIds.value)
+      const showAll = new Set(showAllIds.value)
+      for (const ws of group.workspaces) {
+        expanded.delete(ws.id)
+        showAll.delete(ws.id)
+      }
+      expandedIds.value = expanded
+      showAllIds.value = showAll
+    }
+  } else {
+    next.delete(key)
+  }
   collapsedHosts.value = next
 }
 
@@ -147,11 +168,21 @@ const hoverWorkspace = computed(() =>
   store.recentWorkspaces.find((w) => w.id === hoverId.value) || null,
 )
 
+const hoverHost = computed(() =>
+  workspaceGroups.value.find((g) => g.key === hoverHostKey.value) || null,
+)
+
 function clearHoverHide() {
   if (hoverHideTimer) {
     window.clearTimeout(hoverHideTimer)
     hoverHideTimer = 0
   }
+}
+
+function clearTip() {
+  hoverId.value = null
+  hoverHostKey.value = null
+  hoverReady.value = false
 }
 
 function placeTip(anchor: DOMRect) {
@@ -177,33 +208,64 @@ function placeTip(anchor: DOMRect) {
   hoverReady.value = true
 }
 
-function showTip(ws: Workspace, e: MouseEvent) {
-  clearHoverHide()
-  const row = (e.currentTarget as HTMLElement | null)?.closest('.ws-row') as HTMLElement | null
-  const anchor = (row || (e.currentTarget as HTMLElement)).getBoundingClientRect()
-  hoverId.value = ws.id
+function scheduleTipPlace(anchor: DOMRect, stillValid: () => boolean) {
   hoverReady.value = false
   void nextTick(() => {
     if (tipRaf) cancelAnimationFrame(tipRaf)
     tipRaf = requestAnimationFrame(() => {
       tipRaf = 0
-      if (hoverId.value !== ws.id) return
+      if (!stillValid()) return
       placeTip(anchor)
     })
   })
 }
 
+function showTip(ws: Workspace, e: MouseEvent) {
+  clearHoverHide()
+  const row = (e.currentTarget as HTMLElement | null)?.closest('.ws-row') as HTMLElement | null
+  const anchor = (row || (e.currentTarget as HTMLElement)).getBoundingClientRect()
+  hoverHostKey.value = null
+  hoverId.value = ws.id
+  scheduleTipPlace(anchor, () => hoverId.value === ws.id)
+}
+
+function showHostTip(group: WorkspaceHostGroup, e: MouseEvent) {
+  clearHoverHide()
+  const row = (e.currentTarget as HTMLElement | null)?.closest('.host-row') as HTMLElement | null
+  const anchor = (row || (e.currentTarget as HTMLElement)).getBoundingClientRect()
+  hoverId.value = null
+  hoverHostKey.value = group.key
+  scheduleTipPlace(anchor, () => hoverHostKey.value === group.key)
+}
+
 function scheduleHideTip() {
   clearHoverHide()
   hoverHideTimer = window.setTimeout(() => {
-    hoverId.value = null
-    hoverReady.value = false
+    clearTip()
     hoverHideTimer = 0
   }, 120)
 }
 
 function keepTip() {
   clearHoverHide()
+}
+
+function hostSample(group: WorkspaceHostGroup) {
+  return group.workspaces[0] || null
+}
+
+function hostWorkspaceNames(group: WorkspaceHostGroup) {
+  return group.workspaces.map((ws) => ws.name || basename(ws.root_path))
+}
+
+function hostLastOpened(group: WorkspaceHostGroup) {
+  let best: string | null = null
+  for (const ws of group.workspaces) {
+    const t = ws.last_opened_at
+    if (!t) continue
+    if (!best || t > best) best = t
+  }
+  return best
 }
 
 function sessionCountLabel(wsId: string) {
@@ -228,6 +290,21 @@ async function toggleExpand(id: string) {
   await setExpanded(id, !isExpanded(id))
 }
 
+async function expandAllSessions() {
+  // Open all host groups so workspaces underneath are visible
+  collapsedHosts.value = new Set()
+  // Expand the workspace that owns the current session
+  const currentId = store.workspaceId
+  if (currentId) await setExpanded(currentId, true)
+}
+
+function collapseAllSessions() {
+  // Fold every host so workspaces underneath are hidden
+  collapsedHosts.value = new Set(workspaceGroups.value.map((g) => g.key))
+  expandedIds.value = new Set()
+  showAllIds.value = new Set()
+}
+
 function toggleShowAll(id: string) {
   const next = new Set(showAllIds.value)
   if (next.has(id)) next.delete(id)
@@ -235,7 +312,10 @@ function toggleShowAll(id: string) {
   showAllIds.value = next
 }
 
-async function loadConvs(wsId: string) {
+async function loadConvs(wsId: string, force = false) {
+  // Reuse cached list on re-expand; current workspace stays in sync via store.conversations watch.
+  if (!force && wsId in convMap && !errors[wsId]) return
+  if (loading[wsId]) return
   loading[wsId] = true
   errors[wsId] = ''
   try {
@@ -314,9 +394,9 @@ async function removeWorkspace(ws: Workspace, e: MouseEvent) {
   if (removingId.value) return
   const name = ws.name || basename(ws.root_path)
   const ok = await store.askConfirm({
-    title: '移除工作空间',
-    summary: `确定移除「${name}」？不会删除磁盘上的文件。`,
-    confirmLabel: '移除',
+    title: t('workspace.panel.removeTitle'),
+    summary: t('workspace.panel.removeSummary', { name }),
+    confirmLabel: t('workspace.panel.removeConfirm'),
     danger: true,
   })
   if (!ok) return
@@ -373,6 +453,8 @@ async function openConv(ws: Workspace, conv: Conversation) {
       await store.openConversation(conv.id)
     }
     window.dispatchEvent(new Event('ca-focus-agent'))
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : t('workspace.panel.openFailed'))
   } finally {
     openingId.value = null
   }
@@ -386,20 +468,24 @@ function turnCount(wsId: string, item: Conversation) {
 }
 
 function sessionStatus(wsId: string, item: Conversation): { label: string; tone: string; icon: string } | null {
-  let label: string | null = null
+  let kind: 'approval' | 'queued' | 'running' | null = null
   if (wsId === store.workspaceId && item.id === store.conversationId) {
-    if (store.pendingApprovals.length) label = '工具确认'
-    else if (store.isRunBusy()) label = store.runStatus === 'queued' ? '排队中' : '生成中'
+    if (store.pendingApprovals.length) kind = 'approval'
+    else if (store.isRunBusy()) kind = store.runStatus === 'queued' ? 'queued' : 'running'
   } else if (item.awaiting_approval) {
-    label = '工具确认'
+    kind = 'approval'
   } else if (item.active_run_id) {
-    if (item.run_status === 'queued') label = '排队中'
-    else if (!item.run_status || item.run_status === 'running') label = '生成中'
+    if (item.run_status === 'queued') kind = 'queued'
+    else if (!item.run_status || item.run_status === 'running') kind = 'running'
   }
-  if (!label) return null
-  if (label === '工具确认') return { label, tone: 'confirm', icon: 'shield' }
-  if (label === '排队中') return { label, tone: 'queued', icon: 'clock' }
-  return { label, tone: 'running', icon: 'loader' }
+  if (!kind) return null
+  if (kind === 'approval') {
+    return { label: t('workspace.panel.statusApproval'), tone: 'confirm', icon: 'shield' }
+  }
+  if (kind === 'queued') {
+    return { label: t('workspace.panel.statusQueued'), tone: 'queued', icon: 'clock' }
+  }
+  return { label: t('workspace.panel.statusRunning'), tone: 'running', icon: 'loader' }
 }
 
 const statusByKey = computed(() => {
@@ -492,15 +578,40 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 <template>
   <div class="panel-shell workspace-panel panel-chromeless">
     <header class="ws-head">
-      <span class="ws-head-title">工作空间</span>
-      <button type="button" class="ws-head-btn" title="打开工作空间" @click="openPrefill = null; showOpen = true">
-        <AppIcon name="plus" :size="14" :stroke-width="1.75" />
-        <span>打开</span>
-      </button>
+      <span class="ws-head-title">{{ t('workspace.panel.title') }}</span>
+      <div class="ws-head-actions">
+        <button
+          type="button"
+          class="ws-head-btn icon"
+          :title="t('workspace.panel.collapseHosts')"
+          :disabled="!store.recentWorkspaces.length || collapsedHosts.size >= workspaceGroups.length"
+          @click="collapseAllSessions"
+        >
+          <AppIcon name="collapse-all" :size="14" :stroke-width="1.75" />
+        </button>
+        <button
+          type="button"
+          class="ws-head-btn icon"
+          :title="t('workspace.panel.expandHosts')"
+          :disabled="!store.recentWorkspaces.length"
+          @click="expandAllSessions"
+        >
+          <AppIcon name="expand-all" :size="14" :stroke-width="1.75" />
+        </button>
+        <button
+          type="button"
+          class="ws-head-btn"
+          :title="t('workspace.panel.openWorkspace')"
+          @click="openPrefill = null; showOpen = true"
+        >
+          <AppIcon name="plus" :size="14" :stroke-width="1.75" />
+          <span>{{ t('workspace.panel.open') }}</span>
+        </button>
+      </div>
     </header>
 
     <div class="workspace-body">
-      <p v-if="!store.recentWorkspaces.length" class="empty">还没有工作空间，点右上角打开一个目录。</p>
+      <p v-if="!store.recentWorkspaces.length" class="empty">{{ t('workspace.panel.empty') }}</p>
 
       <div
         v-for="group in workspaceGroups"
@@ -508,7 +619,11 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
         class="host-block"
         :class="{ current: isHostActive(group) }"
       >
-        <div class="host-row">
+        <div
+          class="host-row"
+          @mouseenter="showHostTip(group, $event)"
+          @mouseleave="scheduleHideTip"
+        >
           <button type="button" class="host-main" @click="toggleHost(group.key)">
             <AppIcon
               class="host-chev"
@@ -518,11 +633,13 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
             />
             <AppIcon
               class="host-icon"
+              :class="{ 'is-ssh': group.kind === 'ssh' }"
               :name="group.kind === 'ssh' ? 'globe' : 'folder'"
               :size="13"
               :stroke-width="1.75"
             />
             <span class="host-label">{{ group.label }}</span>
+            <span v-if="group.kind === 'ssh'" class="host-ssh-mark" title="SSH">SSH</span>
           </button>
           <div class="host-end">
             <span class="host-count">{{ group.workspaces.length }}</span>
@@ -531,7 +648,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 v-if="group.kind === 'ssh'"
                 type="button"
                 class="host-tool"
-                title="编辑主机"
+                :title="t('workspace.panel.editHost')"
                 @click="startEditHost(group, $event)"
               >
                 <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
@@ -539,13 +656,13 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
               <button
                 type="button"
                 class="host-tool"
-                :title="group.kind === 'ssh' ? '添加远程工作空间' : '添加本地工作空间'"
+                :title="group.kind === 'ssh' ? t('workspace.panel.addRemoteWorkspace') : t('workspace.panel.addLocalWorkspace')"
                 @click="startAddWorkspace(group, $event)"
               >
                 <AppIcon name="plus" :size="13" :stroke-width="1.75" />
               </button>
             </div>
-            <span v-if="isHostActive(group)" class="host-dot" title="当前主机" />
+            <span v-if="isHostActive(group)" class="host-dot" :title="t('workspace.panel.currentHost')" />
           </div>
         </div>
 
@@ -578,7 +695,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                   <button
                     type="button"
                     class="ws-tool"
-                    title="新建会话"
+                    :title="t('workspace.panel.newSession')"
                     :disabled="creatingId === ws.id"
                     @click="newSession(ws, $event)"
                   >
@@ -591,26 +708,31 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                     :disabled="switchingId === ws.id"
                     @click="openWorkspace(ws, $event)"
                   >
-                    打开
+                    {{ t('workspace.panel.open') }}
                   </button>
                   <button
                     type="button"
                     class="ws-tool danger"
-                    title="移除工作空间"
+                    :title="t('workspace.panel.removeWorkspace')"
                     :disabled="removingId === ws.id"
                     @click="removeWorkspace(ws, $event)"
                   >
                     <AppIcon name="trash" :size="13" :stroke-width="1.75" />
                   </button>
                 </div>
-                <span v-if="ws.id === store.workspaceId" class="ws-dot" title="当前工作空间" />
+                <span v-if="ws.id === store.workspaceId" class="ws-dot" :title="t('workspace.panel.currentWorkspace')" />
               </div>
             </div>
 
             <div v-if="isExpanded(ws.id)" class="ws-sessions">
-              <p v-if="loading[ws.id]" class="hint">加载中…</p>
-              <p v-else-if="errors[ws.id]" class="hint err">{{ errors[ws.id] }}</p>
-              <p v-else-if="!sortedConvs(ws.id).length" class="hint">暂无会话</p>
+              <p v-if="loading[ws.id]" class="hint">{{ t('workspace.panel.loading') }}</p>
+              <p v-else-if="errors[ws.id]" class="hint err">
+                <span>{{ errors[ws.id] }}</span>
+                <button type="button" class="hint-retry" @click="loadConvs(ws.id, true)">
+                  {{ t('workspace.panel.retry') }}
+                </button>
+              </p>
+              <p v-else-if="!sortedConvs(ws.id).length" class="hint">{{ t('workspace.panel.noSessions') }}</p>
 
               <div
                 v-for="conv in visibleConvs(ws.id)"
@@ -619,11 +741,21 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 :class="{
                   active: conv.id === store.conversationId && ws.id === store.workspaceId,
                   pinned: pins.isPinnedIn(ws.id, conv.id),
+                  opening: openingId === conv.id,
                 }"
+                :aria-busy="openingId === conv.id"
                 @click="openConv(ws, conv)"
               >
-                <span class="conv-status-slot" aria-hidden="true">
-                  <template v-for="st in [statusByKey.get(`${ws.id}:${conv.id}`)]" :key="`${conv.id}-status`">
+                <span class="conv-status-slot">
+                  <span
+                    v-if="openingId === conv.id"
+                    class="conv-status opening"
+                    :title="t('workspace.panel.opening')"
+                    :aria-label="t('workspace.panel.opening')"
+                  >
+                    <AppIcon class="spin" name="loader" :size="12" :stroke-width="1.75" />
+                  </span>
+                  <template v-else v-for="st in [statusByKey.get(`${ws.id}:${conv.id}`)]" :key="`${conv.id}-status`">
                     <span
                       v-if="st"
                       class="conv-status"
@@ -643,7 +775,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                     class="conv-rename-input"
                     type="text"
                     maxlength="300"
-                    aria-label="重命名"
+                    :aria-label="t('workspace.panel.rename')"
                     @click.stop
                     @keydown="onRenameKeydown(ws.id, conv.id, $event)"
                     @blur="commitRename(ws.id, conv.id)"
@@ -658,24 +790,24 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 </span>
 
                 <span class="conv-actions">
-                  <button type="button" class="conv-action" title="重命名" @click="startRename(conv, $event)">
+                  <button type="button" class="conv-action" :title="t('workspace.panel.rename')" @click="startRename(conv, $event)">
                     <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
                   </button>
                   <button
                     type="button"
                     class="conv-action"
                     :class="{ on: pins.isPinnedIn(ws.id, conv.id) }"
-                    :title="pins.isPinnedIn(ws.id, conv.id) ? '取消置顶' : '置顶'"
+                    :title="pins.isPinnedIn(ws.id, conv.id) ? t('workspace.panel.unpin') : t('workspace.panel.pin')"
                     @click="onTogglePin(ws.id, conv.id, $event)"
                   >
                     <AppIcon name="pin" :size="13" :stroke-width="1.75" />
                   </button>
-                  <button type="button" class="conv-action danger" title="删除会话" @click="onDelete(ws.id, conv.id, $event)">
+                  <button type="button" class="conv-action danger" :title="t('workspace.panel.deleteSession')" @click="onDelete(ws.id, conv.id, $event)">
                     <AppIcon name="trash" :size="13" :stroke-width="1.75" />
                   </button>
                 </span>
 
-                <span class="conv-turns">{{ turnCount(ws.id, conv) }}轮</span>
+                <span class="conv-turns">{{ t('workspace.panel.turns', { n: turnCount(ws.id, conv) }) }}</span>
               </div>
 
               <button
@@ -684,7 +816,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 class="show-more"
                 @click="toggleShowAll(ws.id)"
               >
-                显示更多（{{ hiddenCount(ws.id) }}）
+                {{ t('workspace.panel.showMore', { n: hiddenCount(ws.id) }) }}
               </button>
               <button
                 v-else-if="showsAll(ws.id) && sortedConvs(ws.id).length > PREVIEW_LIMIT"
@@ -692,7 +824,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 class="show-more"
                 @click="toggleShowAll(ws.id)"
               >
-                收起
+                {{ t('workspace.panel.showLess') }}
               </button>
             </div>
           </li>
@@ -702,7 +834,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 
     <Teleport to="body">
       <div
-        v-if="hoverWorkspace"
+        v-if="hoverHost || hoverWorkspace"
         ref="tipEl"
         class="ws-tip"
         :class="{ ready: hoverReady }"
@@ -711,43 +843,86 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
         @mouseenter="keepTip"
         @mouseleave="scheduleHideTip"
       >
-        <div class="ws-tip-head">
-          <AppIcon
-            class="ws-tip-icon"
-            :name="isSsh(hoverWorkspace) ? 'globe' : 'folder'"
-            :size="15"
-            :stroke-width="1.75"
-          />
-          <div class="ws-tip-titles">
-            <strong>{{ hoverWorkspace.name || basename(hoverWorkspace.root_path) }}</strong>
-            <span v-if="isSsh(hoverWorkspace)" class="ws-tip-badge remote">远程</span>
-            <span v-if="hoverWorkspace.id === store.workspaceId" class="ws-tip-badge">当前</span>
+        <template v-if="hoverHost">
+          <div class="ws-tip-head">
+            <AppIcon
+              class="ws-tip-icon"
+              :class="{ 'is-ssh': hoverHost.kind === 'ssh' }"
+              :name="hoverHost.kind === 'ssh' ? 'globe' : 'folder'"
+              :size="15"
+              :stroke-width="1.75"
+            />
+            <div class="ws-tip-titles">
+              <strong>{{ hoverHost.label }}</strong>
+              <span class="ws-tip-badge" :class="hoverHost.kind === 'ssh' ? 'remote' : 'local'">
+                {{ hoverHost.kind === 'ssh' ? t('workspace.panel.remote') : t('workspace.panel.local') }}
+              </span>
+              <span v-if="isHostActive(hoverHost)" class="ws-tip-badge">{{ t('workspace.panel.current') }}</span>
+            </div>
           </div>
-        </div>
-        <dl class="ws-tip-meta">
-          <div v-if="isSsh(hoverWorkspace)">
-            <dt>主机</dt>
-            <dd class="mono">{{ hostEndpoint(hoverWorkspace) }}</dd>
+          <dl class="ws-tip-meta">
+            <div v-if="hoverHost.kind === 'ssh' && hostSample(hoverHost)">
+              <dt>{{ t('workspace.panel.host') }}</dt>
+              <dd class="mono">{{ hostEndpoint(hostSample(hoverHost)!) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t('workspace.panel.workspaces') }}</dt>
+              <dd>{{ t('workspace.panel.count', { n: hoverHost.workspaces.length }) }}</dd>
+            </div>
+            <div v-if="hostWorkspaceNames(hoverHost).length">
+              <dt>{{ t('workspace.panel.dirs') }}</dt>
+              <dd class="ws-tip-list" :title="hostWorkspaceNames(hoverHost).join('\n')">
+                {{ hostWorkspaceNames(hoverHost).slice(0, 6).join('、') }}
+                <template v-if="hostWorkspaceNames(hoverHost).length > 6">
+                  {{ t('workspace.panel.dirsMore', { n: hostWorkspaceNames(hoverHost).length }) }}
+                </template>
+              </dd>
+            </div>
+            <div v-if="hostLastOpened(hoverHost)">
+              <dt>{{ t('workspace.panel.lastOpened') }}</dt>
+              <dd>{{ formatWorkspaceOpenedAt(hostLastOpened(hoverHost)!) }}</dd>
+            </div>
+          </dl>
+        </template>
+        <template v-else-if="hoverWorkspace">
+          <div class="ws-tip-head">
+            <AppIcon
+              class="ws-tip-icon"
+              :name="isSsh(hoverWorkspace) ? 'globe' : 'folder'"
+              :size="15"
+              :stroke-width="1.75"
+            />
+            <div class="ws-tip-titles">
+              <strong>{{ hoverWorkspace.name || basename(hoverWorkspace.root_path) }}</strong>
+              <span v-if="isSsh(hoverWorkspace)" class="ws-tip-badge remote">{{ t('workspace.panel.remote') }}</span>
+              <span v-if="hoverWorkspace.id === store.workspaceId" class="ws-tip-badge">{{ t('workspace.panel.current') }}</span>
+            </div>
           </div>
-          <div>
-            <dt>路径</dt>
-            <dd class="mono" :title="hoverWorkspace.display_path || hoverWorkspace.root_path">
-              {{ hoverWorkspace.display_path || hoverWorkspace.root_path }}
-            </dd>
-          </div>
-          <div v-if="hoverWorkspace.last_opened_at">
-            <dt>最近打开</dt>
-            <dd>{{ formatWorkspaceOpenedAt(hoverWorkspace.last_opened_at) }}</dd>
-          </div>
-          <div v-if="hoverWorkspace.created_at">
-            <dt>创建</dt>
-            <dd>{{ formatRelativeTime(hoverWorkspace.created_at) }}</dd>
-          </div>
-          <div v-if="sessionCountLabel(hoverWorkspace.id) != null">
-            <dt>会话</dt>
-            <dd>{{ sessionCountLabel(hoverWorkspace.id) }} 个</dd>
-          </div>
-        </dl>
+          <dl class="ws-tip-meta">
+            <div v-if="isSsh(hoverWorkspace)">
+              <dt>{{ t('workspace.panel.host') }}</dt>
+              <dd class="mono">{{ hostEndpoint(hoverWorkspace) }}</dd>
+            </div>
+            <div>
+              <dt>{{ t('workspace.panel.path') }}</dt>
+              <dd class="mono" :title="hoverWorkspace.display_path || hoverWorkspace.root_path">
+                {{ hoverWorkspace.display_path || hoverWorkspace.root_path }}
+              </dd>
+            </div>
+            <div v-if="hoverWorkspace.last_opened_at">
+              <dt>{{ t('workspace.panel.lastOpened') }}</dt>
+              <dd>{{ formatWorkspaceOpenedAt(hoverWorkspace.last_opened_at) }}</dd>
+            </div>
+            <div v-if="hoverWorkspace.created_at">
+              <dt>{{ t('workspace.panel.created') }}</dt>
+              <dd>{{ formatRelativeTime(hoverWorkspace.created_at) }}</dd>
+            </div>
+            <div v-if="sessionCountLabel(hoverWorkspace.id) != null">
+              <dt>{{ t('workspace.panel.sessions') }}</dt>
+              <dd>{{ t('workspace.panel.count', { n: sessionCountLabel(hoverWorkspace.id) }) }}</dd>
+            </div>
+          </dl>
+        </template>
       </div>
     </Teleport>
 
@@ -767,15 +942,15 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 
 <style scoped>
 .workspace-panel {
-  background: var(--panel-bg);
+  background: var(--sidebar-bg);
 }
 
 .ws-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 36px;
-  padding: 4px 10px 2px 12px;
+  min-height: 28px;
+  padding: 4px 8px;
   flex-shrink: 0;
 }
 
@@ -787,25 +962,43 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: var(--text-muted);
 }
 
-.ws-head-btn {
+.ws-head-actions {
   margin-left: auto;
-  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ws-head-btn {
+  height: 22px;
   padding: 0 8px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-secondary);
+  font: inherit;
   font-size: 12px;
-  font-weight: 500;
   cursor: pointer;
 }
 
-.ws-head-btn:hover {
+.ws-head-btn.icon {
+  width: 22px;
+  min-width: 22px;
+  padding: 0;
+  justify-content: center;
+}
+
+.ws-head-btn:hover:not(:disabled) {
   background: var(--code-bg);
   color: var(--text-h);
+}
+
+.ws-head-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .workspace-body {
@@ -820,13 +1013,13 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   padding: 4px 0 6px;
   border: var(--border-width) solid var(--border);
   border-radius: 10px;
-  background: color-mix(in srgb, var(--text-h) 3%, var(--panel-bg));
+  background: color-mix(in srgb, var(--text-h) 3%, var(--sidebar-bg));
   overflow: hidden;
 }
 
 .host-block.current {
   border-color: color-mix(in srgb, #22c55e 35%, var(--border));
-  background: color-mix(in srgb, #22c55e 6%, var(--panel-bg));
+  background: color-mix(in srgb, #22c55e 6%, var(--sidebar-bg));
 }
 
 .host-row {
@@ -863,15 +1056,25 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .host-tools {
+  position: absolute;
+  right: 100%;
+  top: 50%;
   display: flex;
   align-items: center;
-  flex-shrink: 0;
+  gap: 0;
+  margin-right: 2px;
+  padding: 1px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.12s ease;
+  transform: translate(4px, -50%);
+  transition: opacity 0.12s ease, transform 0.12s ease;
 }
 
 .host-end {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -882,11 +1085,28 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .host-row:hover .host-tools,
-.host-row:focus-within .host-tools,
+.host-row:focus-within .host-tools {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(0, -50%);
+}
+
 .host-row:hover .host-count,
 .host-row:focus-within .host-count {
   opacity: 1;
-  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .host-tools {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    margin-right: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+  }
 }
 
 .host-tool {
@@ -917,6 +1137,14 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: #16a34a;
 }
 
+.host-icon.is-ssh {
+  color: #0284c7;
+}
+
+.host-block.current .host-icon.is-ssh {
+  color: #0284c7;
+}
+
 .host-label {
   flex: 1;
   min-width: 0;
@@ -927,6 +1155,19 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   font-weight: 650;
   letter-spacing: 0.01em;
   color: var(--text-h);
+}
+
+.host-ssh-mark {
+  flex-shrink: 0;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 15px;
+  color: #0284c7;
+  background: color-mix(in srgb, #0284c7 14%, transparent);
 }
 
 .ws-badge {
@@ -965,8 +1206,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--text-h) 8%, transparent);
   font-variant-numeric: tabular-nums;
-  opacity: 0;
-  pointer-events: none;
+  opacity: 0.55;
   transition: opacity 0.12s ease;
 }
 
@@ -994,6 +1234,25 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 
 .hint.err {
   color: var(--error-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hint-retry {
+  border: 0;
+  border-radius: 5px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hint-retry:hover {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
 .ws-list {
@@ -1165,6 +1424,11 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: var(--text-h);
 }
 
+.conv-row.opening {
+  opacity: 0.78;
+  pointer-events: none;
+}
+
 .conv-row.active .conv-title {
   color: var(--text-h);
   font-weight: 600;
@@ -1186,11 +1450,14 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   color: var(--text-muted);
 }
 
-.conv-status.running {
+.conv-status.running,
+.conv-status.opening {
   color: var(--primary);
 }
 
-.conv-status.running :deep(svg) {
+.conv-status.running :deep(svg),
+.conv-status.opening :deep(svg),
+.spin {
   animation: conv-spin 0.9s linear infinite;
 }
 
@@ -1356,6 +1623,17 @@ html[data-theme='dark'] .ws-tip {
   flex-shrink: 0;
   margin-top: 1px;
   color: var(--primary);
+}
+.ws-tip-icon.is-ssh {
+  color: #0284c7;
+}
+.ws-tip-list {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.4;
 }
 .ws-tip-titles {
   min-width: 0;

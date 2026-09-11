@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon, { type AppIconName } from '@/components/AppIcon.vue'
 import BrandMark from '@/components/BrandMark.vue'
+import ShortcutsHelp from '@/components/ShortcutsHelp.vue'
 import { useToast } from '@/composables/useToast'
 import { useAppStore } from '@/stores/app'
 import {
@@ -32,6 +33,8 @@ const props = defineProps<{
   asTitleBar?: boolean
   /** Hide brand when a DesktopTitleBar already shows it. */
   hideBrand?: boolean
+  /** Hide command/theme actions when DesktopTitleBar already shows them. */
+  hideActions?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -45,10 +48,13 @@ const { t } = useI18n()
 const store = useAppStore()
 const toast = useToast()
 const openMenu = ref<MenuId | null>(null)
+const activeOption = ref(-1)
+const shortcutsOpen = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 const dropdownEl = ref<HTMLElement | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
+const MENU_ORDER: MenuId[] = ['file', 'edit', 'panel', 'help']
 
 const modKey = isMacMod() ? '⌘' : 'Ctrl+'
 const commandShortcut = paletteShortcutLabel()
@@ -89,36 +95,103 @@ const POSITION_ICONS: Record<MenuBarPosition, AppIconName> = {
 
 function closeMenu() {
   openMenu.value = null
+  activeOption.value = -1
+}
+
+async function openMenuById(id: MenuId) {
+  openMenu.value = id
+  activeOption.value = 0
+  await nextTick()
+  const trigger = rootEl.value?.querySelector(
+    `.menu-item.open .menu-trigger`,
+  ) as HTMLElement | null
+  if (trigger) {
+    placeDropdown(trigger)
+    requestAnimationFrame(() => placeDropdown(trigger))
+  }
+}
+
+function moveActiveOption(delta: number) {
+  const items = activeMenuItems.value
+  if (!items.length) {
+    activeOption.value = -1
+    return
+  }
+  const next = activeOption.value < 0 ? (delta > 0 ? 0 : items.length - 1) : activeOption.value + delta
+  activeOption.value = ((next % items.length) + items.length) % items.length
+  void nextTick(() => {
+    dropdownEl.value
+      ?.querySelector('.menu-option.active')
+      ?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
+function switchMenu(delta: number) {
+  if (!openMenu.value) return
+  const idx = MENU_ORDER.indexOf(openMenu.value)
+  if (idx < 0) return
+  const next = MENU_ORDER[(idx + delta + MENU_ORDER.length) % MENU_ORDER.length]
+  void openMenuById(next)
 }
 
 function placeDropdown(trigger: HTMLElement) {
   const rect = trigger.getBoundingClientRect()
   const gap = 6
+  const margin = 8
+  const el = dropdownEl.value
+  const width = Math.max(el?.offsetWidth || 240, 240)
+  const height = Math.max(el?.offsetHeight || 48, 48)
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+
+  let top: number | null = null
+  let left: number | null = null
+  let right: number | null = null
+  let bottom: number | null = null
+
   if (props.position === 'top') {
-    dropdownStyle.value = {
-      top: `${Math.round(rect.bottom + gap)}px`,
-      left: `${Math.round(rect.left)}px`,
+    top = rect.bottom + gap
+    left = rect.left
+    if (top + height > vh - margin) {
+      top = Math.max(margin, rect.top - height - gap)
     }
-    return
-  }
-  if (props.position === 'bottom') {
-    dropdownStyle.value = {
-      bottom: `${Math.round(window.innerHeight - rect.top + gap)}px`,
-      left: `${Math.round(rect.left)}px`,
+  } else if (props.position === 'bottom') {
+    bottom = vh - rect.top + gap
+    left = rect.left
+    const estimatedTop = vh - bottom - height
+    if (estimatedTop < margin) {
+      bottom = null
+      top = Math.min(rect.bottom + gap, vh - height - margin)
     }
-    return
-  }
-  if (props.position === 'left') {
-    dropdownStyle.value = {
-      top: `${Math.round(rect.top)}px`,
-      left: `${Math.round(rect.right + gap)}px`,
+  } else if (props.position === 'left') {
+    top = rect.top
+    left = rect.right + gap
+    if (left + width > vw - margin) {
+      left = Math.max(margin, rect.left - width - gap)
     }
-    return
+  } else {
+    top = rect.top
+    right = vw - rect.left + gap
+    const estimatedLeft = vw - right - width
+    if (estimatedLeft < margin) {
+      right = null
+      left = Math.min(rect.right + gap, vw - width - margin)
+    }
   }
-  dropdownStyle.value = {
-    top: `${Math.round(rect.top)}px`,
-    right: `${Math.round(window.innerWidth - rect.left + gap)}px`,
+
+  if (left != null) {
+    left = Math.min(Math.max(margin, left), Math.max(margin, vw - width - margin))
   }
+  if (top != null) {
+    top = Math.min(Math.max(margin, top), Math.max(margin, vh - height - margin))
+  }
+
+  const style: Record<string, string> = {}
+  if (top != null) style.top = `${Math.round(top)}px`
+  if (left != null) style.left = `${Math.round(left)}px`
+  if (right != null) style.right = `${Math.round(right)}px`
+  if (bottom != null) style.bottom = `${Math.round(bottom)}px`
+  dropdownStyle.value = style
 }
 
 async function toggleMenu(id: MenuId, e: MouseEvent) {
@@ -127,6 +200,7 @@ async function toggleMenu(id: MenuId, e: MouseEvent) {
     return
   }
   openMenu.value = id
+  activeOption.value = 0
   const trigger = e.currentTarget as HTMLElement
   await nextTick()
   placeDropdown(trigger)
@@ -136,9 +210,14 @@ async function toggleMenu(id: MenuId, e: MouseEvent) {
 function onMenuEnter(id: MenuId, e: MouseEvent) {
   if (!openMenu.value || openMenu.value === id) return
   openMenu.value = id
+  activeOption.value = 0
   const trigger = e.currentTarget as HTMLElement
   void nextTick(() => placeDropdown(trigger))
 }
+
+watch(openMenu, (id) => {
+  if (!id) activeOption.value = -1
+})
 
 async function runItem(item: MenuItem) {
   if (item.disabled || item.separator || !item.run) return
@@ -270,8 +349,9 @@ const menus = computed(() => {
       id: 'shortcuts',
       label: t('menu.items.keyboardShortcuts'),
       icon: 'command',
-      shortcut: commandShortcut,
-      run: () => emit('openCommandPalette'),
+      run: () => {
+        shortcutsOpen.value = true
+      },
     },
     {
       id: 'about',
@@ -292,6 +372,10 @@ const menus = computed(() => {
 })
 
 const activeMenu = computed(() => menus.value.find((menu) => menu.id === openMenu.value) || null)
+const activeMenuItems = computed(() =>
+  (activeMenu.value?.items || []).filter((item) => !item.separator && !item.disabled),
+)
+const activeItemId = computed(() => activeMenuItems.value[activeOption.value]?.id || null)
 
 function onImportFile(e: Event) {
   const input = e.target as HTMLInputElement
@@ -325,9 +409,44 @@ function onPointerDown(e: PointerEvent) {
 }
 
 function onKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && openMenu.value) {
+  if (!openMenu.value) return
+  const sideRail = props.position === 'left' || props.position === 'right'
+  if (e.key === 'Escape') {
+    e.preventDefault()
     e.stopPropagation()
     closeMenu()
+    return
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    e.stopPropagation()
+    moveActiveOption(1)
+    return
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    e.stopPropagation()
+    moveActiveOption(-1)
+    return
+  }
+  if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    e.stopPropagation()
+    switchMenu(sideRail ? 1 : 1)
+    return
+  }
+  if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    e.stopPropagation()
+    switchMenu(sideRail ? -1 : -1)
+    return
+  }
+  if (e.key === 'Enter' || e.key === ' ') {
+    const item = activeMenuItems.value[activeOption.value]
+    if (!item) return
+    e.preventDefault()
+    e.stopPropagation()
+    void runItem(item)
   }
 }
 
@@ -383,7 +502,7 @@ onUnmounted(() => {
       </div>
     </nav>
 
-    <div class="menu-actions">
+    <div v-if="!hideActions" class="menu-actions">
       <button
         type="button"
         class="ghost-icon-btn"
@@ -425,9 +544,13 @@ onUnmounted(() => {
           v-else
           type="button"
           class="menu-option"
+          :class="{ active: activeItemId === item.id }"
           role="menuitem"
           :disabled="item.disabled"
           :aria-checked="item.checked"
+          @mouseenter="
+            activeOption = activeMenuItems.findIndex((it) => it.id === item.id)
+          "
           @click="runItem(item)"
         >
           <span class="menu-option-main">
@@ -448,6 +571,8 @@ onUnmounted(() => {
       </template>
     </div>
   </Teleport>
+
+  <ShortcutsHelp v-model:open="shortcutsOpen" />
 </template>
 
 <style scoped>
@@ -487,6 +612,10 @@ onUnmounted(() => {
   align-items: stretch;
   gap: 6px;
   padding: 10px 6px;
+}
+.app-menu-bar.pos-left:not(:has(.menu-actions)),
+.app-menu-bar.pos-right:not(:has(.menu-actions)) {
+  padding-bottom: 6px;
 }
 .app-menu-bar.pos-left {
   border-right: var(--border-width) solid var(--border);
@@ -605,7 +734,8 @@ onUnmounted(() => {
   text-align: left;
   cursor: pointer;
 }
-.menu-option:hover:not(:disabled) {
+.menu-option:hover:not(:disabled),
+.menu-option.active:not(:disabled) {
   background: var(--primary-soft);
   color: var(--primary);
 }

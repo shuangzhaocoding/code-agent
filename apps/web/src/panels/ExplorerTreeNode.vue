@@ -5,7 +5,7 @@ import { useAppStore } from '@/stores/app'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
-import { explorerDragKey, FS_DRAG_MIME } from '@/panels/explorerDrag'
+import { explorerDragKey, FS_DRAG_MIME, isOsFileDrag } from '@/panels/explorerDrag'
 
 const props = defineProps<{
   item: FsItem
@@ -121,17 +121,23 @@ function onDragOver(e: DragEvent) {
   if (!drag) return
   const types = e.dataTransfer?.types
   const isOurs = !!drag.dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
-  if (!isOurs) return
+  const isFiles = isOsFileDrag(e)
+  if (!isOurs && !isFiles) return
   e.preventDefault()
   e.stopPropagation()
   const dest = drag.resolveDestDir(props.item)
-  if (!drag.canDropTo(dest)) {
-    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
-    drag.setDropHover(null, null)
+  if (isOurs) {
+    if (!drag.canDropTo(dest)) {
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+      drag.setDropHover(null, null)
+      return
+    }
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+    drag.setDropHover(props.item.path, dest)
     return
   }
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
-  drag.setDropHover(props.item.path, dest)
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  drag.setDropHover(props.item.path, dest, { external: true })
 }
 
 function onDragLeave(e: DragEvent) {
@@ -145,6 +151,14 @@ function onDrop(e: DragEvent) {
   if (!drag) return
   const types = e.dataTransfer?.types
   const isOurs = !!drag.dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
+  const files = e.dataTransfer?.files
+  if (!isOurs && files?.length) {
+    e.preventDefault()
+    e.stopPropagation()
+    const dest = drag.resolveDestDir(props.item)
+    void drag.dropFiles(dest, files)
+    return
+  }
   if (!isOurs) return
   e.preventDefault()
   e.stopPropagation()

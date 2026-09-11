@@ -86,6 +86,8 @@ export type AppIconName =
   | 'tree'
   | 'expand-all'
   | 'collapse-all'
+  | 'maximize'
+  | 'minimize'
 
 const props = withDefaults(
   defineProps<{
@@ -392,6 +394,18 @@ const paths: Record<string, string[]> = {
   'collapse-all': [
     'M7 11l5-5 5 5',
     'M7 18l5-5 5 5',
+  ],
+  maximize: [
+    'M8 3H5a2 2 0 0 0-2 2v3',
+    'M16 3h3a2 2 0 0 1 2 2v3',
+    'M8 21H5a2 2 0 0 1-2-2v-3',
+    'M16 21h3a2 2 0 0 0 2-2v-3',
+  ],
+  minimize: [
+    'M8 3v3a2 2 0 0 1-2 2H3',
+    'M21 8h-3a2 2 0 0 1-2-2V3',
+    'M3 16h3a2 2 0 0 1 2 2v3',
+    'M16 21v-3a2 2 0 0 1 2-2h3',
   ],
 }
 

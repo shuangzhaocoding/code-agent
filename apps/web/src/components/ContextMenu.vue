@@ -85,7 +85,7 @@ onBeforeUnmount(() => {
     ref="root"
     class="ctx dropdown-panel"
     :class="{ ready: true }"
-    :style="{ left: pos.left + 'px', top: pos.top + 'px', position: 'fixed', zIndex: '80', opacity: 1, pointerEvents: 'auto' }"
+    :style="{ left: pos.left + 'px', top: pos.top + 'px', position: 'fixed', zIndex: '13000', opacity: 1, pointerEvents: 'auto' }"
     @click.stop
     @contextmenu.prevent
   >

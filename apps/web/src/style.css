@@ -201,7 +201,6 @@ html, body, #app {
 
 html {
   scroll-behavior: smooth;
-  scrollbar-gutter: stable;
 }
 
 /* Panel / menu scroll regions */
@@ -970,16 +969,27 @@ html[data-theme='dark'] .dropdown-panel {
 .search-box-btn:hover { background: var(--primary-hover); }
 
 .dockview-theme-codeagent .dv-tabs-and-actions-container {
-  padding: 0 8px 0 6px;
-  gap: 4px;
+  padding: 0 8px 0 0;
+  gap: 0;
   border-bottom: var(--border-width) solid var(--border);
   background-color: var(--page-bg);
   color: var(--text);
+  align-items: stretch;
+}
+
+.dockview-theme-codeagent .dv-tabs-and-actions-container > .dv-scrollable,
+.dockview-theme-codeagent .dv-tabs-and-actions-container > .dv-pre-actions-container,
+.dockview-theme-codeagent .dv-tabs-and-actions-container > .dv-left-actions-container {
+  margin: 0;
+  padding: 0;
 }
 
 .dockview-theme-codeagent .dv-tabs-container {
-  gap: 2px;
-  padding: 3px 0 0;
+  gap: 0;
+  padding: 0;
+  margin: 0;
+  align-items: stretch;
+  height: 100%;
 }
 
 .dockview-theme-codeagent .dv-tabs-container.dv-horizontal .dv-tab:not(:first-child)::before {
@@ -995,17 +1005,26 @@ html[data-theme='dark'] .dropdown-panel {
 .dockview-theme-codeagent .dv-tab {
   cursor: grab;
   min-width: 0;
-  height: 30px;
-  margin: 0;
-  padding: 0;
+  height: 100%;
+  margin: 0 !important;
+  padding: 0 !important;
   border: 1px solid transparent;
+  border-left: 0;
   border-bottom: 0;
   border-radius: 0;
   background: transparent;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
-  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+  transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, opacity 0.14s ease;
+  align-self: stretch;
+  box-sizing: border-box;
+}
+
+.dockview-theme-codeagent .dv-tabs-container > .dv-tab:first-child {
+  margin-left: 0 !important;
+  padding-left: 0 !important;
+  border-left: 0 !important;
 }
 
 .dockview-theme-codeagent .dv-tab > div {
@@ -1019,23 +1038,54 @@ html[data-theme='dark'] .dropdown-panel {
   color: var(--text-h) !important;
 }
 
+.dockview-theme-codeagent .dv-tab.dv-dragged,
+.dockview-theme-codeagent .dv-tab-ghost-drag {
+  opacity: 0.92;
+  background: var(--panel-bg) !important;
+  color: var(--text-h) !important;
+  box-shadow:
+    0 0 0 1.5px var(--primary),
+    0 8px 22px color-mix(in srgb, #000 22%, transparent);
+  z-index: 5;
+}
+
+.dockview-theme-codeagent .dv-tab.dv-dragged {
+  cursor: grabbing;
+}
+
 .dockview-theme-codeagent.dockview-theme-light .dv-tab.dv-active-tab,
 .dockview-theme-codeagent.dockview-theme-dark .dv-tab.dv-active-tab,
 .dockview-theme-codeagent .dv-tab.dv-active-tab,
 .dockview-theme-codeagent .dv-groupview.dv-active-group .dv-tab.dv-active-tab,
 .dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  position: relative;
   background: var(--panel-bg) !important;
   color: var(--text-h) !important;
-  font-weight: 600;
-  border-color: var(--border);
+  font-weight: 650;
+  border-left: 0;
+  border-right: 1px solid var(--border);
+  border-top: 2px solid var(--primary);
   border-bottom: 1px solid var(--panel-bg);
   margin-bottom: -1px;
   padding-bottom: 1px;
   z-index: 1;
+  box-shadow: none;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default {
+  margin: 0 2px;
+  height: auto;
+  align-self: stretch;
+  padding: 0 8px;
+  border-radius: 0;
+  color: var(--text-secondary);
+  border: 1px solid transparent;
 }
 
 .dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
+  background: var(--panel-bg) !important;
   color: var(--text) !important;
+  border-top-color: color-mix(in srgb, var(--primary) 45%, var(--border));
 }
 
 .dockview-theme-codeagent .dv-tab.dv-active-tab .ptab-ico {
@@ -1043,24 +1093,104 @@ html[data-theme='dark'] .dropdown-panel {
   opacity: 1;
 }
 
-.dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab .ptab-ico {
-  color: color-mix(in srgb, var(--primary) 70%, var(--text));
+.dockview-theme-codeagent .dv-tab.dv-active-tab .lbl {
+  color: var(--text-h);
+  font-weight: 650;
 }
 
-.dockview-theme-codeagent .dv-tab.dv-active-tab .x {
-  opacity: 0.42;
+.dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab .ptab-ico {
+  color: color-mix(in srgb, var(--primary) 55%, var(--text));
+}
+
+.dockview-theme-codeagent .dv-tab.dv-active-tab .ptab-close {
+  opacity: 0.55;
 }
 
 .dockview-theme-codeagent.dockview-theme-light .dv-tab.dv-inactive-tab,
 .dockview-theme-codeagent.dockview-theme-dark .dv-tab.dv-inactive-tab,
 .dockview-theme-codeagent .dv-tab.dv-inactive-tab {
-  color: var(--text-secondary) !important;
+  color: var(--text-muted) !important;
   background: transparent !important;
   font-weight: 500;
 }
 
 .dockview-theme-codeagent .dv-default-tab-action {
   display: none;
+}
+
+/* Drop overlay / edge-split preview */
+.dockview-theme-codeagent .dv-drop-target-container .dv-drop-target-anchor,
+.dockview-theme-codeagent .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection {
+  border: var(--dv-drag-over-border) !important;
+  background-color: var(--dv-drag-over-background-color) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.dockview-theme-codeagent .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-top.dv-drop-target-small-vertical {
+  border: 0 !important;
+  border-top: 3px solid var(--primary) !important;
+  background: color-mix(in srgb, var(--primary) 18%, transparent) !important;
+  box-shadow: 0 -1px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.dockview-theme-codeagent .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-bottom.dv-drop-target-small-vertical {
+  border: 0 !important;
+  border-bottom: 3px solid var(--primary) !important;
+  background: color-mix(in srgb, var(--primary) 18%, transparent) !important;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.dockview-theme-codeagent .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-left.dv-drop-target-small-horizontal {
+  border: 0 !important;
+  border-left: 3px solid var(--primary) !important;
+  background: color-mix(in srgb, var(--primary) 18%, transparent) !important;
+  box-shadow: -1px 0 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.dockview-theme-codeagent .dv-drop-target > .dv-drop-target-dropzone > .dv-drop-target-selection.dv-drop-target-right.dv-drop-target-small-horizontal {
+  border: 0 !important;
+  border-right: 3px solid var(--primary) !important;
+  background: color-mix(in srgb, var(--primary) 18%, transparent) !important;
+  box-shadow: 1px 0 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+.dockview-theme-codeagent .dv-dnd-compass-edge-preview {
+  border: 2px solid var(--primary) !important;
+  background-color: color-mix(in srgb, var(--primary) 24%, transparent) !important;
+}
+
+/* Tabs overflow chevron */
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default:hover {
+  background: var(--code-bg);
+  color: var(--text-h);
+  border-color: var(--border);
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-container {
+  min-width: 180px;
+  max-height: min(70vh, 360px);
+  padding: 4px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 10px 28px color-mix(in srgb, #000 18%, transparent);
+  color: var(--text-h);
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-container .dv-tab {
+  height: 30px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-container .dv-tab:hover {
+  background: var(--primary-soft) !important;
+  color: var(--primary) !important;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-container .dv-active-tab {
+  background: color-mix(in srgb, var(--primary) 12%, var(--panel-bg)) !important;
+  color: var(--text-h) !important;
 }
 
 /* override built-in dark/light theme separator & sash colors */
@@ -1084,13 +1214,17 @@ html[data-theme='dark'] .dropdown-panel {
   --dv-activegroup-hiddenpanel-tab-background-color: var(--code-bg);
   --dv-inactivegroup-hiddenpanel-tab-background-color: var(--page-bg);
   --dv-tab-divider-color: var(--border);
+  --dv-tab-margin: 0;
+  --dv-tab-margin-block: 0;
+  --dv-tab-margin-inline: 0;
   --dv-separator-border: var(--border);
   --dv-activegroup-visiblepanel-tab-color: var(--primary);
   --dv-inactivegroup-visiblepanel-tab-color: var(--text);
   --dv-activegroup-hiddenpanel-tab-color: var(--text);
   --dv-inactivegroup-hiddenpanel-tab-color: var(--text-muted);
-  --dv-drag-over-background-color: color-mix(in srgb, var(--primary) 16%, transparent);
-  --dv-drag-over-border-color: transparent;
+  --dv-drag-over-background-color: color-mix(in srgb, var(--primary) 28%, transparent);
+  --dv-drag-over-border-color: var(--primary);
+  --dv-drag-over-border: 2px solid var(--primary);
   --dv-icon-hover-background-color: var(--code-bg);
   --dv-paneview-active-outline-color: var(--primary);
   --dv-paneview-header-border-color: var(--border);

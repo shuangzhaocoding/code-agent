@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import AppIcon from '@/components/AppIcon.vue'
+import AppIcon, { type AppIconName } from '@/components/AppIcon.vue'
 import { useToast } from '@/composables/useToast'
 import { useAppStore } from '@/stores/app'
 import {
@@ -18,7 +18,6 @@ import {
   setMenuBarPosition,
   type MenuBarPosition,
 } from '@/utils/layoutPrefs'
-import FormSelect from '@/components/FormSelect.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -32,12 +31,12 @@ const PRESET_ICONS: Record<LayoutPresetId, string> = {
   code: 'file',
 }
 
-const menuPositionOptions = computed(() =>
-  MENU_BAR_POSITIONS.map((value) => ({
-    value,
-    label: t(`menu.positions.${value}`),
-  })),
-)
+const POSITION_ICONS: Record<MenuBarPosition, AppIconName> = {
+  top: 'menu',
+  left: 'layout-left',
+  right: 'layout-right',
+  bottom: 'layout-bottom',
+}
 
 function syncActivePreset(id?: LayoutPresetId) {
   activePreset.value = id && isLayoutPresetId(id) ? id : getStoredLayoutPreset(store.workspaceId)
@@ -53,16 +52,9 @@ function onMenuPositionChanged(e: Event) {
   if (isMenuBarPosition(position)) menuPosition.value = position
 }
 
-function onMenuPositionSelect(value: string) {
-  if (!isMenuBarPosition(value)) return
+function onMenuPositionSelect(value: MenuBarPosition) {
   menuPosition.value = value
   setMenuBarPosition(value)
-}
-
-function onImportResult(e: Event) {
-  const ok = Boolean((e as CustomEvent<{ ok?: boolean }>).detail?.ok)
-  if (ok) toast.success(t('layout.importDone'))
-  else toast.error(t('layout.importInvalid'))
 }
 
 function resetLayout() {
@@ -94,6 +86,13 @@ function onImportFile(e: Event) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(String(reader.result || ''))
+      const onResult = (ev: Event) => {
+        window.removeEventListener('ca-layout-import-result', onResult)
+        const ok = Boolean((ev as CustomEvent<{ ok?: boolean }>).detail?.ok)
+        if (ok) toast.success(t('layout.importDone'))
+        else toast.error(t('layout.importInvalid'))
+      }
+      window.addEventListener('ca-layout-import-result', onResult)
       window.dispatchEvent(new CustomEvent('ca-layout-import', { detail: { layout: parsed } }))
     } catch {
       toast.error(t('layout.importInvalid'))
@@ -106,12 +105,10 @@ onMounted(() => {
   syncActivePreset()
   menuPosition.value = getMenuBarPosition()
   window.addEventListener('ca-layout-preset-changed', onPresetChanged as EventListener)
-  window.addEventListener('ca-layout-import-result', onImportResult as EventListener)
   window.addEventListener('ca-menu-position', onMenuPositionChanged as EventListener)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-layout-preset-changed', onPresetChanged as EventListener)
-  window.removeEventListener('ca-layout-import-result', onImportResult as EventListener)
   window.removeEventListener('ca-menu-position', onMenuPositionChanged as EventListener)
 })
 
@@ -126,12 +123,23 @@ watch(
     <div class="menu-position-block">
       <h3>{{ t('menu.positionLabel') }}</h3>
       <p class="layout-lead">{{ t('menu.positionLead') }}</p>
-      <FormSelect
-        class="menu-position-select"
-        :model-value="menuPosition"
-        :options="menuPositionOptions"
-        @update:model-value="onMenuPositionSelect"
-      />
+      <div class="position-grid" role="radiogroup" :aria-label="t('menu.positionLabel')">
+        <button
+          v-for="pos in MENU_BAR_POSITIONS"
+          :key="pos"
+          type="button"
+          class="position-card"
+          role="radio"
+          :aria-checked="menuPosition === pos"
+          :class="{ active: menuPosition === pos }"
+          @click="onMenuPositionSelect(pos)"
+        >
+          <span class="position-icon">
+            <AppIcon :name="POSITION_ICONS[pos]" :size="16" />
+          </span>
+          <strong>{{ t(`menu.positionsShort.${pos}`) }}</strong>
+        </button>
+      </div>
     </div>
 
     <h3>{{ t('layout.title') }}</h3>
@@ -187,9 +195,47 @@ watch(
   border-bottom: var(--border-width) solid var(--border);
   margin-bottom: 4px;
 }
-.menu-position-select {
-  width: 100%;
-  max-width: 280px;
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-width: 320px;
+}
+.position-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-h);
+}
+.position-card:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, var(--panel-bg));
+}
+.position-card.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.position-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.position-card strong {
+  font-size: 12px;
+  font-weight: 600;
 }
 .layout-controls h3 {
   margin: 0;
@@ -265,7 +311,8 @@ watch(
   line-height: 1.35;
 }
 @media (max-width: 560px) {
-  .preset-grid {
+  .preset-grid,
+  .position-grid {
     grid-template-columns: 1fr;
   }
 }
