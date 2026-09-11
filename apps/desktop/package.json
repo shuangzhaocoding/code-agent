@@ -3,6 +3,8 @@
   "version": "1.0.3",
   "private": true,
   "description": "Code Agent Electron shell with embedded Python runtime",
+  "homepage": "https://github.com/shuangzhaocoding/code-agent",
+  "author": "shuang zhao <shuang.zhao@narwal.com>",
   "desktopName": "code-agent",
   "main": "main.cjs",
   "scripts": {
@@ -117,6 +119,20 @@
       ],
       "title": "Code Agent ${version}"
     },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1"
+      ],
+      "priority": "optional",
+      "packageCategory": "devel"
+    },
     "linux": {
       "target": [
         {
@@ -139,6 +155,7 @@
         }
       ],
       "category": "Development",
+      "maintainer": "shuang zhao <shuang.zhao@narwal.com>",
       "artifactName": "CodeAgent-${version}-Linux-${arch}-glibc-Python3.11.${ext}",
       "extraResources": [
         {
@@ -146,20 +163,6 @@
           "to": "python"
         }
       ]
-    },
-    "deb": {
-      "depends": [
-        "libgtk-3-0",
-        "libnotify4",
-        "libnss3",
-        "libxss1",
-        "libxtst6",
-        "xdg-utils",
-        "libatspi2.0-0",
-        "libuuid1"
-      ],
-      "priority": "optional",
-      "packageCategory": "devel"
     },
     "mac": {
       "target": [
