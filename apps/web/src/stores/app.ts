@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { api, subscribeRun, type StreamEnvelope } from '@/api/http'
+import { api, subscribeRun, type StreamConnectionState, type StreamEnvelope } from '@/api/http'
+import { useToast } from '@/composables/useToast'
 import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
@@ -9,6 +10,7 @@ import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPat
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
 import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/approvals'
 import { parseChatFileRef } from '@/utils/chatFileLinks'
+import { acceptHunkIntoBefore, rejectHunkFromAfter, textsEqual } from '@/utils/diffHunk'
 import { t } from '@/i18n'
 
 export type Workspace = {
@@ -67,7 +69,14 @@ export type QueuedSend = {
   id: string
   conversationId: string
   text: string
-  references: { type: string; path: string }[]
+  references: {
+    type: string
+    path: string
+    text?: string
+    line_start?: number
+    line_end?: number
+    title?: string
+  }[]
   files: { name: string; url: string; size: number; type: string }[]
   mode: 'ask' | 'agent' | 'plan'
   modelId: string | null
@@ -111,6 +120,10 @@ export const useAppStore = defineStore('app', () => {
   const switchLoading = ref<string | null>(null)
   let switchLoadGen = 0
   const runStatus = ref<string>('idle')
+  /** SSE projection for the active run: idle | live | reconnecting | disconnected */
+  const streamConnection = ref<'idle' | 'live' | 'reconnecting' | 'disconnected'>('idle')
+  let streamResumeAfter: string | null = null
+  const toast = useToast()
   const lastEventId = ref<string | null>(null)
   const applied = ref<Set<string>>(new Set())
   const mode = ref<'ask' | 'agent' | 'plan'>('agent')
@@ -135,6 +148,12 @@ export const useAppStore = defineStore('app', () => {
     text: string
     startLine: number
     endLine: number
+  } | null>(null)
+  const terminalCopyContext = ref<{
+    text: string
+    startLine: number
+    endLine: number
+    title: string
   } | null>(null)
   const fileNotice = ref<string | null>(null)
   const pendingReveal = ref<{
@@ -990,10 +1009,20 @@ export const useAppStore = defineStore('app', () => {
 
   function setEditorCopyContext(ctx: { path: string; text: string; startLine: number; endLine: number }) {
     editorCopyContext.value = ctx
+    terminalCopyContext.value = null
   }
 
   function clearEditorCopyContext() {
     editorCopyContext.value = null
+  }
+
+  function setTerminalCopyContext(ctx: { text: string; startLine: number; endLine: number; title: string }) {
+    terminalCopyContext.value = ctx
+    editorCopyContext.value = null
+  }
+
+  function clearTerminalCopyContext() {
+    terminalCopyContext.value = null
   }
 
   async function openChatFilePath(rawPath: string, line?: number) {
@@ -1134,12 +1163,23 @@ export const useAppStore = defineStore('app', () => {
     const items = pendingReviews.value
     if (!items.length) return
     for (const item of [...pendingReviews.value]) await acceptReview(item.path, item.blockId)
+    await loadGitChangedPaths()
+    if (gitRepoOk.value && Object.keys(gitChangedPaths.value).length) {
+      window.dispatchEvent(
+        new CustomEvent('ca-git-commit-draft', {
+          detail: { message: t('editor.commitDraftDefault') },
+        }),
+      )
+      window.dispatchEvent(new Event('ca-open-git'))
+    }
   }
 
   async function rejectAllReviews() {
     const items = pendingReviews.value
     if (!items.length) return
+    const paths = [...new Set(items.map((item) => item.path))]
     for (const item of [...pendingReviews.value]) await rejectReview(item.path, item.blockId)
+    toast.info(t('editor.reviewRejectedAll', { n: paths.length }))
   }
 
   async function cycleReviewPath(delta: number) {
@@ -1252,12 +1292,46 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  async function writeWorkspaceFile(path: string, content: string) {
+    if (!workspaceId.value) return
+    await api(`/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    })
+    await syncOpenFile(path, content, false)
+  }
+
+  function patchReview(path: string, blockId: string, patch: Partial<FileReview>) {
+    reviews.value = {
+      ...reviews.value,
+      [path]: reviewsForPath(path).map((item) => (item.blockId === blockId ? { ...item, ...patch } : item)),
+    }
+  }
+
   function setReviewStatus(path: string, blockId: string, status: 'accepted' | 'rejected') {
     reviews.value = {
       ...reviews.value,
       [path]: reviewsForPath(path).map((item) => (item.blockId === blockId ? { ...item, status } : item)),
     }
     clampReviewIndex(path)
+  }
+
+  async function applyAgentFileUpdate(path: string, content: string) {
+    const file = openFiles.value.find((f) => f.path === path)
+    if (!file) return
+    if (!file.dirty) {
+      file.content = content
+      window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content } }))
+      return
+    }
+    const useAgent = await askConfirm({
+      title: t('editor.agentWriteConflictTitle'),
+      summary: t('editor.agentWriteConflictSummary', { path }),
+      confirmLabel: t('editor.useAgentVersion'),
+      cancelLabel: t('editor.keepMine'),
+      danger: false,
+    })
+    if (useAgent) await syncOpenFile(path, content, false)
   }
 
   async function acceptReview(path: string, blockId?: string) {
@@ -1267,13 +1341,61 @@ export const useAppStore = defineStore('app', () => {
     if (!review || review.status !== 'pending') return
     setReviewStatus(path, review.blockId, 'accepted')
     markReviewAcked(review.blockId)
-    await syncOpenFile(path, review.after, false)
+    await writeWorkspaceFile(path, review.after)
     if (!pendingReviewsForPath(path).length) {
       const session = { ...sessionTreeMarks.value }
       delete session[path]
       sessionTreeMarks.value = session
       ackedTreeMarks.value = { ...ackedTreeMarks.value, [path]: true }
     }
+    void loadGitChangedPaths()
+  }
+
+  async function acceptReviewHunk(
+    path: string,
+    change: {
+      originalStartLineNumber: number
+      originalEndLineNumber: number
+      modifiedStartLineNumber: number
+      modifiedEndLineNumber: number
+    },
+    blockId?: string,
+  ) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
+    if (!review || review.status !== 'pending') return
+    const nextBefore = acceptHunkIntoBefore(review.before, review.after, change)
+    if (textsEqual(nextBefore, review.after)) {
+      await acceptReview(path, review.blockId)
+      return
+    }
+    patchReview(path, review.blockId, { before: nextBefore })
+    await writeWorkspaceFile(path, nextBefore)
+    void loadGitChangedPaths()
+  }
+
+  async function rejectReviewHunk(
+    path: string,
+    change: {
+      originalStartLineNumber: number
+      originalEndLineNumber: number
+      modifiedStartLineNumber: number
+      modifiedEndLineNumber: number
+    },
+    blockId?: string,
+  ) {
+    const review = blockId
+      ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
+      : pendingReview(path)
+    if (!review || review.status !== 'pending') return
+    const nextAfter = rejectHunkFromAfter(review.before, review.after, change)
+    if (textsEqual(nextAfter, review.before)) {
+      await rejectReview(path, review.blockId)
+      return
+    }
+    patchReview(path, review.blockId, { after: nextAfter })
+    await writeWorkspaceFile(path, nextAfter)
     void loadGitChangedPaths()
   }
 
@@ -1312,6 +1434,7 @@ export const useAppStore = defineStore('app', () => {
     setReviewStatus(path, review.blockId, 'rejected')
     markReviewAcked(review.blockId)
     void loadGitChangedPaths()
+    toast.info(t('editor.reviewRejected', { path }))
   }
 
   function activateFile(path: string) {
@@ -1497,11 +1620,7 @@ export const useAppStore = defineStore('app', () => {
       })
       const changedPath = String(meta.path || path || '')
       if (changedPath && typeof meta.after === 'string') {
-        const file = openFiles.value.find((f) => f.path === changedPath)
-        if (file && !file.dirty) {
-          file.content = meta.after
-          window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: changedPath, content: meta.after } }))
-        }
+        void applyAgentFileUpdate(changedPath, meta.after)
       }
       if (type === 'file.diff' && (meta.action === 'create' || meta.action === 'overwrite') && changedPath) {
         if (meta.action === 'create') {
@@ -1530,6 +1649,8 @@ export const useAppStore = defineStore('app', () => {
       )
       void refreshTree()
       if (activeRunId.value === event.run_id) activeRunId.value = null
+      streamConnection.value = 'idle'
+      streamResumeAfter = null
       syncCurrentConversationStatus({ awaiting_approval: false })
       void flushSendQueue()
     }
@@ -1571,6 +1692,8 @@ export const useAppStore = defineStore('app', () => {
     activeRunId.value = null
     runStatus.value = 'idle'
     lastEventId.value = null
+    streamConnection.value = 'idle'
+    streamResumeAfter = null
   }
 
   async function openConversation(id: string, opts?: { loading?: boolean }) {
@@ -1722,7 +1845,7 @@ export const useAppStore = defineStore('app', () => {
 
   function onEvent(event: StreamEnvelope) {
     // Drop events from a run we already navigated away from
-    if (!activeRunId.value || event.run_id !== activeRunId.value) return
+    if (!activeRunId.value || String(event.run_id) !== String(activeRunId.value)) return
     if (applied.value.has(event.event_id)) return
     applied.value.add(event.event_id)
     lastEventId.value = event.event_id
@@ -1769,24 +1892,72 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function onStreamConnection(runId: string, state: StreamConnectionState) {
+    // Ignore stale callbacks after we've already moved on to another run.
+    if (activeRunId.value !== runId) return
+    if (state === 'live' || state === 'connecting') {
+      if (streamConnection.value !== 'live') streamConnection.value = 'live'
+      return
+    }
+    if (state === 'reconnecting') {
+      streamConnection.value = 'reconnecting'
+      return
+    }
+    // 'closed' from a finished stream — idle (terminal events also clear this)
+    if (runStatus.value === 'running' || runStatus.value === 'queued') {
+      streamConnection.value = 'disconnected'
+    } else {
+      streamConnection.value = 'idle'
+    }
+  }
+
   function attachRun(runId: string, after?: string | null) {
     discardPendingDeltas()
     stopStream?.()
     stopStream = null
     activeRunId.value = runId
     runStatus.value = 'running'
+    streamResumeAfter = after || null
+    streamConnection.value = 'live'
+    // Fresh run should not inherit idempotency keys from a prior stream.
+    if (!after) applied.value = new Set()
     syncCurrentConversationStatus({ awaiting_approval: false })
-    stopStream = subscribeRun(runId, after || null, onEvent, () => {
-      // Stream closed after we already switched conversations — ignore
-      if (activeRunId.value !== runId) return
-      discardPendingDeltas()
-      messages.value = settleUndecidedApprovals(messages.value, { runId, decision: 'denied' })
-      runStatus.value = runStatus.value === 'running' ? 'completed' : runStatus.value
-      activeRunId.value = null
-      syncCurrentConversationStatus({ awaiting_approval: false })
-      loadConversations()
-      void flushSendQueue()
-    })
+    const attachedRunId = runId
+    stopStream = subscribeRun(
+      runId,
+      after || null,
+      (event) => {
+        if (activeRunId.value !== attachedRunId) return
+        streamResumeAfter = event.event_id
+        onEvent(event)
+      },
+      () => {
+        // Prefer attachedRunId over activeRunId: applyIncomingEvent may already
+        // have cleared activeRunId on the terminal event.
+        if (activeRunId.value && activeRunId.value !== attachedRunId) return
+        discardPendingDeltas()
+        messages.value = settleUndecidedApprovals(messages.value, { runId: attachedRunId, decision: 'denied' })
+        if (runStatus.value === 'running' || runStatus.value === 'queued') {
+          runStatus.value = 'completed'
+        }
+        if (activeRunId.value === attachedRunId) activeRunId.value = null
+        streamConnection.value = 'idle'
+        streamResumeAfter = null
+        syncCurrentConversationStatus({ awaiting_approval: false })
+        loadConversations()
+        void flushSendQueue()
+      },
+      (state) => onStreamConnection(attachedRunId, state),
+    )
+  }
+
+  function reconnectActiveStream() {
+    const runId = activeRunId.value
+    if (!runId) {
+      streamConnection.value = 'idle'
+      return
+    }
+    attachRun(runId, streamResumeAfter || lastEventId.value)
   }
 
   function isRunBusy() {
@@ -1816,7 +1987,14 @@ export const useAppStore = defineStore('app', () => {
 
   function enqueueSend(
     text: string,
-    references: { type: string; path: string }[] = [],
+    references: {
+    type: string
+    path: string
+    text?: string
+    line_start?: number
+    line_end?: number
+    title?: string
+  }[] = [],
     files: { name: string; url: string; size: number; type: string }[] = [],
   ) {
     if (!conversationId.value) return
@@ -1855,7 +2033,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function dispatchSend(
     text: string,
-    references: { type: string; path: string }[] = [],
+    references: {
+    type: string
+    path: string
+    text?: string
+    line_start?: number
+    line_end?: number
+    title?: string
+  }[] = [],
     files: { name: string; url: string; size: number; type: string }[] = [],
     opts?: {
       mode?: 'ask' | 'agent' | 'plan'
@@ -1866,14 +2051,20 @@ export const useAppStore = defineStore('app', () => {
   ) {
     if (!conversationId.value) await newChat()
     if (!conversationId.value) return
+    if (!hasConfiguredModel.value) {
+      toast.warning(t('chat.needModel'))
+      window.dispatchEvent(new Event('ca-open-models'))
+      return
+    }
     const sendMode = opts?.mode ?? mode.value
     const sendModel = opts?.modelId ?? modelId.value
     const sendThinking = opts?.thinkingLevel ?? thinkingLevel.value
     const sendSkill = opts?.skillName !== undefined ? opts.skillName : conversationSkillName()
+    const localId = `local-${Date.now()}`
     messages.value = [
       ...messages.value,
       {
-        id: `local-${Date.now()}`,
+        id: localId,
         role: 'user',
         created_at: new Date().toISOString(),
         blocks: [
@@ -1890,21 +2081,27 @@ export const useAppStore = defineStore('app', () => {
         ],
       },
     ]
-    const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
-      method: 'POST',
-      body: JSON.stringify({
-        text,
-        mode: sendMode,
-        model_id: sendModel,
-        thinking_level: sendThinking,
-        thinking: sendThinking !== 'off',
-        references,
-        files,
-        skill_name: sendSkill || undefined,
-      }),
-    })
-    lastEventId.value = null
-    attachRun(data.run_id, null)
+    try {
+      const data = await api<{ run_id: string }>(`/api/conversations/${conversationId.value}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          text,
+          mode: sendMode,
+          model_id: sendModel,
+          thinking_level: sendThinking,
+          thinking: sendThinking !== 'off',
+          references,
+          files,
+          skill_name: sendSkill || undefined,
+        }),
+      })
+      lastEventId.value = null
+      attachRun(data.run_id, null)
+    } catch (err) {
+      messages.value = messages.value.filter((m) => m.id !== localId)
+      toast.error(err instanceof Error ? err.message : t('chat.sendFailed'))
+      throw err
+    }
   }
 
   async function flushSendQueue() {
@@ -1925,6 +2122,7 @@ export const useAppStore = defineStore('app', () => {
     } catch (err) {
       sendQueue.value = [next, ...sendQueue.value]
       console.error(err)
+      toast.error(err instanceof Error ? err.message : t('chat.sendFailed'))
     } finally {
       queueFlushing = false
     }
@@ -1932,7 +2130,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function send(
     text: string,
-    references: { type: string; path: string }[] = [],
+    references: {
+    type: string
+    path: string
+    text?: string
+    line_start?: number
+    line_end?: number
+    title?: string
+  }[] = [],
     files: { name: string; url: string; size: number; type: string }[] = [],
   ) {
     if (!conversationId.value) await newChat()
@@ -1946,7 +2151,14 @@ export const useAppStore = defineStore('app', () => {
 
   async function sendNow(
     text: string,
-    references: { type: string; path: string }[] = [],
+    references: {
+    type: string
+    path: string
+    text?: string
+    line_start?: number
+    line_end?: number
+    title?: string
+  }[] = [],
     files: { name: string; url: string; size: number; type: string }[] = [],
   ) {
     if (!conversationId.value) await newChat()
@@ -1991,7 +2203,11 @@ export const useAppStore = defineStore('app', () => {
     const conv = conversations.value.find((c) => c.id === conversationId.value)
     const runId = activeRunId.value || conv?.active_run_id
     if (!runId) return
-    await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
+    try {
+      await api(`/api/runs/${runId}/cancel`, { method: 'POST' })
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('chat.stopFailed'))
+    }
   }
 
   function askConfirm(req: {
@@ -2067,6 +2283,18 @@ export const useAppStore = defineStore('app', () => {
       const def = pool.find((m: any) => m.is_default) || pool[0]
       if (def) modelId.value = def.id
     }
+  }
+
+  const hasConfiguredModel = computed(() =>
+    providers.value.some((p) => Array.isArray(p.models) && p.models.length > 0),
+  )
+
+  async function quickAddPreset(kind: string) {
+    await api(`/api/llm/presets/${kind}`, {
+      method: 'POST',
+      body: JSON.stringify({ make_default: true }),
+    })
+    await loadProviders()
   }
 
   async function loadSkills() {
@@ -2152,9 +2380,13 @@ export const useAppStore = defineStore('app', () => {
     messages,
     switchLoading,
     runStatus,
+    streamConnection,
+    reconnectActiveStream,
     sendQueue,
     mode,
     modelId,
+    hasConfiguredModel,
+    quickAddPreset,
     thinkingLevel,
     thinking,
     sampling,
@@ -2168,6 +2400,9 @@ export const useAppStore = defineStore('app', () => {
     editorCopyContext,
     setEditorCopyContext,
     clearEditorCopyContext,
+    terminalCopyContext,
+    setTerminalCopyContext,
+    clearTerminalCopyContext,
     fileNotice,
     clearFileNotice,
     pendingReveal,
@@ -2231,6 +2466,8 @@ export const useAppStore = defineStore('app', () => {
     openAgentFile,
     openRevisionFile,
     acceptReview,
+    acceptReviewHunk,
+    rejectReviewHunk,
     rejectReview,
     activateFile,
     closeFile,

@@ -1,22 +1,31 @@
+export type MenuBarPosition = 'top' | 'left' | 'right' | 'bottom'
+
 const KEYS = {
-  sidebarCollapsed: 'ca.sidebar.collapsed',
+  menuPosition: 'ca.menu.position',
 } as const
 
-function readBool(key: string, defaultValue: boolean): boolean {
-  const saved = localStorage.getItem(key)
-  if (saved === '1') return true
-  if (saved === '0') return false
-  return defaultValue
+const POSITIONS: MenuBarPosition[] = ['top', 'left', 'right', 'bottom']
+
+export function isMenuBarPosition(value: unknown): value is MenuBarPosition {
+  return value === 'top' || value === 'left' || value === 'right' || value === 'bottom'
 }
 
-function writeBool(key: string, value: boolean) {
-  localStorage.setItem(key, value ? '1' : '0')
+export function getMenuBarPosition(defaultValue: MenuBarPosition = 'top'): MenuBarPosition {
+  try {
+    const raw = localStorage.getItem(KEYS.menuPosition)
+    return isMenuBarPosition(raw) ? raw : defaultValue
+  } catch {
+    return defaultValue
+  }
 }
 
-export function getSidebarCollapsed(defaultValue = true): boolean {
-  return readBool(KEYS.sidebarCollapsed, defaultValue)
+export function setMenuBarPosition(value: MenuBarPosition) {
+  try {
+    localStorage.setItem(KEYS.menuPosition, value)
+  } catch {
+    /* ignore quota */
+  }
+  window.dispatchEvent(new CustomEvent('ca-menu-position', { detail: { position: value } }))
 }
 
-export function setSidebarCollapsed(value: boolean) {
-  writeBool(KEYS.sidebarCollapsed, value)
-}
+export const MENU_BAR_POSITIONS = POSITIONS

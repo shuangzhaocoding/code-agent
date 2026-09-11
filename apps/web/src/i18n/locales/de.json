@@ -12,6 +12,7 @@
     "close": "Schließen",
     "save": "Speichern",
     "saved": "Gespeichert",
+    "saveFailed": "Speichern fehlgeschlagen",
     "cancel": "Abbrechen",
     "confirm": "Bestätigen",
     "delete": "Löschen",
@@ -61,6 +62,34 @@
     "light": "Hell",
     "dark": "Dunkel"
   },
+  "menu": {
+    "aria": "Anwendungsmenü",
+    "file": "Datei",
+    "edit": "Bearbeiten",
+    "panel": "Panel",
+    "help": "Hilfe",
+    "aboutBody": "{name} {version}",
+    "positions": {
+      "top": "Menüleiste oben",
+      "left": "Menüleiste links",
+      "right": "Menüleiste rechts",
+      "bottom": "Menüleiste unten"
+    },
+    "positionLabel": "Position der Menüleiste",
+    "positionLead": "Menüleiste oben, links, rechts oder unten im Fenster anzeigen.",
+    "items": {
+      "openWorkspace": "Arbeitsbereich öffnen…",
+      "newChat": "Neuer Chat",
+      "openFile": "Datei öffnen…",
+      "save": "Speichern",
+      "exportLayout": "Layout exportieren…",
+      "importLayout": "Layout importieren…",
+      "commandPalette": "Befehlspalette…",
+      "search": "In Dateien suchen…",
+      "keyboardShortcuts": "Tastenkürzel…",
+      "about": "Info"
+    }
+  },
   "time": {
     "justNow": "Gerade eben",
     "minutesAgo": "vor {n} Min.",
@@ -82,7 +111,6 @@
     "settings": "Einstellungen",
     "workspace": "Arbeitsbereich",
     "trajectory": "Verlauf",
-    "chats": "Chats",
     "file": "Dateien"
   },
   "sidebar": {
@@ -198,13 +226,18 @@
   },
   "commandPalette": {
     "aria": "Befehlspalette",
+    "ariaFiles": "Datei schnell öffnen",
     "placeholder": "Befehle oder Chats suchen…",
+    "placeholderFiles": "Nach Dateiname oder Pfad suchen…",
     "empty": "Keine passenden Befehle",
+    "emptyFiles": "Keine passenden Dateien",
+    "loadingFiles": "Dateien werden gesucht…",
     "hint": "↑↓ wählen · Enter ausführen · Esc schließen",
     "or": "oder",
     "groupSession": "Chats",
     "groupPanel": "Panels",
     "groupLayout": "Layout",
+    "groupFiles": "Dateien",
     "newChat": "Neuer Chat",
     "openAgent": "Chat öffnen",
     "openTrajectory": "Verlauf öffnen",
@@ -278,10 +311,25 @@
     "selectModel": "Verfügbares Modell wählen",
     "searchModel": "Modelle suchen",
     "openModels": "Modellseite öffnen und Verfügbarkeit prüfen",
+    "needModel": "Bitte zuerst ein verfügbares Modell hinzufügen",
+    "sendFailed": "Senden fehlgeschlagen",
+    "stopFailed": "Stoppen fehlgeschlagen",
+    "promptNeedModel": "Modell konfigurieren, um zu senden…",
+    "modelSetupTitle": "Kein Modell konfiguriert",
+    "modelSetupLead": "Füge ein LLM hinzu, um Coding-Chats zu starten. Lokales Ollama kann mit einem Klick hinzugefügt werden.",
+    "modelSetupOllama": "Ollama hinzufügen",
+    "modelSetupCustom": "Modelleinstellungen öffnen",
+    "modelSetupBusy": "Wird hinzugefügt…",
+    "modelSetupOllamaOk": "Ollama hinzugefügt und als Standard gesetzt",
+    "modelSetupFailed": "Modell konnte nicht hinzugefügt werden",
     "noMatch": "Keine passenden Modelle",
     "modeAsk": "Schnelle Q&A ohne Tools",
     "modeAgent": "Tools autonom nutzen",
     "modePlan": "Zuerst planen, dann schrittweise ausführen",
+    "newConversation": "Neuer Chat",
+    "pinned": "Angeheftet",
+    "recent": "Zuletzt",
+    "matched": "Treffer",
     "badgeUnknown": "Nicht geprüft",
     "badgeOk": "Verfügbar",
     "badgeFail": "Nicht verfügbar",
@@ -343,9 +391,6 @@
     "noHistory": "Keine Chat-Historie",
     "pin": "Anheften",
     "unpin": "Lösen",
-    "pinned": "Angeheftet",
-    "recent": "Zuletzt",
-    "matched": "Treffer",
     "deleteSession": "Chat löschen",
     "workProcess": "Arbeitsprozess",
     "hideWork": "Arbeitsprozess ausblenden",
@@ -371,7 +416,16 @@
     "noContent": "(leer)",
     "thinkingDone": "Denkinhalt erzeugt ({time})",
     "noDetail": "(keine Details)",
-    "toolResult": "Tool-Ergebnis"
+    "toolResult": "Tool-Ergebnis",
+    "exportMarkdown": "Als Markdown exportieren",
+    "exportJson": "Als JSON exportieren",
+    "exportHint": "Chat exportieren (Klick Markdown, Shift+Klick JSON)",
+    "exportDone": "Chat exportiert",
+    "exportEmpty": "Kein Chat zum Exportieren",
+    "turnCount": "{n} Runden",
+    "statusGenerating": "Wird generiert",
+    "statusQueued": "In Warteschlange",
+    "statusAwaitingApproval": "Bestätigung nötig"
   },
   "models": {
     "title": "Modelle",
@@ -506,6 +560,36 @@
     "cannotMoveIntoSelf": "Kann nicht in sich selbst oder ein Unterverzeichnis verschoben werden",
     "moveFail": "Verschieben fehlgeschlagen"
   },
+  "plan": {
+    "title": "Ausführungsplan",
+    "count": "{n} Schritte",
+    "selectAll": "Alle auswählen",
+    "deselectAll": "Auswahl aufheben",
+    "confirmExecute": "Auswahl ausführen ({n})",
+    "executing": "Wird ausgeführt…",
+    "executed": "Ausführung bestätigt",
+    "selectAtLeastOne": "Mindestens einen Schritt auswählen",
+    "executeLead": "Führen Sie den folgenden Plan schrittweise aus (nur ausgewählte Schritte):"
+  },
+  "layout": {
+    "title": "Workspace-Layout",
+    "lead": "Layout zurücksetzen, exportieren, importieren oder Preset wechseln.",
+    "reset": "Layout zurücksetzen",
+    "export": "JSON exportieren",
+    "import": "JSON importieren",
+    "resetDone": "Layout zurückgesetzt",
+    "presetApplied": "Layout „{name}“ angewendet",
+    "importDone": "Layout importiert",
+    "importInvalid": "Ungültige Layout-Datei",
+    "presets": {
+      "chat": "Chat zuerst",
+      "code": "Code zuerst"
+    },
+    "presetsDesc": {
+      "chat": "Breiter Chat in der Mitte, Dateien und Workspace links",
+      "code": "Editor zentral, Terminal unten, Chat rechts"
+    }
+  },
   "editor": {
     "close": "Schließen",
     "closeOthers": "Andere schließen",
@@ -541,7 +625,16 @@
     "splitRight": "Editor rechts teilen",
     "splitDown": "Editor unten teilen",
     "closeSplit": "Teilung schließen",
-    "splitEmpty": "Datei in diesem Bereich öffnen"
+    "splitEmpty": "Datei in diesem Bereich öffnen",
+    "agentWriteConflictTitle": "Lokale Änderungen kollidieren mit Agent",
+    "agentWriteConflictSummary": "„{path}“ hat ungespeicherte lokale Änderungen und Agent hat eine neue Version geschrieben.",
+    "useAgentVersion": "Agent-Version verwenden",
+    "keepMine": "Meine Änderungen behalten",
+    "reviewRejected": "{path} abgelehnt",
+    "reviewRejectedAll": "{n} Dateien abgelehnt",
+    "commitDraftDefault": "Agent-Änderungen anwenden",
+    "acceptHunk": "Hunk akzeptieren",
+    "rejectHunk": "Hunk ablehnen"
   },
   "search": {
     "title": "Suche",
@@ -565,7 +658,11 @@
   "terminal": {
     "title": "Terminal",
     "new": "Neues Terminal",
-    "close": "Terminal schließen"
+    "close": "Terminal schließen",
+    "untitled": "Terminal {n}",
+    "copy": "Kopieren",
+    "paste": "Einfügen",
+    "addSelectionToChat": "Auswahl zum Chat hinzufügen"
   },
   "ports": {
     "title": "Ports",
@@ -762,5 +859,12 @@
   "workbench": {
     "resizeSidebar": "Ziehen, um die Seitenleistenbreite zu ändern",
     "resizeTrajectory": "Ziehen, um die Verlaufsbreite zu ändern"
+  },
+  "connection": {
+    "reconnecting": "Ereignisstrom wird neu verbunden",
+    "reconnectingLead": "Streaming-Ausgabe wird wiederhergestellt. Bitte warten…",
+    "disconnected": "Ereignisstrom getrennt",
+    "disconnectedLead": "Die Verbindung zum Server wurde unterbrochen. Erneut versuchen oder auf automatische Wiederherstellung warten.",
+    "retry": "Erneut versuchen"
   }
 }

@@ -255,6 +255,34 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Electron custom title bar insets (Window Controls Overlay / traffic lights) */
+html.has-custom-titlebar .desktop-titlebar,
+html.has-custom-titlebar .app-menu-bar.is-titlebar,
+html.has-custom-titlebar .launch-header.is-titlebar {
+  box-sizing: border-box;
+  height: var(--desktop-titlebar-height, 38px);
+  min-height: var(--desktop-titlebar-height, 38px);
+  padding-left: max(10px, env(titlebar-area-x, 0px));
+  padding-right: max(
+    10px,
+    calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+  );
+}
+html.has-custom-titlebar[data-desktop-platform='darwin'] .desktop-titlebar,
+html.has-custom-titlebar[data-desktop-platform='darwin'] .app-menu-bar.is-titlebar,
+html.has-custom-titlebar[data-desktop-platform='darwin'] .launch-header.is-titlebar {
+  /* Fallback when env() is unset: clear traffic lights (hiddenInset). */
+  padding-left: max(78px, env(titlebar-area-x, 78px));
+}
+html.has-custom-titlebar[data-desktop-platform='win32'] .desktop-titlebar,
+html.has-custom-titlebar[data-desktop-platform='win32'] .app-menu-bar.is-titlebar,
+html.has-custom-titlebar[data-desktop-platform='win32'] .launch-header.is-titlebar {
+  padding-right: max(
+    138px,
+    calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+  );
+}
+
 button, input, textarea, select { font: inherit; }
 
 button:focus-visible,

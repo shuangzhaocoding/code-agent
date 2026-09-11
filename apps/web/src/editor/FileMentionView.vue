@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/vue-3'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAppStore } from '@/stores/app'
+import { isTerminalMentionPath } from '@/utils/terminalMention'
 
 const props = defineProps<NodeViewProps>()
 const store = useAppStore()
@@ -17,6 +18,8 @@ const attrs = computed(() => props.node.attrs as {
   lineEnd: number | null
 })
 
+const isTerminal = computed(() => isTerminalMentionPath(attrs.value.path))
+
 const lineLabel = computed(() => {
   const start = attrs.value.lineStart
   const end = attrs.value.lineEnd
@@ -28,6 +31,10 @@ const lineLabel = computed(() => {
 function openMention() {
   const { path, isDir, lineStart } = attrs.value
   if (!path) return
+  if (isTerminalMentionPath(path)) {
+    window.dispatchEvent(new Event('ca-open-terminal'))
+    return
+  }
   if (isDir) {
     void store.openPath(path, true)
     return
@@ -48,6 +55,7 @@ function removeMention() {
   <NodeViewWrapper
     as="span"
     class="file-mention-chip"
+    :class="{ 'is-terminal': isTerminal }"
     :data-path="attrs.path"
     contenteditable="false"
   >
@@ -58,7 +66,7 @@ function removeMention() {
       @click.stop="openMention"
       @keydown.enter.prevent="openMention"
     >
-      <AppIcon :name="attrs.isDir ? 'folder' : 'file'" :size="12" />
+      <AppIcon :name="isTerminal ? 'terminal' : attrs.isDir ? 'folder' : 'file'" :size="12" />
       <span class="file-mention-name">{{ attrs.name }}</span>
       <span v-if="lineLabel" class="file-mention-lines">{{ lineLabel }}</span>
     </span>

@@ -169,7 +169,14 @@ function onVisibility() {
   void refresh()
 }
 
+function onCommitDraft(e: Event) {
+  const detail = (e as CustomEvent<{ message?: string }>).detail
+  if (detail?.message) message.value = detail.message
+  tab.value = 'changes'
+}
+
 onMounted(() => {
+  window.addEventListener('ca-git-commit-draft', onCommitDraft as EventListener)
   void refresh(true)
   pollTimer = window.setInterval(() => {
     if (document.hidden) return
@@ -178,6 +185,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
 })
 onUnmounted(() => {
+  window.removeEventListener('ca-git-commit-draft', onCommitDraft as EventListener)
   window.clearInterval(pollTimer)
   window.clearTimeout(debounceTimer)
   document.removeEventListener('visibilitychange', onVisibility)

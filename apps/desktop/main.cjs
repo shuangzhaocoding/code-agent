@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require('electron')
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require('electron')
 const { spawn } = require('child_process')
 const http = require('http')
 const path = require('path')
@@ -7,6 +7,15 @@ const fs = require('fs')
 const PORT = Number(process.env.CODE_AGENT_PORT || 4060)
 const HOST = process.env.CODE_AGENT_HOST || '127.0.0.1'
 const HEALTH_URL = `http://${HOST}:${PORT}/api/health`
+const TITLEBAR_HEIGHT = 38
+
+const CHROME = {
+  dark: { background: '#121218', overlay: '#121218', symbol: '#c4c4cc' },
+  light: { background: '#ffffff', overlay: '#ffffff', symbol: '#3f3f46' },
+}
+
+/** @type {'light' | 'dark'} */
+let chromeTheme = 'dark'
 
 const SPLIT_SERVICES = [
   { name: 'api', args: ['-m', 'code_agent', 'api'] },
@@ -103,16 +112,59 @@ function setSplashStatus(text, opts = {}) {
     .catch(() => {})
 }
 
+function applyWindowChrome(theme) {
+  const next = theme === 'light' ? 'light' : 'dark'
+  chromeTheme = next
+  nativeTheme.themeSource = next
+  const colors = CHROME[next]
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.setBackgroundColor(colors.background)
+  if (process.platform === 'win32' && typeof mainWindow.setTitleBarOverlay === 'function') {
+    try {
+      mainWindow.setTitleBarOverlay({
+        color: colors.overlay,
+        symbolColor: colors.symbol,
+        height: TITLEBAR_HEIGHT,
+      })
+    } catch {
+      // ignore unsupported hosts
+    }
+  }
+}
+
+function windowChromeOptions() {
+  const colors = CHROME[chromeTheme]
+  if (process.platform === 'darwin') {
+    return {
+      titleBarStyle: 'hiddenInset',
+      trafficLightPosition: { x: 14, y: 12 },
+    }
+  }
+  if (process.platform === 'win32') {
+    return {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        color: colors.overlay,
+        symbolColor: colors.symbol,
+        height: TITLEBAR_HEIGHT,
+      },
+    }
+  }
+  return {}
+}
+
 function createWindow() {
+  const colors = CHROME[chromeTheme]
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1100,
     minHeight: 700,
     title: 'Code Agent',
-    backgroundColor: '#0f1115',
+    backgroundColor: colors.background,
     autoHideMenuBar: true,
     show: false,
+    ...windowChromeOptions(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -313,9 +365,15 @@ if (!gotLock) {
     if (result.canceled || !result.filePaths.length) return null
     return result.filePaths[0]
   })
+  ipcMain.handle('desktop:set-theme', (_event, theme) => {
+    applyWindowChrome(theme === 'light' ? 'light' : 'dark')
+    return chromeTheme
+  })
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).
+    // In-app TopMenuBar owns menus; OS title bar chrome follows app theme via desktop:set-theme.
     Menu.setApplicationMenu(null)
+    nativeTheme.themeSource = chromeTheme
     return boot()
   })
 }

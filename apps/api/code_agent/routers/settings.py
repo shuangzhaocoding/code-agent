@@ -11,6 +11,26 @@ from code_agent.plugins.base import registry
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
+# Empty string means "use default / env", not an intentional stored value.
+_CLEAR_ON_EMPTY = frozenset(
+    {
+        "terminal.shell",
+        "uploads.dir",
+        "storage.postgres_url",
+        "storage.redis_url",
+        "storage.checkpoint_postgres_url",
+    }
+)
+
+
+def _clear_live_setting(key: str) -> None:
+    parts = key.split(".")
+    if len(parts) != 2:
+        return
+    bucket = settings._cfg.get(parts[0])
+    if isinstance(bucket, dict):
+        bucket.pop(parts[1], None)
+
 
 @router.get("/settings")
 async def get_settings():
@@ -43,6 +63,20 @@ async def patch_settings(body: dict[str, Any]):
     for key, value in body.items():
         if key not in SETTINGS_SCHEMA["properties"]:
             continue
+
+        clear = key in _CLEAR_ON_EMPTY and (value is None or value == "")
+        if clear:
+            row = await Setting.get_or_none(key=key)
+            if row:
+                await row.delete()
+            _clear_live_setting(key)
+            parts = key.split(".")
+            if key in STORAGE_SETTING_KEYS and len(parts) == 2:
+                storage_patch[parts[1]] = ""
+            if key in UPLOADS_SETTING_KEYS and len(parts) == 2:
+                uploads_patch[parts[1]] = ""
+            continue
+
         row = await Setting.get_or_none(key=key)
         if row:
             row.value_json = value

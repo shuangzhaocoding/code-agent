@@ -149,12 +149,46 @@ def message_files(row_blocks: list | None) -> list[dict[str, Any]]:
     return files
 
 
+def message_reference_snippets(row_blocks: list | None) -> str:
+    """Expand terminal (and similar) reference payloads into readable text for the model."""
+    parts: list[str] = []
+    for block in row_blocks or []:
+        if block.get("type") != "user.references":
+            continue
+        refs = (block.get("meta") or {}).get("references") or []
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if not isinstance(ref, dict):
+                continue
+            text = str(ref.get("text") or "").strip()
+            if not text:
+                continue
+            ref_type = str(ref.get("type") or "snippet")
+            if ref_type != "terminal":
+                continue
+            start = ref.get("line_start")
+            end = ref.get("line_end")
+            title = str(ref.get("title") or "terminal").strip() or "terminal"
+            if start and end:
+                label = f"terminal:{start}-{end}" if start != end else f"terminal:{start}"
+            else:
+                label = "terminal"
+            header = f"[{title} · {label}]" if title and title != "terminal" else f"[{label}]"
+            parts.append(f"{header}\n```{label}\n{text}\n```")
+    return "\n\n".join(parts).strip()
+
+
 def message_text(row_blocks: list | None) -> str:
     parts: list[str] = []
     for block in row_blocks or []:
         if block.get("type") in {"user.text", "assistant.markdown"} and block.get("text"):
             parts.append(str(block["text"]))
-    return "\n".join(parts).strip()
+    body = "\n".join(parts).strip()
+    snippets = message_reference_snippets(row_blocks)
+    if body and snippets:
+        return f"{body}\n\n{snippets}"
+    return body or snippets
 
 
 # Phrases that suggest the user is referring to an image already in the thread.

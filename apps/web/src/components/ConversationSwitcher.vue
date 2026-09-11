@@ -5,10 +5,18 @@ import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
 import { formatRelativeTime } from '@/utils/relativeTime'
+import { useToast } from '@/composables/useToast'
+import {
+  conversationToJson,
+  conversationToMarkdown,
+  downloadTextFile,
+  safeFilename,
+} from '@/utils/exportConversation'
 
 const store = useAppStore()
 const pins = useSessionPins()
 const { t } = useI18n()
+const toast = useToast()
 const open = ref(false)
 const ready = ref(false)
 const query = ref('')
@@ -25,7 +33,7 @@ const current = computed(() =>
   store.conversations.find((c) => c.id === store.conversationId) || null,
 )
 
-const currentTitle = computed(() => current.value?.title || '新会话')
+const currentTitle = computed(() => current.value?.title || t('chat.newConversation'))
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
@@ -40,8 +48,13 @@ const recentItems = computed(() => filtered.value.filter((c) => !pins.isPinned(c
 
 const sections = computed(() => {
   const rows: { label: string; items: typeof filtered.value }[] = []
-  if (pinnedItems.value.length) rows.push({ label: '置顶', items: pinnedItems.value })
-  if (recentItems.value.length) rows.push({ label: query.value.trim() ? '匹配' : '最近', items: recentItems.value })
+  if (pinnedItems.value.length) rows.push({ label: t('chat.pinned'), items: pinnedItems.value })
+  if (recentItems.value.length) {
+    rows.push({
+      label: query.value.trim() ? t('chat.matched') : t('chat.recent'),
+      items: recentItems.value,
+    })
+  }
   return rows
 })
 
@@ -142,6 +155,34 @@ async function startNew() {
   await store.newChat()
 }
 
+function exportCurrent(format: 'markdown' | 'json') {
+  const id = store.conversationId
+  if (!id) {
+    toast.warning(t('chat.exportEmpty'))
+    return
+  }
+  const title = currentTitle.value
+  const base = safeFilename(title)
+  if (format === 'json') {
+    downloadTextFile(
+      `${base}.json`,
+      conversationToJson({ id, title, messages: store.messages }),
+      'application/json',
+    )
+  } else {
+    downloadTextFile(
+      `${base}.md`,
+      conversationToMarkdown({ id, title, messages: store.messages }),
+      'text/markdown;charset=utf-8',
+    )
+  }
+  toast.success(t('chat.exportDone'))
+}
+
+function onExportClick(e: MouseEvent) {
+  exportCurrent(e.shiftKey ? 'json' : 'markdown')
+}
+
 function onTogglePin(id: string, e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
@@ -203,26 +244,26 @@ function turnCount(item: (typeof filtered.value)[number]) {
   return item.turn_count ?? 0
 }
 
-/** Live status for history rows: icons for 生成中 / 工具确认 / 排队中 */
+/** Live status for history rows */
 function sessionStatus(item: (typeof filtered.value)[number]): {
   label: string
   tone: string
   icon: string
 } | null {
-  let label: string | null = null
+  let kind: 'confirm' | 'queued' | 'running' | null = null
   if (item.id === store.conversationId) {
-    if (store.pendingApprovals.length) label = '工具确认'
-    else if (store.isRunBusy()) label = store.runStatus === 'queued' ? '排队中' : '生成中'
+    if (store.pendingApprovals.length) kind = 'confirm'
+    else if (store.isRunBusy()) kind = store.runStatus === 'queued' ? 'queued' : 'running'
   } else if (item.awaiting_approval) {
-    label = '工具确认'
+    kind = 'confirm'
   } else if (item.active_run_id) {
-    if (item.run_status === 'queued') label = '排队中'
-    else if (!item.run_status || item.run_status === 'running') label = '生成中'
+    if (item.run_status === 'queued') kind = 'queued'
+    else if (!item.run_status || item.run_status === 'running') kind = 'running'
   }
-  if (!label) return null
-  if (label === '工具确认') return { label, tone: 'confirm', icon: 'shield' }
-  if (label === '排队中') return { label, tone: 'queued', icon: 'clock' }
-  return { label, tone: 'running', icon: 'loader' }
+  if (!kind) return null
+  if (kind === 'confirm') return { label: t('chat.statusAwaitingApproval'), tone: 'confirm', icon: 'shield' }
+  if (kind === 'queued') return { label: t('chat.statusQueued'), tone: 'queued', icon: 'clock' }
+  return { label: t('chat.statusGenerating'), tone: 'running', icon: 'loader' }
 }
 
 const statusById = computed(() => {
@@ -327,7 +368,7 @@ onBeforeUnmount(() => {
               ref="searchEl"
               v-model="query"
               type="search"
-              placeholder="搜索会话"
+              :placeholder="t('chat.searchSessions')"
               autocomplete="off"
               spellcheck="false"
             />
@@ -335,7 +376,7 @@ onBeforeUnmount(() => {
 
           <div class="switcher-list">
             <p v-if="!filtered.length" class="switcher-empty">
-              {{ store.conversations.length ? '没有匹配的会话' : '暂无历史会话' }}
+              {{ store.conversations.length ? t('chat.noMatchSessions') : t('chat.noHistory') }}
             </p>
             <section v-for="section in sections" :key="section.label">
               <h2>{{ section.label }}</h2>
@@ -384,7 +425,7 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     class="row-action row-action-danger"
-                    :title="t('sidebar.deleteSession')"
+                    :title="t('chat.deleteSession')"
                     @click="onDelete(item.id, $event)"
                   >
                     <AppIcon name="trash" :size="16" :stroke-width="1.75" />
@@ -393,7 +434,7 @@ onBeforeUnmount(() => {
                     type="button"
                     class="row-action row-pin"
                     :class="{ on: pins.isPinned(item.id) }"
-                    :title="pins.isPinned(item.id) ? '取消置顶' : '置顶'"
+                    :title="pins.isPinned(item.id) ? t('chat.unpin') : t('chat.pin')"
                     @click="onTogglePin(item.id, $event)"
                   >
                     <AppIcon name="pin" :size="16" :stroke-width="1.75" />
@@ -412,7 +453,7 @@ onBeforeUnmount(() => {
                       <AppIcon :name="st.icon" :size="14" :stroke-width="1.75" />
                     </span>
                   </template>
-                  <span class="row-turns">{{ turnCount(item) }}轮</span>
+                  <span class="row-turns">{{ t('chat.turnCount', { n: turnCount(item) }) }}</span>
                 </span>
               </div>
             </section>
@@ -423,7 +464,16 @@ onBeforeUnmount(() => {
 
     <div class="switcher-actions">
       <slot name="actions" />
-      <button type="button" class="ghost-icon-btn switcher-new" title="新会话" @click="startNew">
+      <button
+        type="button"
+        class="ghost-icon-btn"
+        :title="t('chat.exportHint')"
+        :disabled="!store.conversationId"
+        @click="onExportClick"
+      >
+        <AppIcon name="download" :size="16" :stroke-width="1.75" />
+      </button>
+      <button type="button" class="ghost-icon-btn switcher-new" :title="t('chat.newSession')" @click="startNew">
         <AppIcon name="plus" :size="16" :stroke-width="1.75" />
       </button>
     </div>

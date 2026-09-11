@@ -11,6 +11,7 @@ import BrandMark from '@/components/BrandMark.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
 import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
+import { hasCustomTitleBar, isDesktopApp } from '@/utils/desktop'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -19,7 +20,8 @@ const mode = ref<'local' | 'ssh'>('local')
 const local = reactive(useWorkspaceBrowse('~'))
 const ssh = reactive(useSshWorkspaceBrowse())
 
-const isDesktop = Boolean((window as Window & { codeAgentDesktop?: { isDesktop?: boolean; pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop?.isDesktop)
+const isDesktop = isDesktopApp()
+const customTitleBar = hasCustomTitleBar()
 
 onMounted(async () => {
   await store.loadWorkspaces()
@@ -65,7 +67,9 @@ async function openSsh() {
 }
 
 async function pickNativeFolder() {
-  const desktop = (window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }).codeAgentDesktop
+  const desktop = (
+    window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }
+  ).codeAgentDesktop
   if (!desktop?.pickDirectory) return
   local.error = ''
   try {
@@ -87,11 +91,12 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
 </script>
 <template>
   <div class="launch-page">
-    <header class="launch-header">
+    <header class="launch-header" :class="{ 'is-titlebar': customTitleBar }">
       <div class="launch-brand">
         <BrandMark :size="24" />
         <span>Code Agent</span>
       </div>
+      <div class="launch-header-drag" />
       <div class="launch-actions">
         <LanguageSelect compact />
         <button type="button" class="launch-theme" :title="t('theme.toggle')" @click="onToggleTheme">
@@ -245,11 +250,20 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
   height: 48px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   padding: 0 14px 0 12px;
   background: var(--sidebar-bg);
   border-bottom: var(--border-width) solid var(--border);
   flex-shrink: 0;
+}
+.launch-header.is-titlebar {
+  height: var(--desktop-titlebar-height, 38px);
+  -webkit-app-region: drag;
+}
+.launch-header-drag {
+  flex: 1;
+  min-width: 24px;
+  align-self: stretch;
 }
 .launch-brand {
   display: flex;
@@ -259,11 +273,13 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
   font-size: 14px;
   color: var(--text-h);
   letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
 .launch-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  -webkit-app-region: no-drag;
 }
 .launch-theme {
   width: 32px;

@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import { useAppStore } from '@/stores/app'
+import { api } from '@/api/http'
 import { formatRelativeTime, isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
 
 type PaletteItem = {
@@ -16,11 +17,11 @@ type PaletteItem = {
 }
 
 const open = defineModel<boolean>('open', { default: false })
+const mode = defineModel<'commands' | 'files'>('mode', { default: 'commands' })
 
 const emit = defineEmits<{
   openPanel: [id: string, component: string, title: string]
   toggleTheme: []
-  toggleSidebar: []
 }>()
 
 const { t } = useI18n()
@@ -28,8 +29,13 @@ const store = useAppStore()
 const query = ref('')
 const active = ref(0)
 const inputEl = ref<HTMLInputElement | null>(null)
+const fileHits = ref<{ path: string; name: string }[]>([])
+const fileLoading = ref(false)
+let fileSearchTimer: ReturnType<typeof setTimeout> | null = null
+let fileSearchGen = 0
 const shortcut = paletteShortcutLabel()
 const altShortcut = isMacMod() ? '⌘K' : 'Ctrl+K'
+const fileShortcut = isMacMod() ? '⌘P' : 'Ctrl+P'
 
 const staticCommands = computed<PaletteItem[]>(() => [
   {
@@ -56,7 +62,6 @@ const staticCommands = computed<PaletteItem[]>(() => [
   { id: 'models', title: t('commandPalette.openModels'), icon: 'chip', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'models', 'models', t('panels.models')) },
   { id: 'settings', title: t('commandPalette.openSettings'), icon: 'sliders', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'settings', 'settings', t('panels.settings')) },
   { id: 'workspace', title: t('commandPalette.openWorkspace'), icon: 'home', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'workspace', 'workspace', t('panels.workspace')) },
-  { id: 'toggle-sidebar', title: t('commandPalette.toggleSidebar'), icon: 'panel-left', group: t('commandPalette.groupLayout'), run: () => emit('toggleSidebar') },
   { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
 ])
 
@@ -74,7 +79,7 @@ const sessionCommands = computed<PaletteItem[]>(() =>
   })),
 )
 
-const items = computed(() => {
+const commandItems = computed(() => {
   const q = query.value.trim().toLowerCase()
   const sessions = q ? sessionCommands.value : sessionCommands.value.slice(0, 6)
   const all = [...staticCommands.value, ...sessions]
@@ -85,8 +90,27 @@ const items = computed(() => {
   })
 })
 
+const fileItems = computed<PaletteItem[]>(() =>
+  fileHits.value.map((f) => ({
+    id: `file:${f.path}`,
+    title: f.name,
+    subtitle: f.path,
+    icon: 'file',
+    group: t('commandPalette.groupFiles'),
+    run: async () => {
+      await store.openPath(f.path, false)
+      emit('openPanel', 'editor', 'editor', t('panels.editor'))
+    },
+  })),
+)
+
+const items = computed(() => (mode.value === 'files' ? fileItems.value : commandItems.value))
+
 const grouped = computed(() => {
-  const order = [t('commandPalette.groupSession'), t('commandPalette.groupPanel'), t('commandPalette.groupLayout')]
+  const order =
+    mode.value === 'files'
+      ? [t('commandPalette.groupFiles')]
+      : [t('commandPalette.groupSession'), t('commandPalette.groupPanel'), t('commandPalette.groupLayout')]
   const map = new Map<string, PaletteItem[]>()
   for (const item of items.value) {
     const list = map.get(item.group) || []
@@ -98,13 +122,58 @@ const grouped = computed(() => {
 
 const flat = computed(() => grouped.value.flatMap((g) => g.items))
 
+async function searchFiles(q: string) {
+  if (!store.workspaceId) {
+    fileHits.value = []
+    return
+  }
+  const gen = ++fileSearchGen
+  fileLoading.value = true
+  try {
+    const params = new URLSearchParams({ q, limit: '40' })
+    const data = await api<{ files: { path: string; name: string }[] }>(
+      `/api/workspaces/${store.workspaceId}/find-files?${params}`,
+    )
+    if (gen !== fileSearchGen) return
+    fileHits.value = data.files || []
+  } catch {
+    if (gen !== fileSearchGen) return
+    fileHits.value = []
+  } finally {
+    if (gen === fileSearchGen) fileLoading.value = false
+  }
+}
+
+function scheduleFileSearch() {
+  if (fileSearchTimer) clearTimeout(fileSearchTimer)
+  fileSearchTimer = setTimeout(() => {
+    fileSearchTimer = null
+    void searchFiles(query.value.trim())
+  }, 120)
+}
+
 watch(open, async (value) => {
   query.value = ''
   active.value = 0
   if (value) {
+    if (mode.value === 'files') void searchFiles('')
     await nextTick()
     inputEl.value?.focus()
+  } else {
+    mode.value = 'commands'
+    fileHits.value = []
   }
+})
+
+watch(mode, (value) => {
+  if (!open.value) return
+  query.value = ''
+  active.value = 0
+  if (value === 'files') void searchFiles('')
+})
+
+watch(query, () => {
+  if (mode.value === 'files') scheduleFileSearch()
 })
 
 watch(items, () => {
@@ -157,11 +226,17 @@ function onWindowKey(e: KeyboardEvent) {
   if (!mod) return
   const key = e.key.toLowerCase()
   const inEditor = e.target instanceof Element && !!e.target.closest('.monaco-editor, .xterm, .xterm-helper-textarea')
+  // Ctrl/Cmd+Shift+P or Ctrl/Cmd+K → command palette
   const palette = (key === 'p' && e.shiftKey) || (key === 'k' && !e.shiftKey && !inEditor)
   if (!palette) return
   e.preventDefault()
   e.stopPropagation()
-  open.value = !open.value
+  if (open.value && mode.value === 'commands') {
+    open.value = false
+    return
+  }
+  mode.value = 'commands'
+  open.value = true
 }
 
 onMounted(() => {
@@ -169,6 +244,7 @@ onMounted(() => {
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onWindowKey, true)
+  if (fileSearchTimer) clearTimeout(fileSearchTimer)
 })
 </script>
 
@@ -176,21 +252,29 @@ onUnmounted(() => {
   <Teleport to="body">
     <div v-if="open" class="palette-root" @keydown="onKey">
       <div class="palette-backdrop" @click="close" />
-      <div class="palette" role="dialog" aria-modal="true" :aria-label="t('commandPalette.aria')">
+      <div
+        class="palette"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="mode === 'files' ? t('commandPalette.ariaFiles') : t('commandPalette.aria')"
+      >
         <div class="palette-search">
-          <AppIcon name="search" :size="16" />
+          <AppIcon :name="mode === 'files' ? 'file' : 'search'" :size="16" />
           <input
             ref="inputEl"
             v-model="query"
             type="search"
-            :placeholder="t('commandPalette.placeholder')"
+            :placeholder="mode === 'files' ? t('commandPalette.placeholderFiles') : t('commandPalette.placeholder')"
             autocomplete="off"
             spellcheck="false"
           />
-          <kbd>{{ shortcut }}</kbd>
+          <kbd>{{ mode === 'files' ? fileShortcut : shortcut }}</kbd>
         </div>
         <div class="palette-list" role="listbox">
-          <p v-if="!flat.length" class="palette-empty">{{ t('commandPalette.empty') }}</p>
+          <p v-if="mode === 'files' && fileLoading && !flat.length" class="palette-empty">{{ t('commandPalette.loadingFiles') }}</p>
+          <p v-else-if="!flat.length" class="palette-empty">
+            {{ mode === 'files' ? t('commandPalette.emptyFiles') : t('commandPalette.empty') }}
+          </p>
           <section v-for="section in grouped" :key="section.group">
             <h2>{{ section.group }}</h2>
             <button
@@ -214,7 +298,8 @@ onUnmounted(() => {
         </div>
         <footer class="palette-foot">
           <span>{{ t('commandPalette.hint') }}</span>
-          <span>{{ shortcut }} {{ t('commandPalette.or') }} {{ altShortcut }}</span>
+          <span v-if="mode === 'files'">{{ fileShortcut }}</span>
+          <span v-else>{{ shortcut }} {{ t('commandPalette.or') }} {{ altShortcut }}</span>
         </footer>
       </div>
     </div>

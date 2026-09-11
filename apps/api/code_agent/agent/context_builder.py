@@ -28,21 +28,13 @@ def compress_threshold_tokens() -> int:
 
 
 def _message_text(row: Message) -> str:
-    parts: list[str] = []
-    for block in row.blocks or []:
-        if block.get("type") in {"user.text", "assistant.markdown"} and block.get("text"):
-            parts.append(str(block["text"]))
-    return "\n".join(parts).strip()
+    return message_text(row.blocks)
 
 
 def history_to_lc_messages(rows: list[Message], *, vision: bool = False) -> list:
     out = []
     for row in rows:
-        text_parts = []
-        for block in row.blocks or []:
-            if block.get("type") in {"user.text", "assistant.markdown"} and block.get("text"):
-                text_parts.append(block["text"])
-        text = "\n".join(text_parts).strip()
+        text = message_text(row.blocks)
         if row.role == "user":
             files = message_files(row.blocks)
             content = build_user_content(text, files, vision=vision)

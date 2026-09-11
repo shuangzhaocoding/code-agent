@@ -8,6 +8,7 @@ export type FileMentionAttrs = {
   isDir?: boolean
   lineStart?: number | null
   lineEnd?: number | null
+  snippet?: string | null
 }
 
 declare module '@tiptap/core' {
@@ -33,6 +34,7 @@ export const fileMentionExtension = Node.create({
       isDir: { default: false },
       lineStart: { default: null },
       lineEnd: { default: null },
+      snippet: { default: null },
     }
   },
 
@@ -50,6 +52,7 @@ export const fileMentionExtension = Node.create({
         'data-is-dir': node.attrs.isDir ? '1' : '0',
         'data-line-start': node.attrs.lineStart ?? '',
         'data-line-end': node.attrs.lineEnd ?? '',
+        'data-snippet': node.attrs.snippet ?? '',
       }),
       node.attrs.name,
     ]
@@ -72,6 +75,7 @@ export const fileMentionExtension = Node.create({
               isDir: Boolean(attrs.isDir),
               lineStart: attrs.lineStart ?? null,
               lineEnd: attrs.lineEnd ?? null,
+              snippet: attrs.snippet ?? null,
             },
           }),
     }

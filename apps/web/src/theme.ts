@@ -1,3 +1,5 @@
+import { getDesktopBridge } from '@/utils/desktop'
+
 export type Theme = 'light' | 'dark'
 
 const KEY = 'ca.theme'
@@ -9,11 +11,18 @@ export function getStoredTheme(): Theme {
   return 'light'
 }
 
+function syncDesktopChrome(theme: Theme) {
+  const desktop = getDesktopBridge()
+  if (!desktop?.isDesktop || typeof desktop.setTheme !== 'function') return
+  void Promise.resolve(desktop.setTheme(theme)).catch(() => {})
+}
+
 export function applyTheme(theme: Theme): Theme {
   const next = theme === 'dark' ? 'dark' : 'light'
   document.documentElement.setAttribute('data-theme', next)
   document.documentElement.setAttribute('data-tr-color-mode', next)
   localStorage.setItem(KEY, next)
+  syncDesktopChrome(next)
   window.dispatchEvent(new CustomEvent('ca-theme', { detail: next }))
   return next
 }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
@@ -7,8 +8,14 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import { currentTheme, type Theme } from '@/theme'
 import AppIcon from '@/components/AppIcon.vue'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import { takeTerminalCwd } from '@/utils/terminalOpen'
+import {
+  TERMINAL_MENTION_PATH,
+  terminalSelectionRange,
+} from '@/utils/terminalMention'
 
+const { t } = useI18n()
 const store = useAppStore()
 
 interface TermEntry {
@@ -19,16 +26,16 @@ interface TermEntry {
   fit: FitAddon | null
   ws: WebSocket | null
   observer: ResizeObserver | null
-  el: HTMLDivElement | null   // dedicated DOM node per terminal
+  el: HTMLDivElement | null
 }
 
 const tabs = reactive<TermEntry[]>([])
 const activeId = ref<string | null>(null)
 const sideWidth = ref(180)
-
-/* ---- rename ---- */
+const ctxMenu = ref<{ x: number; y: number } | null>(null)
 const renamingId = ref<string | null>(null)
 const renameVal = ref('')
+const hostsEl = ref<HTMLDivElement | null>(null)
 
 function startRename(tab: TermEntry) {
   renamingId.value = tab.id
@@ -51,8 +58,6 @@ async function commitRename(tab: TermEntry) {
   }
   renamingId.value = null
 }
-// Container that holds all per-terminal divs
-const hostsEl = ref<HTMLDivElement | null>(null)
 
 const lightTheme = {
   background: '#ffffff', foreground: '#1f2937', cursor: '#2563eb',
@@ -73,18 +78,101 @@ const darkTheme = {
   brightCyan: '#67e8f9', brightWhite: '#f9fafb',
 }
 
-function termTheme(t: Theme) {
-  const base = t === 'dark' ? darkTheme : lightTheme
+function termTheme(theme: Theme) {
+  const base = theme === 'dark' ? darkTheme : lightTheme
   if (typeof document === 'undefined') return base
   const bg = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim()
   if (!bg) return base
   return { ...base, background: bg, cursorAccent: bg }
 }
 
-/**
- * Create the xterm + fit for a new entry, attach it to its own <div>,
- * and append that div into the shared hosts container (hidden by default).
- */
+function activeEntry() {
+  return tabs.find((row) => row.id === activeId.value) || null
+}
+
+function activeTerm() {
+  return activeEntry()?.term || null
+}
+
+function selectionMention(term?: Terminal | null) {
+  const entry = term ? tabs.find((row) => row.term === term) : activeEntry()
+  const range = terminalSelectionRange(term || entry?.term || null)
+  if (!range || !entry) return null
+  return {
+    name: entry.title || t('panels.terminal'),
+    path: TERMINAL_MENTION_PATH,
+    is_dir: false,
+    lineStart: range.startLine,
+    lineEnd: range.endLine,
+    snippet: range.text,
+  }
+}
+
+async function copySelection(term?: Terminal | null) {
+  const target = term || activeTerm()
+  const range = terminalSelectionRange(target)
+  if (!range) return false
+  const entry = term ? tabs.find((row) => row.term === term) : activeEntry()
+  try {
+    await navigator.clipboard.writeText(range.text)
+    store.setTerminalCopyContext({
+      text: range.text,
+      startLine: range.startLine,
+      endLine: range.endLine,
+      title: entry?.title || t('panels.terminal'),
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function pasteClipboard(term?: Terminal | null) {
+  const entry = term ? tabs.find((row) => row.term === term) : activeEntry()
+  if (!entry?.term || entry.ws?.readyState !== WebSocket.OPEN) return
+  try {
+    const text = await navigator.clipboard.readText()
+    if (!text) return
+    entry.ws.send(JSON.stringify({ type: 'input', data: text }))
+  } catch {
+    /* clipboard denied */
+  }
+}
+
+function addSelectionToChat(term?: Terminal | null) {
+  const item = selectionMention(term)
+  if (!item) return
+  window.dispatchEvent(new Event('ca-focus-agent'))
+  window.dispatchEvent(new CustomEvent('ca-add-chat-mention', { detail: item }))
+}
+
+const ctxMenuItems = computed((): ContextMenuItem[] => {
+  const hasSel = Boolean(activeTerm()?.hasSelection())
+  return [
+    { id: 'copy', label: t('terminal.copy'), icon: 'copy', disabled: !hasSel },
+    { id: 'paste', label: t('terminal.paste'), icon: 'paste' },
+    { id: 'sep', separator: true },
+    {
+      id: 'add-selection',
+      label: t('terminal.addSelectionToChat'),
+      icon: 'chat-plus',
+      disabled: !hasSel,
+    },
+  ]
+})
+
+async function onCtxSelect(id: string) {
+  if (id === 'copy') {
+    await copySelection()
+    return
+  }
+  if (id === 'paste') {
+    await pasteClipboard()
+    return
+  }
+  if (id === 'add-selection') addSelectionToChat()
+}
+
 function createAndMount(entry: TermEntry) {
   if (!hostsEl.value) return
   const div = document.createElement('div')
@@ -101,6 +189,7 @@ function createAndMount(entry: TermEntry) {
     convertEol: true,
     allowProposedApi: false,
     drawBoldTextInBrightColors: true,
+    rightClickSelectsWord: false,
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
@@ -115,10 +204,33 @@ function createAndMount(entry: TermEntry) {
   })
   observer.observe(div)
 
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown') return true
+    const mod = ev.ctrlKey || ev.metaKey
+    if (!mod) return true
+    const key = ev.key.toLowerCase()
+    if (key === 'c' && term.hasSelection()) {
+      void copySelection(term)
+      return false
+    }
+    if (key === 'v') {
+      void pasteClipboard(term)
+      return false
+    }
+    return true
+  })
+
   term.onData((data) => {
     if (entry.ws?.readyState === WebSocket.OPEN) {
       entry.ws.send(JSON.stringify({ type: 'input', data }))
     }
+  })
+
+  div.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (entry.id !== activeId.value) activateTab(entry.id)
+    ctxMenu.value = { x: e.clientX, y: e.clientY }
   })
 
   entry.term = term
@@ -146,13 +258,12 @@ async function connectEntry(entry: TermEntry) {
   socket.onclose = () => { entry.alive = false }
 }
 
-/** Show the target terminal's div, hide all others, then refit. */
 function activateTab(id: string) {
   activeId.value = id
-  for (const t of tabs) {
-    if (t.el) t.el.style.display = t.id === id ? '' : 'none'
+  for (const row of tabs) {
+    if (row.el) row.el.style.display = row.id === id ? '' : 'none'
   }
-  const entry = tabs.find((t) => t.id === id)
+  const entry = tabs.find((row) => row.id === id)
   if (!entry) return
   nextTick(() => {
     entry.fit?.fit()
@@ -164,7 +275,7 @@ async function addTerminal(cwd?: string) {
   if (!store.workspaceId) return
   const body: { workspace_id: string; title?: string; cwd?: string } = {
     workspace_id: store.workspaceId,
-    title: cwd ? undefined : `Terminal ${tabs.length + 1}`,
+    title: cwd ? undefined : t('terminal.untitled', { n: tabs.length + 1 }),
   }
   if (cwd) body.cwd = cwd
   const row = await api<{ id: string; title: string }>('/api/terminals', {
@@ -173,12 +284,12 @@ async function addTerminal(cwd?: string) {
   })
   const entry: TermEntry = {
     id: row.id,
-    title: row.title || `Terminal ${tabs.length + 1}`,
+    title: row.title || t('terminal.untitled', { n: tabs.length + 1 }),
     alive: true,
     term: null, fit: null, ws: null, observer: null, el: null,
   }
   tabs.push(entry)
-  await nextTick()          // hostsEl must be rendered
+  await nextTick()
   createAndMount(entry)
   activateTab(entry.id)
   await connectEntry(entry)
@@ -195,7 +306,7 @@ async function flushQueuedTerminal() {
 }
 
 async function removeTerminal(id: string) {
-  const idx = tabs.findIndex((t) => t.id === id)
+  const idx = tabs.findIndex((row) => row.id === id)
   if (idx < 0) return
   const entry = tabs[idx]
   entry.ws?.close()
@@ -219,7 +330,7 @@ async function loadExisting() {
   for (const row of list) {
     const entry: TermEntry = {
       id: row.id,
-      title: row.title || `Terminal ${tabs.length + 1}`,
+      title: row.title || t('terminal.untitled', { n: tabs.length + 1 }),
       alive: row.alive,
       term: null, fit: null, ws: null, observer: null, el: null,
     }
@@ -290,13 +401,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="panel-shell term-panel">
-    <!-- shared container; each terminal lives in its own child div -->
     <div ref="hostsEl" class="term-hosts" />
     <div class="term-divider" @mousedown="onDragStart" />
     <aside class="term-sidebar" :style="{ width: sideWidth + 'px' }">
       <div class="side-head">
-        <span class="side-title">终端</span>
-        <button type="button" class="ghost-icon-btn" title="新建终端" @click="addTerminal()">
+        <span class="side-title">{{ t('terminal.title') }}</span>
+        <button type="button" class="ghost-icon-btn" :title="t('terminal.new')" @click="addTerminal()">
           <AppIcon name="plus" :size="16" :stroke-width="1.75" />
         </button>
       </div>
@@ -318,12 +428,25 @@ onBeforeUnmount(() => {
             @keydown.escape="renamingId = null"
           />
           <span v-else class="side-item-name" @dblclick.stop="startRename(tab)">{{ tab.title }}</span>
-          <button type="button" class="ghost-icon-btn side-item-close" title="关闭终端" @click.stop="removeTerminal(tab.id)">
-            <AppIcon name="close" :size="16" :stroke-width="1.75" />
+          <button
+            type="button"
+            class="ghost-icon-btn side-item-close"
+            :title="t('terminal.close')"
+            @click.stop="removeTerminal(tab.id)"
+          >
+            <AppIcon name="trash" :size="14" :stroke-width="1.75" />
           </button>
         </div>
       </div>
     </aside>
+    <ContextMenu
+      v-if="ctxMenu"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :items="ctxMenuItems"
+      @select="onCtxSelect"
+      @close="ctxMenu = null"
+    />
   </div>
 </template>
 

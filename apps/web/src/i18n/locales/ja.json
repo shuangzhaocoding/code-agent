@@ -12,6 +12,7 @@
     "close": "閉じる",
     "save": "保存",
     "saved": "保存しました",
+    "saveFailed": "保存に失敗しました",
     "cancel": "キャンセル",
     "confirm": "確認",
     "delete": "削除",
@@ -61,6 +62,34 @@
     "light": "ライト",
     "dark": "ダーク"
   },
+  "menu": {
+    "aria": "アプリケーションメニュー",
+    "file": "ファイル",
+    "edit": "編集",
+    "panel": "パネル",
+    "help": "ヘルプ",
+    "aboutBody": "{name} {version}",
+    "positions": {
+      "top": "メニューを上に配置",
+      "left": "メニューを左に配置",
+      "right": "メニューを右に配置",
+      "bottom": "メニューを下に配置"
+    },
+    "positionLabel": "メニューバーの位置",
+    "positionLead": "メニューバーをウィンドウの上・左・右・下に表示します。",
+    "items": {
+      "openWorkspace": "ワークスペースを開く…",
+      "newChat": "新しいチャット",
+      "openFile": "ファイルを開く…",
+      "save": "保存",
+      "exportLayout": "レイアウトを書き出し…",
+      "importLayout": "レイアウトを読み込み…",
+      "commandPalette": "コマンドパレット…",
+      "search": "ファイル内を検索…",
+      "keyboardShortcuts": "キーボードショートカット…",
+      "about": "バージョン情報"
+    }
+  },
   "time": {
     "justNow": "たった今",
     "minutesAgo": "{n} 分前",
@@ -82,7 +111,6 @@
     "settings": "設定",
     "workspace": "ワークスペース",
     "trajectory": "軌跡",
-    "chats": "チャット",
     "file": "ファイル"
   },
   "sidebar": {
@@ -198,13 +226,18 @@
   },
   "commandPalette": {
     "aria": "コマンドパレット",
+    "ariaFiles": "ファイルをすばやく開く",
     "placeholder": "コマンドまたはチャットを検索…",
+    "placeholderFiles": "ファイル名またはパスで検索…",
     "empty": "一致するコマンドがありません",
+    "emptyFiles": "一致するファイルがありません",
+    "loadingFiles": "ファイルを検索中…",
     "hint": "↑↓ で選択 · Enter で実行 · Esc で閉じる",
     "or": "または",
     "groupSession": "チャット",
     "groupPanel": "パネル",
     "groupLayout": "レイアウト",
+    "groupFiles": "ファイル",
     "newChat": "新しいチャット",
     "openAgent": "チャットを開く",
     "openTrajectory": "軌跡を開く",
@@ -278,10 +311,25 @@
     "selectModel": "利用可能なモデルを選択",
     "searchModel": "モデルを検索",
     "openModels": "モデルページを開いて可用性を確認",
+    "needModel": "先に利用可能なモデルを追加してください",
+    "sendFailed": "送信に失敗しました",
+    "stopFailed": "停止に失敗しました",
+    "promptNeedModel": "モデルを設定すると送信できます…",
+    "modelSetupTitle": "モデル未設定",
+    "modelSetupLead": "コーディングチャットを始めるには LLM を追加してください。ローカル Ollama をワンクリックで追加できます。",
+    "modelSetupOllama": "Ollama を追加",
+    "modelSetupCustom": "モデル設定を開く",
+    "modelSetupBusy": "追加中…",
+    "modelSetupOllamaOk": "Ollama を追加し、デフォルトに設定しました",
+    "modelSetupFailed": "モデルの追加に失敗しました",
     "noMatch": "一致するモデルがありません",
     "modeAsk": "ツールを使わない簡易 Q&A",
     "modeAgent": "ツールを自律的に使用",
     "modePlan": "先に計画し、段階的に実行",
+    "newConversation": "新しいチャット",
+    "pinned": "ピン留め",
+    "recent": "最近",
+    "matched": "一致",
     "badgeUnknown": "未確認",
     "badgeOk": "利用可",
     "badgeFail": "利用不可",
@@ -342,9 +390,6 @@
     "noHistory": "履歴がありません",
     "pin": "ピン留め",
     "unpin": "ピンを外す",
-    "pinned": "ピン留め",
-    "recent": "最近",
-    "matched": "一致",
     "deleteSession": "チャットを削除",
     "workProcess": "作業過程",
     "hideWork": "作業過程を隠す",
@@ -370,7 +415,16 @@
     "noContent": "（内容なし）",
     "thinkingDone": "思考を生成しました（{time}）",
     "noDetail": "（詳細なし）",
-    "toolResult": "ツール結果"
+    "toolResult": "ツール結果",
+    "exportMarkdown": "Markdown としてエクスポート",
+    "exportJson": "JSON としてエクスポート",
+    "exportHint": "チャットをエクスポート（クリックで Markdown、Shift+クリックで JSON）",
+    "exportDone": "チャットをエクスポートしました",
+    "exportEmpty": "エクスポートできるチャットがありません",
+    "turnCount": "{n} ターン",
+    "statusGenerating": "生成中",
+    "statusQueued": "キュー待ち",
+    "statusAwaitingApproval": "確認待ち"
   },
   "models": {
     "title": "モデル設定",
@@ -505,6 +559,36 @@
     "cannotMoveIntoSelf": "自身またはそのサブディレクトリには移動できません",
     "moveFail": "移動に失敗しました"
   },
+  "plan": {
+    "title": "実行計画",
+    "count": "{n} ステップ",
+    "selectAll": "すべて選択",
+    "deselectAll": "選択解除",
+    "confirmExecute": "選択を実行 ({n})",
+    "executing": "実行中…",
+    "executed": "実行を確認済み",
+    "selectAtLeastOne": "少なくとも 1 ステップを選択してください",
+    "executeLead": "以下の計画を段階的に実行してください（選択したステップのみ）："
+  },
+  "layout": {
+    "title": "ワークスペースレイアウト",
+    "lead": "レイアウトのリセット、エクスポート、インポート、またはプリセット切替。",
+    "reset": "レイアウトをリセット",
+    "export": "JSON をエクスポート",
+    "import": "JSON をインポート",
+    "resetDone": "レイアウトをリセットしました",
+    "presetApplied": "「{name}」レイアウトを適用しました",
+    "importDone": "レイアウトをインポートしました",
+    "importInvalid": "無効なレイアウトファイル",
+    "presets": {
+      "chat": "チャット優先",
+      "code": "コーディング優先"
+    },
+    "presetsDesc": {
+      "chat": "中央に広いチャット、左にファイルとワークスペース",
+      "code": "中央にエディター、下にターミナル、右にチャット"
+    }
+  },
   "editor": {
     "close": "閉じる",
     "closeOthers": "他を閉じる",
@@ -540,7 +624,16 @@
     "splitRight": "エディターを右に分割",
     "splitDown": "エディターを下に分割",
     "closeSplit": "分割を閉じる",
-    "splitEmpty": "このペインでファイルを開く"
+    "splitEmpty": "このペインでファイルを開く",
+    "agentWriteConflictTitle": "ローカル編集と Agent が競合",
+    "agentWriteConflictSummary": "「{path}」に未保存のローカル編集があり、Agent も新しい版を書き込みました。",
+    "useAgentVersion": "Agent の版を使用",
+    "keepMine": "自分の編集を保持",
+    "reviewRejected": "{path} を拒否しました",
+    "reviewRejectedAll": "{n} 件のファイルを拒否しました",
+    "commitDraftDefault": "Agent の変更を適用",
+    "acceptHunk": "この差分を承認",
+    "rejectHunk": "この差分を拒否"
   },
   "search": {
     "title": "検索",
@@ -564,7 +657,11 @@
   "terminal": {
     "title": "ターミナル",
     "new": "新しいターミナル",
-    "close": "ターミナルを閉じる"
+    "close": "ターミナルを閉じる",
+    "untitled": "ターミナル {n}",
+    "copy": "コピー",
+    "paste": "貼り付け",
+    "addSelectionToChat": "選択をチャットに追加"
   },
   "ports": {
     "title": "ポート",
@@ -761,5 +858,12 @@
   "workbench": {
     "resizeSidebar": "ドラッグしてサイドバー幅を調整",
     "resizeTrajectory": "ドラッグして軌跡パネル幅を調整"
+  },
+  "connection": {
+    "reconnecting": "イベントストリームを再接続中",
+    "reconnectingLead": "ストリーミング出力の復旧を試みています。しばらくお待ちください…",
+    "disconnected": "イベントストリームが切断されました",
+    "disconnectedLead": "サーバーとの接続が切れました。再試行するか、自動復旧をお待ちください。",
+    "retry": "再試行"
   }
 }

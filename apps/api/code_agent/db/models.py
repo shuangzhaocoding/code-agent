@@ -4,6 +4,7 @@ from tortoise import fields
 from tortoise.models import Model
 
 from code_agent.config import settings
+from code_agent.db.fields import ScalarJSONField
 
 
 class Workspace(Model):
@@ -142,7 +143,7 @@ class SkillRecord(Model):
 
 class Setting(Model):
     key = fields.CharField(max_length=120, pk=True)
-    value_json = fields.JSONField()
+    value_json = ScalarJSONField()
 
     class Meta:
         table = "settings"

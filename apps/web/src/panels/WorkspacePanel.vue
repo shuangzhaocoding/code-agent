@@ -139,6 +139,10 @@ function toggleHost(key: string) {
   collapsedHosts.value = next
 }
 
+function isHostActive(group: WorkspaceHostGroup) {
+  return group.workspaces.some((ws) => ws.id === store.workspaceId)
+}
+
 const hoverWorkspace = computed(() =>
   store.recentWorkspaces.find((w) => w.id === hoverId.value) || null,
 )
@@ -498,7 +502,12 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
     <div class="workspace-body">
       <p v-if="!store.recentWorkspaces.length" class="empty">还没有工作空间，点右上角打开一个目录。</p>
 
-      <div v-for="group in workspaceGroups" :key="group.key" class="host-block">
+      <div
+        v-for="group in workspaceGroups"
+        :key="group.key"
+        class="host-block"
+        :class="{ current: isHostActive(group) }"
+      >
         <div class="host-row">
           <button type="button" class="host-main" @click="toggleHost(group.key)">
             <AppIcon
@@ -514,27 +523,29 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
               :stroke-width="1.75"
             />
             <span class="host-label">{{ group.label }}</span>
-            <span v-if="group.kind === 'ssh'" class="host-badge">SSH</span>
-            <span class="host-count">{{ group.workspaces.length }}</span>
           </button>
-          <div class="host-tools">
-            <button
-              v-if="group.kind === 'ssh'"
-              type="button"
-              class="host-tool"
-              title="编辑主机"
-              @click="startEditHost(group, $event)"
-            >
-              <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
-            </button>
-            <button
-              type="button"
-              class="host-tool"
-              :title="group.kind === 'ssh' ? '添加远程工作空间' : '添加本地工作空间'"
-              @click="startAddWorkspace(group, $event)"
-            >
-              <AppIcon name="plus" :size="13" :stroke-width="1.75" />
-            </button>
+          <div class="host-end">
+            <span class="host-count">{{ group.workspaces.length }}</span>
+            <div class="host-tools">
+              <button
+                v-if="group.kind === 'ssh'"
+                type="button"
+                class="host-tool"
+                title="编辑主机"
+                @click="startEditHost(group, $event)"
+              >
+                <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
+              </button>
+              <button
+                type="button"
+                class="host-tool"
+                :title="group.kind === 'ssh' ? '添加远程工作空间' : '添加本地工作空间'"
+                @click="startAddWorkspace(group, $event)"
+              >
+                <AppIcon name="plus" :size="13" :stroke-width="1.75" />
+              </button>
+            </div>
+            <span v-if="isHostActive(group)" class="host-dot" title="当前主机" />
           </div>
         </div>
 
@@ -805,22 +816,33 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .host-block {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding: 4px 0 6px;
+  border: var(--border-width) solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--text-h) 3%, var(--panel-bg));
+  overflow: hidden;
+}
+
+.host-block.current {
+  border-color: color-mix(in srgb, #22c55e 35%, var(--border));
+  background: color-mix(in srgb, #22c55e 6%, var(--panel-bg));
 }
 
 .host-row {
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 26px;
+  min-height: 30px;
+  margin: 0 4px;
   padding-right: 4px;
   border-radius: 8px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .host-row:hover {
-  background: color-mix(in srgb, var(--text-h) 4%, transparent);
-  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-h) 5%, transparent);
+  color: var(--text-h);
 }
 
 .host-main {
@@ -829,8 +851,8 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-height: 26px;
-  padding: 2px 6px 2px 8px;
+  min-height: 30px;
+  padding: 4px 6px 4px 8px;
   border: 0;
   border-radius: 8px;
   background: transparent;
@@ -849,8 +871,20 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   transition: opacity 0.12s ease;
 }
 
+.host-end {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  min-height: 22px;
+  min-width: 22px;
+  justify-content: flex-end;
+}
+
 .host-row:hover .host-tools,
-.host-row:focus-within .host-tools {
+.host-row:focus-within .host-tools,
+.host-row:hover .host-count,
+.host-row:focus-within .host-count {
   opacity: 1;
   pointer-events: auto;
 }
@@ -875,7 +909,12 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 .host-chev,
 .host-icon {
   flex-shrink: 0;
-  opacity: 0.9;
+  opacity: 0.95;
+  color: var(--text-h);
+}
+
+.host-block.current .host-icon {
+  color: #16a34a;
 }
 
 .host-label {
@@ -884,12 +923,12 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  color: var(--text-h);
 }
 
-.host-badge,
 .ws-badge {
   flex-shrink: 0;
   height: 16px;
@@ -901,7 +940,6 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   letter-spacing: 0.02em;
 }
 
-.host-badge,
 .ws-badge.remote,
 .ws-tip-badge.remote {
   background: color-mix(in srgb, var(--primary) 16%, transparent);
@@ -915,13 +953,35 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 
 .host-count {
   flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-h) 8%, transparent);
   font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+
+.host-dot {
+  width: 6px;
+  height: 6px;
+  margin: 0 8px 0 4px;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 25%, transparent);
+  flex-shrink: 0;
 }
 
 .host-block .ws-list {
-  padding-left: 8px;
+  padding: 2px 4px 2px 6px;
 }
 
 .empty,

@@ -158,6 +158,7 @@ function onDrop(e: DragEvent) {
     <button
       type="button"
       class="row"
+      :data-explorer-path="item.path"
       :class="{
         active: store.activePath === item.path,
         cut: isCut || isDragging,

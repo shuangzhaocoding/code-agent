@@ -4,6 +4,8 @@ export type FileMentionItem = {
   is_dir: boolean
   lineStart?: number
   lineEnd?: number
+  /** Selected text for non-file mentions (e.g. terminal); sent via references. */
+  snippet?: string
 }
 
 export function fileNameFromPath(path: string) {
@@ -140,6 +142,7 @@ export function segmentsToInlineNodes(segments: PasteSegment[]) {
       isDir: boolean
       lineStart: number | null
       lineEnd: number | null
+      snippet: string | null
     }
   }> = []
   for (const seg of segments) {
@@ -154,6 +157,7 @@ export function segmentsToInlineNodes(segments: PasteSegment[]) {
           isDir: seg.item.is_dir,
           lineStart: seg.item.lineStart ?? null,
           lineEnd: seg.item.lineEnd ?? null,
+          snippet: seg.item.snippet ?? null,
         },
       })
     }

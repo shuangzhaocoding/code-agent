@@ -272,6 +272,12 @@ function activateTab(path: string) {
   store.activateFile(path)
 }
 
+/** Double-click tab: force explorer locate even if already active. */
+function onTabDblClick(path: string) {
+  activateTab(path)
+  window.dispatchEvent(new CustomEvent('ca-reveal-in-tree', { detail: { path } }))
+}
+
 async function ensureSecondaryEditor() {
   if (!monacoMod || secondaryEditor || !secondaryHost.value) return
   secondaryEditor = monacoMod.editor.create(secondaryHost.value, {
@@ -490,6 +496,19 @@ function bindReviewNavigation() {
   bind(diffEditor.getOriginalEditor())
 }
 
+function currentLineChange() {
+  const changes = diffEditor?.getLineChanges()
+  if (!changes?.length || !diffEditor) return null
+  const line = diffEditor.getModifiedEditor().getPosition()?.lineNumber ?? 1
+  for (const change of changes) {
+    const start = change.modifiedStartLineNumber || 1
+    const end = change.modifiedEndLineNumber || start
+    if (line >= Math.min(start, end) && line <= Math.max(start, end)) return change
+  }
+  // Prefer nearest change at/after cursor, else first
+  return changes.find((c) => (c.modifiedStartLineNumber || 1) >= line) || changes[0]
+}
+
 function clearDiffReveal() {
   diffRevealDisposable?.dispose()
   diffRevealDisposable = null
@@ -680,6 +699,8 @@ watch(
       store.activePath,
       review.value?.blockId,
       review.value?.status,
+      review.value?.before,
+      review.value?.after,
       store.activeReviewIndexFor(store.activePath),
       htmlPreview.value,
     ] as const,
@@ -927,6 +948,8 @@ const editorMenuItems = computed((): ContextMenuItem[] => {
   const items: ContextMenuItem[] = []
   if (inReview && review.value) {
     items.push(
+      { id: 'accept-hunk', label: t('editor.acceptHunk'), icon: 'check' },
+      { id: 'reject-hunk', label: t('editor.rejectHunk'), icon: 'close', danger: true },
       { id: 'accept-block', label: t('editor.acceptBlock'), icon: 'check' },
       { id: 'reject-block', label: t('editor.rejectBlock'), icon: 'close', danger: true },
       { id: 'sep-review', separator: true },
@@ -990,6 +1013,22 @@ async function onEditorMenuSelect(id: string) {
   const path = store.activePath
   if (!path) return
   const ed = activeEditor()
+  if (id === 'accept-hunk') {
+    const current = review.value
+    const change = currentLineChange()
+    if (current && change) {
+      await store.acceptReviewHunk(current.path, change, current.blockId)
+    }
+    return
+  }
+  if (id === 'reject-hunk') {
+    const current = review.value
+    const change = currentLineChange()
+    if (current && change) {
+      await store.rejectReviewHunk(current.path, change, current.blockId)
+    }
+    return
+  }
   if (id === 'accept-block') {
     const current = review.value
     if (current) await store.acceptReview(current.path, current.blockId)
@@ -1031,9 +1070,18 @@ async function onEditorMenuSelect(id: string) {
   }
   if (id === 'add-selection') {
     const text = editorSelectionText()
-    if (!text) return
-    const fence = `\`\`\`${path}\n${text.replace(/\n$/, '')}\n\`\`\``
-    window.dispatchEvent(new CustomEvent('ca-append-chat-text', { detail: { text: fence } }))
+    if (!text || !ed) return
+    const sel = ed.getSelection()
+    if (!sel) return
+    window.dispatchEvent(new CustomEvent('ca-add-chat-mention', {
+      detail: {
+        name: fileName(path),
+        path,
+        is_dir: false,
+        lineStart: sel.startLineNumber,
+        lineEnd: sel.endLineNumber,
+      },
+    }))
     return
   }
   if (id === 'add-to-chat') {
@@ -1110,6 +1158,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           :draggable="true"
           tabindex="0"
           @click="activateTab(file.path)"
+          @dblclick.prevent="onTabDblClick(file.path)"
           @keydown.enter.prevent="activateTab(file.path)"
           @auxclick="onTabAux(file.path, $event)"
           @contextmenu="onTabContext(file.path, $event)"
@@ -1224,6 +1273,24 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
         </div>
       </div>
       <div v-if="review" class="review-actions" role="group" :aria-label="t('editor.reviewActionsCurrent')">
+        <button
+          type="button"
+          class="action-btn is-reject"
+          :title="t('editor.rejectHunk')"
+          @click="onEditorMenuSelect('reject-hunk')"
+        >
+          <AppIcon name="close" :size="14" :stroke-width="1.75" />
+          <span>{{ t('editor.rejectHunk') }}</span>
+        </button>
+        <button
+          type="button"
+          class="action-btn is-accept"
+          :title="t('editor.acceptHunk')"
+          @click="onEditorMenuSelect('accept-hunk')"
+        >
+          <AppIcon name="check" :size="14" :stroke-width="1.75" />
+          <span>{{ t('editor.acceptHunk') }}</span>
+        </button>
         <button
           type="button"
           class="action-btn is-reject"

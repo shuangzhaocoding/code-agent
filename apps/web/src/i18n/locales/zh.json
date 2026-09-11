@@ -12,6 +12,7 @@
     "close": "关闭",
     "save": "保存",
     "saved": "已保存",
+    "saveFailed": "保存失败",
     "cancel": "取消",
     "confirm": "确认",
     "delete": "删除",
@@ -61,6 +62,34 @@
     "light": "浅色",
     "dark": "深色"
   },
+  "menu": {
+    "aria": "应用菜单",
+    "file": "文件",
+    "edit": "编辑",
+    "panel": "面板",
+    "help": "帮助",
+    "aboutBody": "{name} {version}",
+    "positions": {
+      "top": "菜单栏置顶",
+      "left": "菜单栏靠左",
+      "right": "菜单栏靠右",
+      "bottom": "菜单栏置底"
+    },
+    "positionLabel": "菜单栏位置",
+    "positionLead": "选择菜单栏显示在窗口顶部、左侧、右侧或底部。",
+    "items": {
+      "openWorkspace": "打开工作区…",
+      "newChat": "新建对话",
+      "openFile": "打开文件…",
+      "save": "保存",
+      "exportLayout": "导出布局…",
+      "importLayout": "导入布局…",
+      "commandPalette": "命令面板…",
+      "search": "在文件中搜索…",
+      "keyboardShortcuts": "键盘快捷键…",
+      "about": "关于"
+    }
+  },
   "time": {
     "justNow": "刚刚",
     "minutesAgo": "{n} 分钟前",
@@ -83,7 +112,6 @@
     "settings": "设置",
     "workspace": "工作空间",
     "trajectory": "轨迹",
-    "chats": "会话",
     "file": "文件"
   },
   "sidebar": {
@@ -234,13 +262,18 @@
   },
   "commandPalette": {
     "aria": "命令面板",
+    "ariaFiles": "快速打开文件",
     "placeholder": "搜索命令或会话…",
+    "placeholderFiles": "按文件名或路径搜索…",
     "empty": "没有匹配的命令",
+    "emptyFiles": "没有匹配的文件",
+    "loadingFiles": "正在搜索文件…",
     "hint": "↑↓ 选择 · Enter 执行 · Esc 关闭",
     "or": "或",
     "groupSession": "会话",
     "groupPanel": "面板",
     "groupLayout": "布局",
+    "groupFiles": "文件",
     "newChat": "新会话",
     "openAgent": "打开对话",
     "openTrajectory": "打开轨迹",
@@ -314,10 +347,25 @@
     "selectModel": "选择可用模型",
     "searchModel": "搜索模型",
     "openModels": "打开模型页并检测可用性",
+    "needModel": "请先添加可用模型，再开始对话",
+    "sendFailed": "发送失败",
+    "stopFailed": "停止失败",
+    "promptNeedModel": "配置模型后即可发送…",
+    "modelSetupTitle": "尚未配置模型",
+    "modelSetupLead": "先添加一个 LLM，才能开始编码对话。可一键接入本机 Ollama。",
+    "modelSetupOllama": "一键添加 Ollama",
+    "modelSetupCustom": "打开模型设置",
+    "modelSetupBusy": "正在添加…",
+    "modelSetupOllamaOk": "已添加 Ollama，并设为默认",
+    "modelSetupFailed": "添加模型失败",
     "noMatch": "没有匹配的模型",
     "modeAsk": "快速问答，不调用工具",
     "modeAgent": "自主调用工具完成任务",
     "modePlan": "先规划步骤，再逐步执行",
+    "newConversation": "新会话",
+    "pinned": "置顶",
+    "recent": "最近",
+    "matched": "匹配",
     "badgeUnknown": "未检测",
     "badgeOk": "可用",
     "badgeFail": "不可用",
@@ -378,10 +426,16 @@
     "noHistory": "暂无历史会话",
     "pin": "置顶",
     "unpin": "取消置顶",
-    "pinned": "置顶",
-    "recent": "最近",
-    "matched": "匹配",
     "deleteSession": "删除会话",
+    "exportMarkdown": "导出为 Markdown",
+    "exportJson": "导出为 JSON",
+    "exportHint": "导出会话（点击 Markdown，Shift+点击 JSON）",
+    "exportDone": "会话已导出",
+    "exportEmpty": "没有可导出的会话",
+    "turnCount": "{n} 轮",
+    "statusGenerating": "生成中",
+    "statusQueued": "排队中",
+    "statusAwaitingApproval": "工具确认",
     "workProcess": "工作过程",
     "hideWork": "收起工作过程",
     "thinkCount": "{n} 次思考",
@@ -541,6 +595,36 @@
     "cannotMoveIntoSelf": "不能移动到自身或其子目录中",
     "moveFail": "移动失败"
   },
+  "plan": {
+    "title": "执行计划",
+    "count": "{n} 步",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "confirmExecute": "确认执行 ({n})",
+    "executing": "执行中…",
+    "executed": "已确认执行",
+    "selectAtLeastOne": "请至少选择一步",
+    "executeLead": "请按以下计划逐步执行（仅执行已勾选的步骤）："
+  },
+  "layout": {
+    "title": "工作区布局",
+    "lead": "重置、导出或导入面板布局；也可一键切换常用预设。",
+    "reset": "重置布局",
+    "export": "导出 JSON",
+    "import": "导入 JSON",
+    "resetDone": "布局已重置",
+    "presetApplied": "已应用「{name}」布局",
+    "importDone": "布局已导入",
+    "importInvalid": "无效的布局文件",
+    "presets": {
+      "chat": "对话优先",
+      "code": "编码优先"
+    },
+    "presetsDesc": {
+      "chat": "宽对话区居中，左侧浏览文件与工作区",
+      "code": "编辑器居中，下挂终端，右侧对话"
+    }
+  },
   "editor": {
     "close": "关闭",
     "closeOthers": "关闭其他",
@@ -563,6 +647,8 @@
     "formatDocument": "格式化文档",
     "acceptBlock": "接受此块",
     "rejectBlock": "拒绝此块",
+    "acceptHunk": "接受此处",
+    "rejectHunk": "拒绝此处",
     "openInTerminal": "在终端中打开所在目录",
     "commandPalette": "命令面板",
     "preview": "预览",
@@ -594,7 +680,14 @@
     "splitRight": "向右拆分编辑器",
     "splitDown": "向下拆分编辑器",
     "closeSplit": "关闭拆分",
-    "splitEmpty": "在此窗格打开文件"
+    "splitEmpty": "在此窗格打开文件",
+    "agentWriteConflictTitle": "本地修改与 Agent 冲突",
+    "agentWriteConflictSummary": "「{path}」有未保存的本地修改，Agent 也写入了新版本。",
+    "useAgentVersion": "使用 Agent 版本",
+    "keepMine": "保留我的修改",
+    "reviewRejected": "已拒绝 {path}",
+    "reviewRejectedAll": "已拒绝 {n} 个文件",
+    "commitDraftDefault": "应用 Agent 改动"
   },
   "search": {
     "title": "搜索",
@@ -618,7 +711,11 @@
   "terminal": {
     "title": "终端",
     "new": "新建终端",
-    "close": "关闭终端"
+    "close": "关闭终端",
+    "untitled": "终端 {n}",
+    "copy": "复制",
+    "paste": "粘贴",
+    "addSelectionToChat": "选中内容添加到对话"
   },
   "ports": {
     "title": "端口",
@@ -843,5 +940,12 @@
   "workbench": {
     "resizeSidebar": "拖拽调整侧栏宽度",
     "resizeTrajectory": "拖拽调整轨迹面板宽度"
+  },
+  "connection": {
+    "reconnecting": "事件流重连中",
+    "reconnectingLead": "正在尝试恢复流式输出，请稍候…",
+    "disconnected": "事件流已断开",
+    "disconnectedLead": "与服务器的连接已中断，可点击重试或等待自动恢复。",
+    "retry": "重试"
   }
 }

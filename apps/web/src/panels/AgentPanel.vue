@@ -16,12 +16,14 @@ import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
 import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
+import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
 import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
 import { provideSenderFooterLayout } from '@/composables/useSenderLayoutWidth'
+import { useToast } from '@/composables/useToast'
 import {
   chatInputToolbarOverflowKey,
   type ChatInputToolbarOverflowApi,
@@ -52,6 +54,7 @@ import {
   type FileMentionItem,
   type PasteSegment,
 } from '@/utils/fileMention'
+import { isTerminalMentionPath, TERMINAL_MENTION_PATH } from '@/utils/terminalMention'
 
 const senderExtensions = [fileMentionExtension, skillMentionExtension]
 
@@ -283,6 +286,11 @@ const quickPrompts = computed(() => [
 ])
 
 function useQuickPrompt(text: string) {
+  if (composerLocked.value) {
+    toast.warning(t('chat.needModel'))
+    openModelsPanel()
+    return
+  }
   setSenderDraft(text)
   nextTick(() => {
     const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
@@ -435,12 +443,14 @@ function bindMentionEditorEvents() {
 }
 
 function mentionItemFromAttrs(attrs: Record<string, unknown>): MentionItem {
+  const snippet = attrs.snippet != null ? String(attrs.snippet) : undefined
   return {
     path: String(attrs.path || ''),
     name: String(attrs.name || ''),
     is_dir: Boolean(attrs.isDir),
     lineStart: attrs.lineStart != null ? Number(attrs.lineStart) : undefined,
     lineEnd: attrs.lineEnd != null ? Number(attrs.lineEnd) : undefined,
+    ...(snippet ? { snippet } : {}),
   }
 }
 
@@ -451,7 +461,21 @@ function fileMentionAttrs(item: MentionItem): FileMentionAttrs {
     isDir: item.is_dir,
     lineStart: item.lineStart ?? null,
     lineEnd: item.lineEnd ?? null,
+    snippet: item.snippet ?? null,
   }
+}
+
+function terminalRefsFromMentions(mentions: MentionItem[]) {
+  return mentions
+    .filter((item) => isTerminalMentionPath(item.path) && item.snippet)
+    .map((item) => ({
+      type: 'terminal',
+      path: TERMINAL_MENTION_PATH,
+      text: item.snippet!,
+      line_start: item.lineStart,
+      line_end: item.lineEnd,
+      title: item.name,
+    }))
 }
 
 function switchMentionTab(tab: 'files' | 'skills') {
@@ -884,12 +908,44 @@ const { preview: contextUsagePreview, loading: contextUsagePreviewLoading } = us
 const contextUsageRingPercent = computed(() => contextUsagePreview.value?.recommendedUsagePercent ?? 0)
 const contextUsageRingLevel = computed(() => contextUsagePreview.value?.level ?? 'normal')
 const inputBlocked = computed(() => hasUploadingAttachments())
+const modelSetupBusy = ref(false)
+const composerLocked = computed(() => !store.hasConfiguredModel)
+const toast = useToast()
 
 const queuedMessages = computed(() => store.conversationQueue())
 const queueExpanded = ref(true)
 
 function toggleQueueExpanded() {
   queueExpanded.value = !queueExpanded.value
+}
+
+function openModelsPanel() {
+  window.dispatchEvent(new Event('ca-open-models'))
+}
+
+async function quickAddOllama() {
+  if (modelSetupBusy.value) return
+  modelSetupBusy.value = true
+  try {
+    await store.quickAddPreset('ollama')
+    toast.success(t('chat.modelSetupOllamaOk'))
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : t('chat.modelSetupFailed'))
+  } finally {
+    modelSetupBusy.value = false
+  }
+}
+
+function focusComposer() {
+  nextTick(() => {
+    const editor = getTipTapEditor()
+    if (editor) {
+      editor.chain().focus('end').run()
+      return
+    }
+    const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
+    el?.focus()
+  })
 }
 
 function onSendQueuedNow(id: string) {
@@ -1068,6 +1124,7 @@ onMounted(() => {
   window.addEventListener('ca-append-chat-text', onAppendChatText)
   window.addEventListener('ca-messages-loaded', onMessagesLoaded)
   window.addEventListener('ca-layout-ready', onMessagesLoaded)
+  window.addEventListener('ca-focus-composer', focusComposer)
   nextTick(() => {
     bindMentionEditorEvents()
     setupHistoryObserver()
@@ -1086,6 +1143,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-append-chat-text', onAppendChatText)
   window.removeEventListener('ca-messages-loaded', onMessagesLoaded)
   window.removeEventListener('ca-layout-ready', onMessagesLoaded)
+  window.removeEventListener('ca-focus-composer', focusComposer)
 })
 
 watch(
@@ -1164,7 +1222,7 @@ function buildPayload(_text: string) {
   const files = getPendingFiles()
   const skillName = store.conversationSkillName()
   if (!value && !files.length && !mentions.length && !skillName) return null
-  return { value, refs: [] as { type: 'file'; path: string }[], files }
+  return { value, refs: terminalRefsFromMentions(mentions), files }
 }
 
 function afterSubmitClear() {
@@ -1180,6 +1238,11 @@ function afterSubmitClear() {
 }
 
 function onSubmit(text: string) {
+  if (composerLocked.value) {
+    toast.warning(t('chat.needModel'))
+    openModelsPanel()
+    return
+  }
   const payload = buildPayload(text)
   if (!payload) return
   stick.value = true
@@ -1188,6 +1251,11 @@ function onSubmit(text: string) {
 }
 
 function onSubmitNow() {
+  if (composerLocked.value) {
+    toast.warning(t('chat.needModel'))
+    openModelsPanel()
+    return
+  }
   const payload = buildPayload(draft.value)
   if (!payload) return
   stick.value = true
@@ -1247,6 +1315,20 @@ function onComposerPaste(e: ClipboardEvent) {
       is_dir: false,
       lineStart: copyCtx.startLine,
       lineEnd: copyCtx.endLine,
+    })
+    return
+  }
+
+  const termCtx = store.terminalCopyContext
+  if (termCtx && clip === normalizeClipboardText(termCtx.text)) {
+    e.preventDefault()
+    insertInlineMention({
+      path: TERMINAL_MENTION_PATH,
+      name: termCtx.title || t('panels.terminal'),
+      is_dir: false,
+      lineStart: termCtx.startLine,
+      lineEnd: termCtx.endLine,
+      snippet: termCtx.text,
     })
     return
   }
@@ -1363,6 +1445,7 @@ function openContextUsageDialog() {
           </div>
         </article>
         <div v-if="virtualList.enabled.value" class="virtual-spacer" :style="{ height: `${virtualList.paddingBottom.value}px` }" />
+        <ConnectionStatusBar />
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
           <button type="button" class="stop-inline" @click="store.stop()">{{ t('common.stop') }}</button>
@@ -1518,8 +1601,27 @@ function openContextUsageDialog() {
         <ApprovalActionBar />
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
+        v-if="composerLocked"
+        class="model-setup-banner"
+        role="status"
+      >
+        <div class="model-setup-copy">
+          <strong>{{ t('chat.modelSetupTitle') }}</strong>
+          <span>{{ t('chat.modelSetupLead') }}</span>
+        </div>
+        <div class="model-setup-actions">
+          <button type="button" class="btn btn-primary" :disabled="modelSetupBusy" @click="quickAddOllama">
+            {{ modelSetupBusy ? t('chat.modelSetupBusy') : t('chat.modelSetupOllama') }}
+          </button>
+          <button type="button" class="btn" :disabled="modelSetupBusy" @click="openModelsPanel">
+            {{ t('chat.modelSetupCustom') }}
+          </button>
+        </div>
+      </div>
+      <div
         ref="senderWrap"
         class="agent-sender-wrap"
+        :class="{ locked: composerLocked }"
         @pointerdown.capture="onSenderBlankPointerDown"
         @keydown.capture="onSenderCaptureKeydown"
         @keydown="mentionKeydown"
@@ -1533,8 +1635,9 @@ function openContextUsageDialog() {
           :extensions="senderExtensions"
           mode="multiple"
           submit-type="enter"
-          :placeholder="running() ? t('chat.promptBusy') : t('chat.prompt')"
+          :placeholder="composerLocked ? t('chat.promptNeedModel') : running() ? t('chat.promptBusy') : t('chat.prompt')"
           :loading="running()"
+          :disabled="composerLocked || inputBlocked"
           clearable
           @submit="onSubmit"
           @cancel="onCancel"
@@ -2025,6 +2128,42 @@ html[data-theme='dark'] .scroll-to-bottom-btn {
 .sender-resize-handle:hover::before,
 .sender-resize-handle:active::before {
   background: var(--border-strong);
+}
+
+.model-setup-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+}
+.model-setup-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 180px;
+}
+.model-setup-copy strong {
+  font-size: 13px;
+  color: var(--text-h);
+}
+.model-setup-copy span {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+.model-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.agent-sender-wrap.locked {
+  opacity: 0.72;
 }
 
 .agent-sender-wrap {

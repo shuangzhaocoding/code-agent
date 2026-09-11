@@ -7,11 +7,12 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0f1115;
+      --bg: #121218;
       --fg: #e8eaed;
       --muted: #9aa0a6;
       --accent: #5b9fff;
       --accent-soft: color-mix(in srgb, var(--accent) 28%, transparent);
+      --titlebar-h: 38px;
     }
     * { box-sizing: border-box; }
     html, body {
@@ -23,6 +24,25 @@
       user-select: none;
       -webkit-user-select: none;
     }
+    .titlebar {
+      display: none;
+      height: var(--titlebar-h);
+      align-items: center;
+      padding: 0 12px;
+      padding-left: max(12px, env(titlebar-area-x, 12px));
+      padding-right: max(
+        12px,
+        calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
+      );
+      background: var(--bg);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      -webkit-app-region: drag;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--fg);
+    }
+    body.custom-titlebar .titlebar { display: flex; }
     .wrap {
       min-height: 100%;
       display: grid;
@@ -31,6 +51,9 @@
       background:
         radial-gradient(ellipse 70% 50% at 50% 0%, rgba(91, 159, 255, 0.12), transparent 60%),
         var(--bg);
+    }
+    body.custom-titlebar .wrap {
+      min-height: calc(100% - var(--titlebar-h));
     }
     .card {
       display: flex;
@@ -93,6 +116,7 @@
   </style>
 </head>
 <body>
+  <div class="titlebar">Code Agent</div>
   <div class="wrap">
     <div class="card">
       <div class="mark" aria-hidden="true">
@@ -108,6 +132,9 @@
     </div>
   </div>
   <script>
+    if (window.codeAgentDesktop && window.codeAgentDesktop.customTitleBar) {
+      document.body.classList.add('custom-titlebar')
+    }
     window.setSplashStatus = function (text, opts) {
       const status = document.getElementById('status')
       const detail = document.getElementById('detail')

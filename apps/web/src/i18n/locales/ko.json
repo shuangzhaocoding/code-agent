@@ -12,6 +12,7 @@
     "close": "닫기",
     "save": "저장",
     "saved": "저장됨",
+    "saveFailed": "저장 실패",
     "cancel": "취소",
     "confirm": "확인",
     "delete": "삭제",
@@ -61,6 +62,34 @@
     "light": "밝게",
     "dark": "어둡게"
   },
+  "menu": {
+    "aria": "앱 메뉴",
+    "file": "파일",
+    "edit": "편집",
+    "panel": "패널",
+    "help": "도움말",
+    "aboutBody": "{name} {version}",
+    "positions": {
+      "top": "메뉴 막대 위쪽",
+      "left": "메뉴 막대 왼쪽",
+      "right": "메뉴 막대 오른쪽",
+      "bottom": "메뉴 막대 아래쪽"
+    },
+    "positionLabel": "메뉴 막대 위치",
+    "positionLead": "메뉴 막대를 창의 위·왼쪽·오른쪽·아래에 표시합니다.",
+    "items": {
+      "openWorkspace": "작업 공간 열기…",
+      "newChat": "새 대화",
+      "openFile": "파일 열기…",
+      "save": "저장",
+      "exportLayout": "레이아웃 내보내기…",
+      "importLayout": "레이아웃 가져오기…",
+      "commandPalette": "명령 팔레트…",
+      "search": "파일에서 검색…",
+      "keyboardShortcuts": "키보드 단축키…",
+      "about": "정보"
+    }
+  },
   "time": {
     "justNow": "방금",
     "minutesAgo": "{n}분 전",
@@ -82,7 +111,6 @@
     "settings": "설정",
     "workspace": "작업 공간",
     "trajectory": "궤적",
-    "chats": "채팅",
     "file": "파일"
   },
   "sidebar": {
@@ -198,13 +226,18 @@
   },
   "commandPalette": {
     "aria": "명령 팔레트",
+    "ariaFiles": "파일 빠른 열기",
     "placeholder": "명령 또는 채팅 검색…",
+    "placeholderFiles": "파일 이름 또는 경로로 검색…",
     "empty": "일치하는 명령이 없습니다",
+    "emptyFiles": "일치하는 파일이 없습니다",
+    "loadingFiles": "파일 검색 중…",
     "hint": "↑↓ 선택 · Enter 실행 · Esc 닫기",
     "or": "또는",
     "groupSession": "채팅",
     "groupPanel": "패널",
     "groupLayout": "레이아웃",
+    "groupFiles": "파일",
     "newChat": "새 채팅",
     "openAgent": "대화 열기",
     "openTrajectory": "궤적 열기",
@@ -278,10 +311,25 @@
     "selectModel": "사용 가능한 모델 선택",
     "searchModel": "모델 검색",
     "openModels": "모델 페이지를 열고 가용성 검사",
+    "needModel": "대화 전에 사용 가능한 모델을 추가하세요",
+    "sendFailed": "전송 실패",
+    "stopFailed": "중지 실패",
+    "promptNeedModel": "모델을 구성하면 전송할 수 있습니다…",
+    "modelSetupTitle": "모델이 구성되지 않음",
+    "modelSetupLead": "코딩 대화를 시작하려면 LLM을 추가하세요. 로컬 Ollama를 한 번에 추가할 수 있습니다.",
+    "modelSetupOllama": "Ollama 추가",
+    "modelSetupCustom": "모델 설정 열기",
+    "modelSetupBusy": "추가 중…",
+    "modelSetupOllamaOk": "Ollama를 추가하고 기본값으로 설정했습니다",
+    "modelSetupFailed": "모델 추가 실패",
     "noMatch": "일치하는 모델이 없습니다",
     "modeAsk": "도구 없이 빠른 Q&A",
     "modeAgent": "도구를 자율적으로 사용",
     "modePlan": "먼저 계획한 뒤 단계적으로 실행",
+    "newConversation": "새 채팅",
+    "pinned": "고정됨",
+    "recent": "최근",
+    "matched": "일치",
     "badgeUnknown": "미검사",
     "badgeOk": "사용 가능",
     "badgeFail": "사용 불가",
@@ -342,9 +390,6 @@
     "noHistory": "채팅 기록이 없습니다",
     "pin": "고정",
     "unpin": "고정 해제",
-    "pinned": "고정됨",
-    "recent": "최근",
-    "matched": "일치",
     "deleteSession": "채팅 삭제",
     "workProcess": "작업 과정",
     "hideWork": "작업 과정 숨기기",
@@ -370,7 +415,16 @@
     "noContent": "(내용 없음)",
     "thinkingDone": "사고 내용 생성됨({time})",
     "noDetail": "(상세 없음)",
-    "toolResult": "도구 결과"
+    "toolResult": "도구 결과",
+    "exportMarkdown": "Markdown으로 내보내기",
+    "exportJson": "JSON으로 내보내기",
+    "exportHint": "채팅 내보내기(클릭 Markdown, Shift+클릭 JSON)",
+    "exportDone": "채팅을 내보냈습니다",
+    "exportEmpty": "내보낼 채팅이 없습니다",
+    "turnCount": "{n}턴",
+    "statusGenerating": "생성 중",
+    "statusQueued": "대기 중",
+    "statusAwaitingApproval": "승인 필요"
   },
   "models": {
     "title": "모델 설정",
@@ -505,6 +559,36 @@
     "cannotMoveIntoSelf": "자신 또는 하위 디렉터리로는 이동할 수 없습니다",
     "moveFail": "이동 실패"
   },
+  "plan": {
+    "title": "실행 계획",
+    "count": "{n}단계",
+    "selectAll": "전체 선택",
+    "deselectAll": "선택 해제",
+    "confirmExecute": "선택 실행 ({n})",
+    "executing": "실행 중…",
+    "executed": "실행 확인됨",
+    "selectAtLeastOne": "최소 한 단계를 선택하세요",
+    "executeLead": "다음 계획을 단계별로 실행하세요(선택한 단계만):"
+  },
+  "layout": {
+    "title": "워크스페이스 레이아웃",
+    "lead": "레이아웃 초기화, 내보내기, 가져오기 또는 프리셋 전환.",
+    "reset": "레이아웃 초기화",
+    "export": "JSON 내보내기",
+    "import": "JSON 가져오기",
+    "resetDone": "레이아웃이 초기화되었습니다",
+    "presetApplied": "「{name}」 레이아웃 적용",
+    "importDone": "레이아웃을 가져왔습니다",
+    "importInvalid": "잘못된 레이아웃 파일",
+    "presets": {
+      "chat": "채팅 우선",
+      "code": "코딩 우선"
+    },
+    "presetsDesc": {
+      "chat": "넓은 채팅을 중앙에, 왼쪽은 파일·워크스페이스",
+      "code": "중앙 편집기, 아래 터미널, 오른쪽 채팅"
+    }
+  },
   "editor": {
     "close": "닫기",
     "closeOthers": "다른 탭 닫기",
@@ -540,7 +624,16 @@
     "splitRight": "편집기 오른쪽 분할",
     "splitDown": "편집기 아래 분할",
     "closeSplit": "분할 닫기",
-    "splitEmpty": "이 창에서 파일 열기"
+    "splitEmpty": "이 창에서 파일 열기",
+    "agentWriteConflictTitle": "로컬 편집과 Agent 충돌",
+    "agentWriteConflictSummary": "「{path}」에 저장되지 않은 로컬 편집이 있고 Agent도 새 버전을 작성했습니다.",
+    "useAgentVersion": "Agent 버전 사용",
+    "keepMine": "내 편집 유지",
+    "reviewRejected": "{path} 거부됨",
+    "reviewRejectedAll": "{n}개 파일 거부됨",
+    "commitDraftDefault": "Agent 변경 적용",
+    "acceptHunk": "이 변경 수락",
+    "rejectHunk": "이 변경 거부"
   },
   "search": {
     "title": "검색",
@@ -564,7 +657,11 @@
   "terminal": {
     "title": "터미널",
     "new": "새 터미널",
-    "close": "터미널 닫기"
+    "close": "터미널 닫기",
+    "untitled": "터미널 {n}",
+    "copy": "복사",
+    "paste": "붙여넣기",
+    "addSelectionToChat": "선택 내용을 채팅에 추가"
   },
   "ports": {
     "title": "포트",
@@ -761,5 +858,12 @@
   "workbench": {
     "resizeSidebar": "드래그하여 사이드바 너비 조정",
     "resizeTrajectory": "드래그하여 궤적 패널 너비 조정"
+  },
+  "connection": {
+    "reconnecting": "이벤트 스트림 다시 연결 중",
+    "reconnectingLead": "스트리밍 출력 복구를 시도 중입니다. 잠시만 기다려 주세요…",
+    "disconnected": "이벤트 스트림이 끊어졌습니다",
+    "disconnectedLead": "서버 연결이 끊어졌습니다. 다시 시도하거나 자동 복구를 기다려 주세요.",
+    "retry": "다시 시도"
   }
 }

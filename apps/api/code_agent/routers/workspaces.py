@@ -536,6 +536,27 @@ async def search_workspace(
     return {"query": query, "hits": hits}
 
 
+@router.get("/{workspace_id}/find-files")
+async def find_files(workspace_id: str, q: str = "", limit: int = 50):
+    """Fuzzy-ish filename / path matcher for Ctrl/Cmd+P quick open."""
+    ws = await _get_ws(workspace_id)
+    query = (q or "").strip().lower()
+    cap = max(1, min(int(limit or 50), 100))
+    backend = await get_workspace_backend(ws)
+    walked = await backend.walk_files(extra_ignores=ws.ignore_globs, limit=8000)
+    files: list[dict[str, str]] = []
+    for rel, _abs in walked:
+        name = posixpath.basename(rel)
+        if query and query not in rel.lower() and query not in name.lower():
+            continue
+        files.append({"path": rel, "name": name})
+    if query:
+        files.sort(key=lambda item: (0 if query in item["name"].lower() else 1, len(item["path"]), item["path"]))
+    else:
+        files.sort(key=lambda item: item["path"])
+    return {"query": q, "files": files[:cap]}
+
+
 @router.post("/{workspace_id}/replace")
 async def replace_workspace(workspace_id: str, body: SearchReplaceIn):
     ws = await _get_ws(workspace_id)

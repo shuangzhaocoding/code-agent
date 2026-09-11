@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, provide, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type FsItem } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
@@ -14,6 +14,8 @@ import {
 const { t } = useI18n()
 const store = useAppStore()
 const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
+const menuEl = ref<HTMLElement | null>(null)
+const menuPos = ref({ left: 0, top: 0 })
 const creating = ref<{ kind: 'file' | 'dir'; dir: string; value: string; id: number } | null>(null)
 const error = ref('')
 const renamingPath = ref<string | null>(null)
@@ -125,7 +127,35 @@ function onContext(e: MouseEvent, item: FsItem | null) {
   e.preventDefault()
   e.stopPropagation()
   selectedItem.value = item
+  menuPos.value = { left: e.clientX, top: e.clientY }
   menu.value = { x: e.clientX, y: e.clientY, item }
+  void nextTick(() => placeMenu())
+}
+
+function placeMenu() {
+  const el = menuEl.value
+  const m = menu.value
+  if (!el || !m) return
+  const pad = 8
+  const w = el.offsetWidth
+  const h = el.offsetHeight
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let left = m.x
+  let top = m.y
+  // Prefer flipping above the cursor when there isn't enough room below
+  if (top + h > vh - pad) {
+    top = Math.max(pad, m.y - h)
+  }
+  if (top + h > vh - pad) {
+    top = Math.max(pad, vh - h - pad)
+  }
+  if (left + w > vw - pad) {
+    left = Math.max(pad, vw - w - pad)
+  }
+  if (left < pad) left = pad
+  if (top < pad) top = pad
+  menuPos.value = { left, top }
 }
 
 function targetDir() {
@@ -373,8 +403,76 @@ function onGlobalClick() {
   closeMenu()
 }
 
-onMounted(() => window.addEventListener('click', onGlobalClick))
-onUnmounted(() => window.removeEventListener('click', onGlobalClick))
+/** Map editor tab path → workspace-relative tree path (skip outside / revision-only). */
+function explorerRelPath(path: string | null | undefined): string | null {
+  if (!path) return null
+  // Git revision tabs e.g. HEAD:src/foo.ts
+  const rev = /^([A-Za-z0-9._-]+):(.+)$/.exec(path)
+  if (rev && !/^[A-Za-z]:[\\/]/.test(path)) return rev[2]
+  if (path.startsWith('~/') || path.startsWith('/')) return null
+  if (/^[A-Za-z]:[\\/]/.test(path)) return null
+  return path
+}
+
+const treeEl = ref<HTMLElement | null>(null)
+let scrollTimer: ReturnType<typeof setTimeout> | null = null
+
+async function scrollTreeToPath(path: string, opts?: { force?: boolean }) {
+  const rel = explorerRelPath(path)
+  if (!rel || !treeEl.value) return
+  await store.revealInTree(rel)
+  await nextTick()
+  const root = treeEl.value
+  const escape =
+    typeof CSS !== 'undefined' && typeof CSS.escape === 'function'
+      ? CSS.escape(rel)
+      : rel.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const find = () => root.querySelector(`[data-explorer-path="${escape}"]`) as HTMLElement | null
+  let el = find()
+  if (!el) {
+    await nextTick()
+    el = find()
+  }
+  el?.scrollIntoView({
+    block: opts?.force ? 'center' : 'nearest',
+    behavior: 'smooth',
+  })
+}
+
+watch(
+  () => store.activePath,
+  (path) => {
+    if (!path) return
+    if (scrollTimer) clearTimeout(scrollTimer)
+    // Debounce: tab switches / openPath may set activePath in quick succession
+    scrollTimer = setTimeout(() => {
+      scrollTimer = null
+      void scrollTreeToPath(path)
+    }, 50)
+  },
+)
+
+function onRevealInTree(e: Event) {
+  const path = (e as CustomEvent<{ path?: string }>).detail?.path || store.activePath
+  if (!path) return
+  if (scrollTimer) {
+    clearTimeout(scrollTimer)
+    scrollTimer = null
+  }
+  void scrollTreeToPath(path, { force: true })
+}
+
+onMounted(() => {
+  window.addEventListener('click', onGlobalClick)
+  window.addEventListener('ca-reveal-in-tree', onRevealInTree as EventListener)
+  window.addEventListener('resize', placeMenu)
+})
+onUnmounted(() => {
+  window.removeEventListener('click', onGlobalClick)
+  window.removeEventListener('ca-reveal-in-tree', onRevealInTree as EventListener)
+  window.removeEventListener('resize', placeMenu)
+  if (scrollTimer) clearTimeout(scrollTimer)
+})
 </script>
 
 <template>
@@ -401,6 +499,7 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
     </div>
     <p v-if="error" class="err">{{ error }}</p>
     <div
+      ref="treeEl"
       class="tree"
       :class="{ 'drop-over': dragSrc && dropHoverPath === '' }"
       @dragover="onTreeDragOver"
@@ -434,7 +533,13 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
         @cancel-create="cancelCreate"
       />
     </div>
-    <div v-if="menu" class="ctx" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+    <div
+      v-if="menu"
+      ref="menuEl"
+      class="ctx"
+      :style="{ left: menuPos.left + 'px', top: menuPos.top + 'px' }"
+      @click.stop
+    >
       <!-- 新建 -->
       <button type="button" @click="startCreate('file')">
         <AppIcon class="ctx-ico" name="file-plus" :size="15" />
@@ -582,6 +687,9 @@ onUnmounted(() => window.removeEventListener('click', onGlobalClick))
   position: fixed;
   z-index: 80;
   min-width: 168px;
+  max-height: min(70vh, calc(100vh - 16px));
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 6px;
   background: var(--panel-bg);
   border: var(--border-width) solid var(--border);

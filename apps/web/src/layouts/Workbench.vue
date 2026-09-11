@@ -1,19 +1,30 @@
 <script setup lang="ts">
 import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
-import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, shallowRef, ref, watch } from 'vue'
-import { useI18n } from 'vue-i18n'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, shallowRef, ref } from 'vue'
 import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, toggleTheme, type Theme } from '@/theme'
 import AgentPanel from '@/panels/AgentPanel.vue'
-import SessionSidebar from '@/components/SessionSidebar.vue'
+import TopMenuBar from '@/components/TopMenuBar.vue'
+import DesktopTitleBar from '@/components/DesktopTitleBar.vue'
 import PanelTab from '@/components/PanelTab.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
-import { getSidebarCollapsed, setSidebarCollapsed } from '@/utils/layoutPrefs'
+import AppToastHost from '@/components/AppToastHost.vue'
+import {
+  applyLayoutPreset,
+  clearDock,
+  DEFAULT_LAYOUT_PRESET,
+  getStoredLayoutPreset,
+  isLayoutPresetId,
+  setStoredLayoutPreset,
+  type LayoutPresetId,
+} from '@/utils/layoutPresets'
+import { getMenuBarPosition, isMenuBarPosition, type MenuBarPosition } from '@/utils/layoutPrefs'
+import { hasCustomTitleBar } from '@/utils/desktop'
 import { queueTerminalCwd } from '@/utils/terminalOpen'
 
 const TrajectoryDockPanel = defineAsyncComponent(() => import('@/panels/TrajectoryDockPanel.vue'))
@@ -22,7 +33,6 @@ const ExplorerPanel = defineAsyncComponent(() => import('@/panels/ExplorerPanel.
 const SearchPanel = defineAsyncComponent(() => import('@/panels/SearchPanel.vue'))
 const EditorPanel = defineAsyncComponent(() => import('@/panels/EditorPanel.vue'))
 const TerminalPanel = defineAsyncComponent(() => import('@/panels/TerminalPanel.vue'))
-const ChatListPanel = defineAsyncComponent(() => import('@/panels/ChatListPanel.vue'))
 const SkillsPanel = defineAsyncComponent(() => import('@/panels/SkillsPanel.vue'))
 const PluginsPanel = defineAsyncComponent(() => import('@/panels/PluginsPanel.vue'))
 const ModelsPanel = defineAsyncComponent(() => import('@/panels/ModelsPanel.vue'))
@@ -31,15 +41,14 @@ const GitPanel = defineAsyncComponent(() => import('@/panels/GitPanel.vue'))
 const PortsPanel = defineAsyncComponent(() => import('@/panels/PortsPanel.vue'))
 const MemoryPanel = defineAsyncComponent(() => import('@/panels/MemoryPanel.vue'))
 
-const { t } = useI18n()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
-const sidebarCollapsed = ref(getSidebarCollapsed())
-const sidebarWidth = ref(260)
-const resizing = ref<'sidebar' | null>(null)
+const menuPosition = ref<MenuBarPosition>(getMenuBarPosition())
 const paletteOpen = ref(false)
-
-watch(sidebarCollapsed, (value) => setSidebarCollapsed(value))
+const paletteMode = ref<'commands' | 'files'>('commands')
+const customTitleBar = hasCustomTitleBar()
+const menuAsTitleBar = computed(() => customTitleBar && menuPosition.value === 'top')
+const showDesktopStrip = computed(() => customTitleBar && menuPosition.value !== 'top')
 
 const components = {
   workspace: WorkspacePanel,
@@ -48,7 +57,6 @@ const components = {
   editor: EditorPanel,
   agent: AgentPanel,
   terminal: TerminalPanel,
-  chats: ChatListPanel,
   skills: SkillsPanel,
   plugins: PluginsPanel,
   models: ModelsPanel,
@@ -65,8 +73,14 @@ function onTheme(e: Event) {
   theme.value = (e as CustomEvent<Theme>).detail
 }
 
+function onMenuPosition(e: Event) {
+  const position = (e as CustomEvent<{ position: MenuBarPosition }>).detail?.position
+  if (isMenuBarPosition(position)) menuPosition.value = position
+}
+
 onMounted(() => {
   window.addEventListener('ca-theme', onTheme)
+  window.addEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.addEventListener('ca-focus-editor', focusEditor)
   window.addEventListener('ca-focus-agent', focusAgent)
   window.addEventListener('ca-open-models', openModels)
@@ -74,11 +88,17 @@ onMounted(() => {
   window.addEventListener('ca-open-explorer', openExplorer)
   window.addEventListener('ca-open-terminal', onOpenTerminal)
   window.addEventListener('ca-open-skills', openSkills)
-  window.addEventListener('keydown', onWorkbenchKey)
+  window.addEventListener('ca-open-git', openGit)
+  window.addEventListener('ca-layout-reset', onLayoutReset)
+  window.addEventListener('ca-layout-preset', onLayoutPreset as EventListener)
+  window.addEventListener('ca-layout-export', onLayoutExport)
+  window.addEventListener('ca-layout-import', onLayoutImport as EventListener)
+  window.addEventListener('keydown', onWorkbenchKey, true)
   window.addEventListener('ca-locale', retitlePanels)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
+  window.removeEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.removeEventListener('ca-focus-editor', focusEditor)
   window.removeEventListener('ca-focus-agent', focusAgent)
   window.removeEventListener('ca-open-models', openModels)
@@ -86,9 +106,13 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-explorer', openExplorer)
   window.removeEventListener('ca-open-terminal', onOpenTerminal)
   window.removeEventListener('ca-open-skills', openSkills)
-  window.removeEventListener('keydown', onWorkbenchKey)
+  window.removeEventListener('ca-open-git', openGit)
+  window.removeEventListener('ca-layout-reset', onLayoutReset)
+  window.removeEventListener('ca-layout-preset', onLayoutPreset as EventListener)
+  window.removeEventListener('ca-layout-export', onLayoutExport)
+  window.removeEventListener('ca-layout-import', onLayoutImport as EventListener)
+  window.removeEventListener('keydown', onWorkbenchKey, true)
   window.removeEventListener('ca-locale', retitlePanels)
-  stopResize()
 })
 
 function focusEditor() {
@@ -124,55 +148,156 @@ async function onOpenTerminal(e: Event) {
   window.dispatchEvent(new Event('ca-terminal-cwd'))
 }
 
+function openGit() {
+  openPanel('git', 'git', panelTitle('git'))
+}
+
 function openSkills() {
   openPanel('skills', 'skills', panelTitle('skills'))
 }
 
 function onWorkbenchKey(e: KeyboardEvent) {
-  if (!(e.ctrlKey || e.metaKey) || !e.shiftKey || e.key.toLowerCase() !== 'f') return
-  if (e.repeat) return
-  e.preventDefault()
-  store.openSearch()
+  if (e.isComposing || e.repeat) return
+
+  // Esc → stop active run (when Agent is focused; skip modals / palette / editor / terminal)
+  if (e.key === 'Escape') {
+    if (paletteOpen.value || store.confirmDialog) return
+    const target = e.target as HTMLElement | null
+    if (target?.closest?.('.palette-root, [role="dialog"], .mention-popup, .monaco-editor, .xterm, .xterm-helper-textarea')) return
+    const agentSel = '.panel-shell.agent, .agent-footer, .agent-sender-wrap, .agent-main'
+    const inAgent = !!(target?.closest?.(agentSel) || (document.activeElement as HTMLElement | null)?.closest?.(agentSel))
+    if (!inAgent) return
+    if (!store.isRunBusy()) return
+    e.preventDefault()
+    void store.stop()
+    return
+  }
+
+  const mod = e.metaKey || e.ctrlKey
+  if (!mod || e.altKey) return
+  const key = e.key.toLowerCase()
+  const inEditable =
+    e.target instanceof HTMLElement &&
+    (!!e.target.closest('.monaco-editor, .xterm, .xterm-helper-textarea') ||
+      e.target.isContentEditable ||
+      e.target.tagName === 'INPUT' ||
+      e.target.tagName === 'TEXTAREA')
+
+  // Ctrl/Cmd+Shift+F → search (existing)
+  if (e.shiftKey && key === 'f') {
+    e.preventDefault()
+    store.openSearch()
+    return
+  }
+
+  if (e.shiftKey) return
+
+  // Ctrl/Cmd+L → focus composer
+  if (key === 'l') {
+    e.preventDefault()
+    focusAgent()
+    window.dispatchEvent(new Event('ca-focus-composer'))
+    return
+  }
+
+  // Ctrl/Cmd+N → new chat
+  if (key === 'n') {
+    e.preventDefault()
+    void (async () => {
+      await store.newChat()
+      focusAgent()
+      window.dispatchEvent(new Event('ca-focus-composer'))
+    })()
+    return
+  }
+
+  // Ctrl/Cmd+P → quick open files (not Shift+P command palette)
+  if (key === 'p') {
+    // Allow Monaco/editor to keep its own command if needed? Prefer IDE quick-open.
+    if (inEditable && e.target instanceof HTMLElement && e.target.closest('.xterm, .xterm-helper-textarea')) return
+    e.preventDefault()
+    e.stopPropagation()
+    paletteMode.value = 'files'
+    paletteOpen.value = true
+  }
 }
 
-const LAYOUT_SEED = 2
+const LAYOUT_SEED = 3
+
+function persistLayout(apiRef: DockviewApi) {
+  const layout = apiRef.toJSON()
+  api('/api/layout', {
+    method: 'PUT',
+    body: JSON.stringify({ workspace_id: store.workspaceId, layout }),
+  }).catch(() => undefined)
+}
+
+function rebuildLayout(apply: (api: DockviewApi) => void, preset?: LayoutPresetId) {
+  const apiRef = dock.value
+  if (!apiRef) return
+  clearDock(apiRef)
+  apply(apiRef)
+  localStorage.setItem(layoutSeedKey(), String(LAYOUT_SEED))
+  if (preset) {
+    setStoredLayoutPreset(preset, store.workspaceId)
+    window.dispatchEvent(new CustomEvent('ca-layout-preset-changed', { detail: { id: preset } }))
+  }
+  const active = apiRef.activePanel
+  if (active?.id) store.activity = active.id
+  persistLayout(apiRef)
+}
+
+function onLayoutReset() {
+  rebuildLayout((api) => applyLayoutPreset(api, DEFAULT_LAYOUT_PRESET), DEFAULT_LAYOUT_PRESET)
+}
+
+function onLayoutPreset(e: Event) {
+  const raw = (e as CustomEvent<{ id: LayoutPresetId }>).detail?.id
+  const id = isLayoutPresetId(raw) ? raw : DEFAULT_LAYOUT_PRESET
+  rebuildLayout((api) => applyLayoutPreset(api, id), id)
+}
+
+function onLayoutExport() {
+  const apiRef = dock.value
+  if (!apiRef) return
+  const layout = apiRef.toJSON()
+  const blob = new Blob([JSON.stringify(layout, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `code-agent-layout-${store.workspaceId || 'workspace'}.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function onLayoutImport(e: Event) {
+  const layout = (e as CustomEvent<{ layout: unknown }>).detail?.layout
+  const apiRef = dock.value
+  if (!apiRef || !layout) {
+    window.dispatchEvent(new CustomEvent('ca-layout-import-result', { detail: { ok: false } }))
+    return
+  }
+  try {
+    apiRef.fromJSON(layout as never)
+    localStorage.setItem(layoutSeedKey(), String(LAYOUT_SEED))
+    const active = apiRef.activePanel
+    if (active?.id) store.activity = active.id
+    persistLayout(apiRef)
+    window.dispatchEvent(new CustomEvent('ca-layout-import-result', { detail: { ok: true } }))
+  } catch {
+    window.dispatchEvent(new CustomEvent('ca-layout-import-result', { detail: { ok: false } }))
+  }
+}
 
 function seed(apiRef: DockviewApi) {
-  // Center: Agent + Memory
-  apiRef.addPanel({ id: 'agent', component: 'agent', title: panelTitle('agent') })
-  apiRef.addPanel({
-    id: 'memory',
-    component: 'memory',
-    title: panelTitle('memory'),
-    position: { referencePanel: 'agent', direction: 'within' },
-  })
-
-  // Left: Workspace / Explorer / Search
-  apiRef.addPanel({
-    id: 'workspace',
-    component: 'workspace',
-    title: panelTitle('workspace'),
-    position: { referencePanel: 'agent', direction: 'left' },
-  })
-  apiRef.addPanel({
-    id: 'explorer',
-    component: 'explorer',
-    title: panelTitle('explorer'),
-    position: { referencePanel: 'workspace', direction: 'within' },
-  })
-  apiRef.addPanel({
-    id: 'search',
-    component: 'search',
-    title: panelTitle('search'),
-    position: { referencePanel: 'workspace', direction: 'within' },
-  })
-
-  apiRef.getPanel('agent')?.api.setActive()
-  store.activity = 'agent'
+  const preset = getStoredLayoutPreset(store.workspaceId)
+  applyLayoutPreset(apiRef, preset)
+  setStoredLayoutPreset(preset, store.workspaceId)
+  store.activity = preset === 'code' ? 'editor' : 'agent'
 }
 
 const LEFT_PANELS = ['workspace', 'explorer', 'search'] as const
-const CENTER_PANELS = ['agent', 'memory'] as const
+const AGENT_PANELS = ['agent', 'memory'] as const
 
 function findExisting(apiRef: DockviewApi, ids: readonly string[]) {
   return ids.find((id) => apiRef.getPanel(id))
@@ -202,43 +327,61 @@ async function onReady(event: DockviewReadyEvent) {
     const active = event.api.activePanel
     if (active?.id) store.activity = active.id
   }
+  window.dispatchEvent(
+    new CustomEvent('ca-layout-preset-changed', {
+      detail: { id: getStoredLayoutPreset(store.workspaceId) },
+    }),
+  )
   await nextTick()
   requestAnimationFrame(() => {
     window.dispatchEvent(new Event('ca-layout-ready'))
   })
   event.api.onDidLayoutChange(() => {
-    const layout = event.api.toJSON()
-    api('/api/layout', {
-      method: 'PUT',
-      body: JSON.stringify({ workspace_id: store.workspaceId, layout }),
-    }).catch(() => undefined)
+    persistLayout(event.api)
   })
 }
 
-function panelPosition(
-  apiRef: DockviewApi,
-  id: string,
-): { referencePanel: string; direction: 'left' | 'right' | 'within' } | undefined {
+type PanelPlace = {
+  referencePanel: string
+  direction: 'left' | 'right' | 'below' | 'within'
+}
+
+/** Place panels from current dock structure (works for both chat / code presets). */
+function panelPosition(apiRef: DockviewApi, id: string): PanelPlace | undefined {
   if ((LEFT_PANELS as readonly string[]).includes(id)) {
     const left = findExisting(apiRef, LEFT_PANELS)
     if (left) return { referencePanel: left, direction: 'within' }
-    const center = findExisting(apiRef, CENTER_PANELS)
-    return center ? { referencePanel: center, direction: 'left' } : undefined
+    if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'left' }
+    const agent = findExisting(apiRef, AGENT_PANELS)
+    return agent ? { referencePanel: agent, direction: 'left' } : undefined
   }
 
-  if ((CENTER_PANELS as readonly string[]).includes(id)) {
-    const center = findExisting(apiRef, CENTER_PANELS)
-    return center ? { referencePanel: center, direction: 'within' } : undefined
+  if (id === 'terminal') {
+    if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'below' }
+    const agent = findExisting(apiRef, AGENT_PANELS)
+    return agent ? { referencePanel: agent, direction: 'below' } : undefined
   }
 
-  // Everything else opens on the right, tabbed together when possible.
-  const rightIds = Object.keys(components).filter(
-    (pid) => !(LEFT_PANELS as readonly string[]).includes(pid) && !(CENTER_PANELS as readonly string[]).includes(pid),
-  )
-  const right = findExisting(apiRef, rightIds)
-  if (right) return { referencePanel: right, direction: 'within' }
-  const center = findExisting(apiRef, CENTER_PANELS)
-  return center ? { referencePanel: center, direction: 'right' } : undefined
+  if (id === 'editor') {
+    const left = findExisting(apiRef, LEFT_PANELS)
+    if (left) return { referencePanel: left, direction: 'right' }
+    const agent = findExisting(apiRef, AGENT_PANELS)
+    return agent ? { referencePanel: agent, direction: 'left' } : undefined
+  }
+
+  if ((AGENT_PANELS as readonly string[]).includes(id)) {
+    const agent = findExisting(apiRef, AGENT_PANELS)
+    if (agent) return { referencePanel: agent, direction: 'within' }
+    if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'right' }
+    return undefined
+  }
+
+  // Settings / models / git / … — keep with the agent column when present.
+  const agent = findExisting(apiRef, AGENT_PANELS)
+  if (agent) return { referencePanel: agent, direction: 'within' }
+  if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'right' }
+  const left = findExisting(apiRef, LEFT_PANELS)
+  return left ? { referencePanel: left, direction: 'right' } : undefined
 }
 
 function retitlePanels() {
@@ -277,29 +420,15 @@ function onToggleTheme() {
   theme.value = toggleTheme()
 }
 
-function startSidebarResize(e: PointerEvent) {
-  if (sidebarCollapsed.value) return
-  resizing.value = 'sidebar'
-  const startX = e.clientX
-  const startWidth = sidebarWidth.value
-  const onMove = (ev: PointerEvent) => {
-    sidebarWidth.value = Math.min(420, Math.max(200, startWidth + ev.clientX - startX))
-  }
-  const onUp = () => stopResize(onMove, onUp)
-  window.addEventListener('pointermove', onMove)
-  window.addEventListener('pointerup', onUp)
-  ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+function openCommandPalette() {
+  paletteMode.value = 'commands'
+  paletteOpen.value = true
 }
 
-function stopResize(onMove?: (ev: PointerEvent) => void, onUp?: () => void) {
-  resizing.value = null
-  if (onMove) window.removeEventListener('pointermove', onMove)
-  if (onUp) window.removeEventListener('pointerup', onUp)
+function openFilePalette() {
+  paletteMode.value = 'files'
+  paletteOpen.value = true
 }
-
-const sidebarStyle = computed(() =>
-  sidebarCollapsed.value ? { width: 'var(--sidebar-rail-w)' } : { width: `${sidebarWidth.value}px` },
-)
 
 const dockThemeClass = computed(() =>
   theme.value === 'dark' ? 'dockview-theme-dark' : 'dockview-theme-light',
@@ -307,21 +436,24 @@ const dockThemeClass = computed(() =>
 </script>
 
 <template>
-  <div class="workbench" :class="{ resizing: !!resizing }">
-    <div class="workbench-body">
-      <SessionSidebar
-        :style="sidebarStyle"
-        :collapsed="sidebarCollapsed"
+  <div class="workbench" :class="{ 'has-desktop-titlebar': customTitleBar }">
+    <DesktopTitleBar
+      v-if="showDesktopStrip"
+      :theme="theme"
+      :show-actions="true"
+      @toggle-theme="onToggleTheme"
+      @open-command-palette="openCommandPalette"
+    />
+    <div class="workbench-shell" :class="`menu-${menuPosition}`">
+      <TopMenuBar
         :theme="theme"
-        @toggle-collapse="sidebarCollapsed = !sidebarCollapsed"
+        :position="menuPosition"
+        :as-title-bar="menuAsTitleBar"
+        :hide-brand="showDesktopStrip"
         @open-panel="openPanel"
         @toggle-theme="onToggleTheme"
-      />
-      <div
-        v-if="!sidebarCollapsed"
-        class="sidebar-resizer"
-        :title="t('workbench.resizeSidebar')"
-        @pointerdown="startSidebarResize"
+        @open-command-palette="openCommandPalette"
+        @open-file-palette="openFilePalette"
       />
       <div class="workbench-main">
         <div class="dock">
@@ -346,11 +478,12 @@ const dockThemeClass = computed(() =>
       @cancel="store.closeConfirm(false)"
     />
     <PortNotifyToast />
+    <AppToastHost />
     <CommandPalette
       v-model:open="paletteOpen"
+      v-model:mode="paletteMode"
       @open-panel="openPanel"
       @toggle-theme="onToggleTheme"
-      @toggle-sidebar="sidebarCollapsed = !sidebarCollapsed"
     />
   </div>
 </template>
@@ -362,16 +495,30 @@ const dockThemeClass = computed(() =>
   flex-direction: column;
   background: var(--page-bg);
 }
-.workbench-body {
+.workbench-shell {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   display: flex;
+}
+.workbench-shell.menu-top {
+  flex-direction: column;
+}
+.workbench-shell.menu-bottom {
+  flex-direction: column-reverse;
+}
+.workbench-shell.menu-left {
+  flex-direction: row;
+}
+.workbench-shell.menu-right {
+  flex-direction: row-reverse;
 }
 .workbench-main {
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
 }
 .dock {
   flex: 1;
@@ -384,32 +531,5 @@ const dockThemeClass = computed(() =>
 }
 .dock :deep(.dv-tabs-and-actions-container) {
   min-height: 36px;
-}
-.sidebar-resizer {
-  width: 5px;
-  flex-shrink: 0;
-  cursor: col-resize;
-  background: transparent;
-  position: relative;
-}
-.sidebar-resizer::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 2px;
-  width: 1px;
-  background: var(--border);
-  transition: background 0.15s ease, width 0.15s ease, left 0.15s ease;
-}
-.sidebar-resizer:hover::after,
-.workbench.resizing .sidebar-resizer::after {
-  left: 1px;
-  width: 3px;
-  background: color-mix(in srgb, var(--primary) 55%, var(--border));
-}
-.workbench.resizing {
-  cursor: col-resize;
-  user-select: none;
 }
 </style>

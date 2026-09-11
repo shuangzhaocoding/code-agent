@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { Block } from '@/protocol/applyEvent'
@@ -10,6 +11,7 @@ import SkillMentionChip from '@/components/SkillMentionChip.vue'
 
 const props = defineProps<{ block: Block }>()
 const store = useAppStore()
+const { t } = useI18n()
 
 type AttachmentFile = { name: string; url: string; size?: number; type?: string }
 
@@ -30,6 +32,10 @@ function resolveMentionIsDir(path: string) {
 }
 
 function openMention(path: string, isDir = false) {
+  if (path === 'terminal') {
+    window.dispatchEvent(new Event('ca-open-terminal'))
+    return
+  }
   if (isDir) {
     void store.openPath(path, true)
     return
@@ -43,6 +49,7 @@ type Segment = {
   name?: string
   lineLabel?: string
   isDir?: boolean
+  isTerminal?: boolean
 }
 
 function inlineTextHtml(text: string) {
@@ -68,14 +75,17 @@ const segments = computed<Segment[]>(() => {
         const path = match[1]
         const lineStart = match[2] ? Number(match[2]) : null
         const lineEnd = match[3] ? Number(match[3]) : lineStart
-        const name = path.split('/').filter(Boolean).pop() || path
+        const isTerminal = path === 'terminal'
+        const name = isTerminal
+          ? t('panels.terminal')
+          : path.split('/').filter(Boolean).pop() || path
         const lineLabel = lineStart
           ? lineStart === lineEnd
             ? `(${lineStart})`
             : `(${lineStart}-${lineEnd})`
           : ''
-        const isDir = !lineStart && resolveMentionIsDir(path)
-        return { kind: 'mention' as const, value: path, name, lineLabel, isDir }
+        const isDir = !lineStart && !isTerminal && resolveMentionIsDir(path)
+        return { kind: 'mention' as const, value: path, name, lineLabel, isDir, isTerminal }
       }
       return { kind: 'text' as const, value: inlineTextHtml(p) }
     })
@@ -137,7 +147,11 @@ const skillName = computed(() => {
           @click="openMention(seg.value, seg.isDir)"
           @keydown.enter="openMention(seg.value, seg.isDir)"
         >
-          <svg v-if="seg.isDir" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <svg v-if="seg.isTerminal" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="4 17 10 11 4 5"/>
+            <line x1="12" y1="19" x2="20" y2="19"/>
+          </svg>
+          <svg v-else-if="seg.isDir" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
           <svg v-else width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

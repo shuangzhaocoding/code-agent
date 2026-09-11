@@ -5,6 +5,8 @@ import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import FormSelect from '@/components/FormSelect.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
+import LayoutControls from '@/components/LayoutControls.vue'
+import { useToast } from '@/composables/useToast'
 
 type SchemaSpec = {
   title?: string
@@ -20,8 +22,10 @@ type SchemaSpec = {
 
 const { t, te } = useI18n()
 const store = useAppStore()
+const toast = useToast()
 const local = reactive<Record<string, unknown>>({})
 const saved = ref(false)
+const saving = ref(false)
 const activeGroup = ref('appearance')
 
 const schema = computed(() => (store.settings?.schema?.properties || {}) as Record<string, SchemaSpec>)
@@ -108,20 +112,31 @@ const STORAGE_URL_KEYS = new Set([
   'storage.checkpoint_postgres_url',
 ])
 
-function valueForDisplay(key: string, value: unknown) {
-  if (!STORAGE_URL_KEYS.has(key)) return value
-  if (typeof value !== 'string' || !value.trim()) return ''
-  const ph = fieldPlaceholder(key)
-  if (ph && value.trim() === ph) return ''
-  return value
-}
+const OMIT_EMPTY_KEYS = new Set([
+  ...STORAGE_URL_KEYS,
+  'terminal.shell',
+  'uploads.dir',
+])
+
+const baseline = ref<Record<string, unknown>>({})
 
 function applySettingsValues(values: Record<string, unknown>) {
-  const next = { ...values }
-  for (const key of STORAGE_URL_KEYS) {
-    if (key in next) next[key] = valueForDisplay(key, next[key])
+  Object.assign(local, values)
+  baseline.value = { ...values }
+}
+
+function buildSettingsPatch() {
+  const patch: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(local)) {
+    if (OMIT_EMPTY_KEYS.has(key) && (value === '' || value == null)) {
+      const prev = baseline.value[key]
+      // Clearing a previously set optional field must PATCH "" so the server drops it.
+      if (prev !== '' && prev != null) patch[key] = ''
+      continue
+    }
+    patch[key] = value
   }
-  Object.assign(local, next)
+  return patch
 }
 
 const storageStatus = computed(() => (store.settings as { storage?: Record<string, unknown> } | null)?.storage || null)
@@ -148,9 +163,19 @@ async function pickDirectory(key: string) {
 }
 
 async function save() {
-  await store.saveSettings({ ...local })
-  saved.value = true
-  setTimeout(() => { saved.value = false }, 2000)
+  if (saving.value) return
+  saving.value = true
+  try {
+    await store.saveSettings(buildSettingsPatch())
+    if (store.settings?.values) applySettingsValues(store.settings.values)
+    saved.value = true
+    toast.success(t('common.saved'))
+    setTimeout(() => { saved.value = false }, 2000)
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : t('common.saveFailed'))
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -162,8 +187,14 @@ async function save() {
           <h1 class="page-title">{{ t('settings.title') }}</h1>
           <p class="page-lead">{{ t('settings.lead') }}</p>
         </div>
-        <button type="button" class="btn btn-primary" :class="{ saved }" @click="save">
-          <AppIcon :name="saved ? 'check' : 'save'" :size="16" :stroke-width="1.75" />
+        <button
+          type="button"
+          class="btn btn-primary btn-save"
+          :class="{ saved }"
+          :disabled="saving"
+          @click="save"
+        >
+          <AppIcon :name="saved ? 'check' : 'save'" :size="13" :stroke-width="1.75" />
           {{ saved ? t('common.saved') : t('settings.save') }}
         </button>
       </header>
@@ -202,6 +233,7 @@ async function save() {
               </div>
               <LanguageSelect :show-label="false" />
             </div>
+            <LayoutControls />
           </section>
           <section v-for="group in groups" :id="`settings-${group.id}`" :key="group.id" class="settings-group">
             <div class="group-head">
@@ -317,13 +349,18 @@ async function save() {
   color: var(--text-muted);
   line-height: 1.5;
 }
-.page-head .btn {
+.page-head .btn-save {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   flex-shrink: 0;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 560;
+  border-radius: 6px;
 }
-.page-head .btn.saved {
+.page-head .btn-save.saved {
   background: color-mix(in srgb, var(--primary) 80%, #059669);
 }
 .settings-layout {

@@ -12,6 +12,7 @@
     "close": "Close",
     "save": "Save",
     "saved": "Saved",
+    "saveFailed": "Failed to save",
     "cancel": "Cancel",
     "confirm": "Confirm",
     "delete": "Delete",
@@ -61,6 +62,34 @@
     "light": "Light",
     "dark": "Dark"
   },
+  "menu": {
+    "aria": "Application menu",
+    "file": "File",
+    "edit": "Edit",
+    "panel": "Panel",
+    "help": "Help",
+    "aboutBody": "{name} {version}",
+    "positions": {
+      "top": "Menu bar on top",
+      "left": "Menu bar on left",
+      "right": "Menu bar on right",
+      "bottom": "Menu bar on bottom"
+    },
+    "positionLabel": "Menu bar position",
+    "positionLead": "Show the menu bar at the top, left, right, or bottom of the window.",
+    "items": {
+      "openWorkspace": "Open Workspace…",
+      "newChat": "New Chat",
+      "openFile": "Open File…",
+      "save": "Save",
+      "exportLayout": "Export Layout…",
+      "importLayout": "Import Layout…",
+      "commandPalette": "Command Palette…",
+      "search": "Search in Files…",
+      "keyboardShortcuts": "Keyboard Shortcuts…",
+      "about": "About"
+    }
+  },
   "time": {
     "justNow": "Just now",
     "minutesAgo": "{n} min ago",
@@ -83,7 +112,6 @@
     "settings": "Settings",
     "workspace": "Workspace",
     "trajectory": "Trajectory",
-    "chats": "Chats",
     "file": "Files"
   },
   "sidebar": {
@@ -234,13 +262,18 @@
   },
   "commandPalette": {
     "aria": "Command palette",
+    "ariaFiles": "Quick open file",
     "placeholder": "Search commands or chats…",
+    "placeholderFiles": "Search by file name or path…",
     "empty": "No matching commands",
+    "emptyFiles": "No matching files",
+    "loadingFiles": "Searching files…",
     "hint": "↑↓ to select · Enter to run · Esc to close",
     "or": "or",
     "groupSession": "Chats",
     "groupPanel": "Panels",
     "groupLayout": "Layout",
+    "groupFiles": "Files",
     "newChat": "New chat",
     "openAgent": "Open chat",
     "openTrajectory": "Open trajectory",
@@ -314,10 +347,25 @@
     "selectModel": "Select an available model",
     "searchModel": "Search models",
     "openModels": "Open models page and test availability",
+    "needModel": "Add an available model before chatting",
+    "sendFailed": "Failed to send",
+    "stopFailed": "Failed to stop",
+    "promptNeedModel": "Configure a model to send…",
+    "modelSetupTitle": "No model configured",
+    "modelSetupLead": "Add an LLM to start coding chats. You can one-click add local Ollama.",
+    "modelSetupOllama": "Add Ollama",
+    "modelSetupCustom": "Open model settings",
+    "modelSetupBusy": "Adding…",
+    "modelSetupOllamaOk": "Ollama added and set as default",
+    "modelSetupFailed": "Failed to add model",
     "noMatch": "No matching models",
     "modeAsk": "Quick Q&A without tools",
     "modeAgent": "Use tools autonomously",
     "modePlan": "Plan first, then execute step by step",
+    "newConversation": "New chat",
+    "pinned": "Pinned",
+    "recent": "Recent",
+    "matched": "Matches",
     "badgeUnknown": "Not tested",
     "badgeOk": "Available",
     "badgeFail": "Unavailable",
@@ -378,9 +426,6 @@
     "noHistory": "No chat history",
     "pin": "Pin",
     "unpin": "Unpin",
-    "pinned": "Pinned",
-    "recent": "Recent",
-    "matched": "Matches",
     "deleteSession": "Delete chat",
     "workProcess": "Work process",
     "hideWork": "Hide work process",
@@ -406,7 +451,16 @@
     "noContent": "(empty)",
     "thinkingDone": "Thinking generated ({time})",
     "noDetail": "(no details)",
-    "toolResult": "Tool result"
+    "toolResult": "Tool result",
+    "exportMarkdown": "Export as Markdown",
+    "exportJson": "Export as JSON",
+    "exportHint": "Export chat (click Markdown, Shift+click JSON)",
+    "exportDone": "Chat exported",
+    "exportEmpty": "No chat to export",
+    "turnCount": "{n} turns",
+    "statusGenerating": "Generating",
+    "statusQueued": "Queued",
+    "statusAwaitingApproval": "Needs approval"
   },
   "models": {
     "title": "Models",
@@ -541,6 +595,36 @@
     "cannotMoveIntoSelf": "Cannot move into itself or a subdirectory",
     "moveFail": "Failed to move"
   },
+  "plan": {
+    "title": "Execution plan",
+    "count": "{n} steps",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "confirmExecute": "Execute selected ({n})",
+    "executing": "Executing…",
+    "executed": "Execution confirmed",
+    "selectAtLeastOne": "Select at least one step",
+    "executeLead": "Execute the following plan step by step (selected steps only):"
+  },
+  "layout": {
+    "title": "Workspace layout",
+    "lead": "Reset, export, or import panel layout; or switch a preset.",
+    "reset": "Reset layout",
+    "export": "Export JSON",
+    "import": "Import JSON",
+    "resetDone": "Layout reset",
+    "presetApplied": "Applied “{name}” layout",
+    "importDone": "Layout imported",
+    "importInvalid": "Invalid layout file",
+    "presets": {
+      "chat": "Chat-first",
+      "code": "Code-first"
+    },
+    "presetsDesc": {
+      "chat": "Wide chat in the center, files and workspace on the left",
+      "code": "Editor center, terminal below, chat on the right"
+    }
+  },
   "editor": {
     "close": "Close",
     "closeOthers": "Close others",
@@ -594,7 +678,16 @@
     "splitRight": "Split editor right",
     "splitDown": "Split editor down",
     "closeSplit": "Close split",
-    "splitEmpty": "Open a file in this pane"
+    "splitEmpty": "Open a file in this pane",
+    "agentWriteConflictTitle": "Local edits conflict with Agent",
+    "agentWriteConflictSummary": "“{path}” has unsaved local edits and Agent wrote a new version.",
+    "useAgentVersion": "Use Agent version",
+    "keepMine": "Keep my edits",
+    "reviewRejected": "Rejected {path}",
+    "reviewRejectedAll": "Rejected {n} files",
+    "commitDraftDefault": "Apply agent changes",
+    "acceptHunk": "Accept hunk",
+    "rejectHunk": "Reject hunk"
   },
   "search": {
     "title": "Search",
@@ -618,7 +711,11 @@
   "terminal": {
     "title": "Terminal",
     "new": "New terminal",
-    "close": "Close terminal"
+    "close": "Close terminal",
+    "untitled": "Terminal {n}",
+    "copy": "Copy",
+    "paste": "Paste",
+    "addSelectionToChat": "Add selection to chat"
   },
   "ports": {
     "title": "Ports",
@@ -843,5 +940,12 @@
   "workbench": {
     "resizeSidebar": "Drag to resize sidebar",
     "resizeTrajectory": "Drag to resize trajectory panel"
+  },
+  "connection": {
+    "reconnecting": "Reconnecting event stream",
+    "reconnectingLead": "Trying to restore streaming output. Please wait…",
+    "disconnected": "Event stream disconnected",
+    "disconnectedLead": "Connection to the server was lost. Retry or wait for auto-recovery.",
+    "retry": "Retry"
   }
 }

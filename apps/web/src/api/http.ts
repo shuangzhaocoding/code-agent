@@ -34,25 +34,74 @@ export type StreamEnvelope = {
   payload: Record<string, unknown>
 }
 
+export type StreamConnectionState = 'connecting' | 'live' | 'reconnecting' | 'closed'
+
+/** Browser EventSource auto-retries; stop after this many error cycles. */
+const MAX_STREAM_RECONNECT_ATTEMPTS = 5
+
 export function subscribeRun(
   runId: string,
   lastEventId: string | null,
   onEvent: (event: StreamEnvelope) => void,
   onDone?: () => void,
+  onConnection?: (state: StreamConnectionState) => void,
 ): () => void {
   const url = new URL(`/api/runs/${runId}/events`, window.location.origin)
   if (lastEventId) url.searchParams.set('last_event_id', lastEventId)
   const es = new EventSource(url.toString())
+  let settled = false
+  let intentionalClose = false
+  let reconnectAttempts = 0
+  onConnection?.('connecting')
+
+  const markLive = () => {
+    if (settled || intentionalClose) return
+    reconnectAttempts = 0
+    onConnection?.('live')
+  }
+
+  es.onopen = () => {
+    if (!settled && !intentionalClose) markLive()
+  }
+
   es.onmessage = (ev) => {
-    const data = JSON.parse(ev.data) as StreamEnvelope
+    if (settled || intentionalClose) return
+    markLive()
+    let data: StreamEnvelope
+    try {
+      data = JSON.parse(ev.data) as StreamEnvelope
+    } catch {
+      return
+    }
     onEvent(data)
     if (['run.completed', 'run.failed', 'run.cancelled'].includes(data.type)) {
+      settled = true
+      intentionalClose = true
       es.close()
+      onConnection?.('closed')
       onDone?.()
     }
   }
+
   es.onerror = () => {
-    /* browser will retry using Last-Event-ID */
+    // Let the browser auto-retry with Last-Event-ID while CONNECTING,
+    // but give up after MAX_STREAM_RECONNECT_ATTEMPTS so the UI can show disconnected.
+    if (settled || intentionalClose) return
+    reconnectAttempts += 1
+    if (reconnectAttempts > MAX_STREAM_RECONNECT_ATTEMPTS) {
+      intentionalClose = true
+      settled = true
+      es.close()
+      onConnection?.('closed')
+      return
+    }
+    onConnection?.('reconnecting')
   }
-  return () => es.close()
+
+  return () => {
+    intentionalClose = true
+    settled = true
+    es.close()
+    // Do not emit 'closed' on intentional teardown — attachRun/detachRun own that.
+  }
 }
