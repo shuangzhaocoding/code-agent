@@ -3,20 +3,30 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import { isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
+import { isDesktopApp } from '@/utils/desktop'
 
 const open = defineModel<boolean>('open', { default: false })
 const { t } = useI18n()
 
 const mod = isMacMod() ? '⌘' : 'Ctrl+'
-const rows = computed(() => [
-  { keys: paletteShortcutLabel(), label: t('shortcuts.commandPalette') },
-  { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.commandPaletteAlt') },
-  { keys: isMacMod() ? '⌘P' : 'Ctrl+P', label: t('shortcuts.openFile') },
-  { keys: isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F', label: t('shortcuts.searchFiles') },
-  { keys: `${mod}S`, label: t('shortcuts.save') },
-  { keys: `${mod}N`, label: t('shortcuts.newChat') },
-  { keys: 'Esc', label: t('shortcuts.close') },
-])
+const rows = computed(() => {
+  const list = [
+    { keys: paletteShortcutLabel(), label: t('shortcuts.commandPalette') },
+    { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.commandPaletteAlt') },
+    { keys: isMacMod() ? '⌘P' : 'Ctrl+P', label: t('shortcuts.openFile') },
+    { keys: isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F', label: t('shortcuts.searchFiles') },
+    { keys: `${mod}S`, label: t('shortcuts.save') },
+    { keys: `${mod}N`, label: t('shortcuts.newChat') },
+  ]
+  if (isDesktopApp()) {
+    list.push({
+      keys: isMacMod() ? '⌘⇧N' : 'Ctrl+Shift+N',
+      label: t('shortcuts.newWindow'),
+    })
+  }
+  list.push({ keys: 'Esc', label: t('shortcuts.close') })
+  return list
+})
 
 function close() {
   open.value = false

@@ -8,6 +8,7 @@ export type CodeAgentDesktop = {
   pickDirectory?: () => Promise<string | null>
   setTheme?: (theme: 'light' | 'dark') => void | Promise<string>
   getTheme?: () => Promise<'light' | 'dark' | string>
+  newWindow?: () => Promise<boolean>
 }
 
 export const DESKTOP_TITLEBAR_HEIGHT = 38
@@ -45,5 +46,16 @@ export function initDesktopChrome() {
       '--desktop-titlebar-height',
       `${desktop.titleBarHeight || DESKTOP_TITLEBAR_HEIGHT}px`,
     )
+  }
+}
+
+/** Open another desktop window (shared local backend). */
+export async function openDesktopWindow(): Promise<boolean> {
+  const desktop = getDesktopBridge()
+  if (!desktop?.isDesktop || typeof desktop.newWindow !== 'function') return false
+  try {
+    return Boolean(await desktop.newWindow())
+  } catch {
+    return false
   }
 }

@@ -86,6 +86,8 @@
     "items": {
       "openWorkspace": "打开工作区…",
       "newChat": "新建对话",
+      "newWindow": "新建窗口",
+      "newWindowFailed": "无法打开新窗口",
       "openFile": "打开文件…",
       "save": "保存",
       "exportLayout": "导出布局…",
@@ -104,6 +106,7 @@
     "searchFiles": "在文件中搜索",
     "save": "保存文件",
     "newChat": "新建对话",
+    "newWindow": "新建窗口",
     "close": "关闭弹层 / 菜单"
   },
   "time": {

@@ -12,6 +12,7 @@ import {
   type MenuBarPosition,
 } from '@/utils/layoutPrefs'
 import { isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
+import { isDesktopApp, openDesktopWindow } from '@/utils/desktop'
 
 type MenuId = 'file' | 'edit' | 'panel' | 'help'
 
@@ -62,6 +63,8 @@ const fileShortcut = isMacMod() ? '⌘P' : 'Ctrl+P'
 const searchShortcut = isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F'
 const saveShortcut = `${modKey}S`
 const newChatShortcut = `${modKey}N`
+const newWindowShortcut = isMacMod() ? '⌘⇧N' : 'Ctrl+Shift+N'
+const isDesktop = isDesktopApp()
 
 const canSave = computed(() => {
   const file = store.openFile
@@ -253,6 +256,20 @@ const menus = computed(() => {
         window.dispatchEvent(new Event('ca-focus-composer'))
       },
     },
+    ...(isDesktop
+      ? [
+          {
+            id: 'new-window',
+            label: t('menu.items.newWindow'),
+            icon: 'layout-right' as const,
+            shortcut: newWindowShortcut,
+            run: async () => {
+              const ok = await openDesktopWindow()
+              if (!ok) toast.error(t('menu.items.newWindowFailed'))
+            },
+          } satisfies MenuItem,
+        ]
+      : []),
     {
       id: 'open-file',
       label: t('menu.items.openFile'),

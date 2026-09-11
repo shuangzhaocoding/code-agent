@@ -86,6 +86,8 @@
     "items": {
       "openWorkspace": "작업 공간 열기…",
       "newChat": "새 대화",
+      "newWindow": "새 창",
+      "newWindowFailed": "새 창을 열 수 없습니다",
       "openFile": "파일 열기…",
       "save": "저장",
       "exportLayout": "레이아웃 내보내기…",
@@ -104,6 +106,7 @@
     "searchFiles": "파일에서 검색",
     "save": "파일 저장",
     "newChat": "새 대화",
+    "newWindow": "새 창",
     "close": "오버레이 / 메뉴 닫기"
   },
   "time": {

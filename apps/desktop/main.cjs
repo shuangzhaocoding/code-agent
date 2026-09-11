@@ -50,11 +50,14 @@ const SPLIT_SERVICES = [
   { name: 'preview', args: ['-m', 'code_agent', 'preview'] },
 ]
 
-let mainWindow = null
+/** @type {Set<import('electron').BrowserWindow>} */
+const windows = new Set()
 /** @type {{ name: string, proc: import('child_process').ChildProcess }[]} */
 let backends = []
 let stopping = false
 let backendLog = ''
+let backendReady = false
+let booting = false
 
 function repoRoot() {
   if (app.isPackaged) {
@@ -151,9 +154,14 @@ function splashPath() {
   return path.join(__dirname, 'splash.html')
 }
 
-function setSplashStatus(text, opts = {}) {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents
+function primaryWindow() {
+  return BrowserWindow.getFocusedWindow() || [...windows].find((w) => !w.isDestroyed()) || null
+}
+
+function setSplashStatus(win, text, opts = {}) {
+  const target = win && !win.isDestroyed() ? win : primaryWindow()
+  if (!target || target.isDestroyed()) return
+  target.webContents
     .executeJavaScript(
       `window.setSplashStatus && window.setSplashStatus(${JSON.stringify(text)}, ${JSON.stringify({
         detail: opts.detail || '',
@@ -164,17 +172,13 @@ function setSplashStatus(text, opts = {}) {
     .catch(() => {})
 }
 
-function applyWindowChrome(theme) {
-  const next = theme === 'light' ? 'light' : 'dark'
-  chromeTheme = next
-  nativeTheme.themeSource = next
-  persistChromeTheme(next)
-  const colors = CHROME[next]
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.setBackgroundColor(colors.background)
-  if (process.platform === 'win32' && typeof mainWindow.setTitleBarOverlay === 'function') {
+function applyChromeToWindow(win) {
+  if (!win || win.isDestroyed()) return
+  const colors = CHROME[chromeTheme]
+  win.setBackgroundColor(colors.background)
+  if (process.platform === 'win32' && typeof win.setTitleBarOverlay === 'function') {
     try {
-      mainWindow.setTitleBarOverlay({
+      win.setTitleBarOverlay({
         color: colors.overlay,
         symbolColor: colors.symbol,
         height: TITLEBAR_HEIGHT,
@@ -183,12 +187,22 @@ function applyWindowChrome(theme) {
       // ignore unsupported hosts
     }
   }
-  mainWindow.webContents
+  win.webContents
     .executeJavaScript(
-      `window.setSplashTheme && window.setSplashTheme(${JSON.stringify(next)})`,
+      `window.setSplashTheme && window.setSplashTheme(${JSON.stringify(chromeTheme)})`,
       true,
     )
     .catch(() => {})
+}
+
+function applyWindowChrome(theme) {
+  const next = theme === 'light' ? 'light' : 'dark'
+  chromeTheme = next
+  nativeTheme.themeSource = next
+  persistChromeTheme(next)
+  for (const win of windows) {
+    applyChromeToWindow(win)
+  }
 }
 
 function windowChromeOptions() {
@@ -212,8 +226,8 @@ function windowChromeOptions() {
   return {}
 }
 
-function toggleDevTools(win = mainWindow) {
-  const target = win && !win.isDestroyed() ? win : BrowserWindow.getFocusedWindow()
+function toggleDevTools(win) {
+  const target = win && !win.isDestroyed() ? win : primaryWindow()
   if (!target || target.isDestroyed()) return
   const wc = target.webContents
   if (wc.isDevToolsOpened()) wc.closeDevTools()
@@ -229,15 +243,28 @@ function bindDevToolsShortcuts(win) {
       process.platform === 'darwin'
         ? key === 'i' && input.meta && input.alt
         : key === 'i' && input.control && input.shift
+    // Ctrl/Cmd+Shift+N → new window (IDE habit; avoid stealing from renderer when possible)
+    const isNewWindow =
+      key === 'n' && input.shift && (process.platform === 'darwin' ? input.meta : input.control)
+    if (isNewWindow) {
+      event.preventDefault()
+      void openNewWindow()
+      return
+    }
     if (!isF12 && !isChord) return
     event.preventDefault()
     toggleDevTools(win)
   })
 }
 
-function createWindow() {
+/**
+ * @param {{ showSplash?: boolean }} [opts]
+ * @returns {import('electron').BrowserWindow}
+ */
+function createWindow(opts = {}) {
+  const showSplash = opts.showSplash !== false
   const colors = CHROME[chromeTheme]
-  mainWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1440,
     height: 900,
     minWidth: 1100,
@@ -255,40 +282,45 @@ function createWindow() {
     },
   })
 
-  bindDevToolsShortcuts(mainWindow)
+  windows.add(win)
+  bindDevToolsShortcuts(win)
 
-  mainWindow.once('ready-to-show', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.show()
+  win.once('ready-to-show', () => {
+    if (!win.isDestroyed()) win.show()
   })
 
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+  win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
   })
 
-  mainWindow.loadFile(splashPath(), { query: { theme: chromeTheme } })
-  mainWindow.on('closed', () => {
-    mainWindow = null
+  win.on('closed', () => {
+    windows.delete(win)
   })
+
+  if (showSplash) {
+    win.loadFile(splashPath(), { query: { theme: chromeTheme } })
+  }
+  return win
 }
 
-function loadApp() {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  setSplashStatus('服务已就绪，正在打开界面…')
-  mainWindow.loadURL(`http://${HOST}:${PORT}/`)
+function loadAppInto(win) {
+  if (!win || win.isDestroyed()) return
+  setSplashStatus(win, '服务已就绪，正在打开界面…')
+  win.loadURL(`http://${HOST}:${PORT}/`)
 }
 
-function waitSplashReady() {
+function waitSplashReady(win) {
   return new Promise((resolve) => {
-    if (!mainWindow || mainWindow.isDestroyed()) {
+    if (!win || win.isDestroyed()) {
       resolve()
       return
     }
-    if (!mainWindow.webContents.isLoading()) {
+    if (!win.webContents.isLoading()) {
       resolve()
       return
     }
-    mainWindow.webContents.once('did-finish-load', () => resolve())
+    win.webContents.once('did-finish-load', () => resolve())
   })
 }
 
@@ -379,7 +411,7 @@ function startBackend() {
       console.error(`[${svc.name}] spawn error`, err)
     })
     proc.on('exit', (code, signal) => {
-      if (!stopping && mainWindow) {
+      if (!stopping && windows.size > 0) {
         dialog.showErrorBox(
           'Code Agent backend stopped',
           `${svc.name} exited (code=${code}, signal=${signal || 'none'}).\nPython: ${py}\n\n${backendLogTail()}`,
@@ -391,44 +423,81 @@ function startBackend() {
 
 function stopBackend() {
   stopping = true
+  backendReady = false
   for (const { proc } of backends) {
     killProcessTree(proc)
   }
   backends = []
 }
 
-async function boot() {
-  createWindow()
-  const splashReady = waitSplashReady()
-  const alreadyUp = await probeHealth()
-  if (alreadyUp) {
-    await splashReady
-    loadApp()
-    return
+async function openNewWindow() {
+  if (backendReady || (await probeHealth())) {
+    backendReady = true
+    const win = createWindow({ showSplash: false })
+    win.loadURL(`http://${HOST}:${PORT}/`)
+    return win
   }
+  // Backend still starting: open splash window; boot() will load the app when ready.
+  const win = createWindow({ showSplash: true })
+  if (!booting) void boot(win)
+  return win
+}
 
+function focusExistingWindow() {
+  const win = primaryWindow()
+  if (!win) return false
+  if (win.isMinimized()) win.restore()
+  win.focus()
+  return true
+}
+
+/**
+ * @param {import('electron').BrowserWindow | null} [seedWin]
+ */
+async function boot(seedWin = null) {
+  if (booting) return
+  booting = true
+  const win = seedWin && !seedWin.isDestroyed() ? seedWin : createWindow({ showSplash: true })
+  const splashReady = waitSplashReady(win)
   try {
-    startBackend()
-  } catch (err) {
-    await splashReady
-    setSplashStatus('后端启动失败', { error: true, detail: String(err) })
-    dialog.showErrorBox('Failed to start backend', String(err))
-    app.quit()
-    return
-  }
+    const alreadyUp = await probeHealth()
+    if (alreadyUp) {
+      backendReady = true
+      await splashReady
+      for (const w of [...windows]) {
+        if (!w.isDestroyed()) loadAppInto(w)
+      }
+      return
+    }
 
-  await splashReady
-  setSplashStatus('正在启动服务…')
-  const ok = await waitForBackend()
-  if (!ok) {
-    const detail = `Could not reach ${HEALTH_URL}.\nPython: ${pythonCmd()}\n\n${backendLogTail()}`
-    setSplashStatus('启动超时', { error: true, detail })
-    dialog.showErrorBox('Backend startup timeout', detail)
-    stopBackend()
-    app.quit()
-    return
+    try {
+      startBackend()
+    } catch (err) {
+      await splashReady
+      setSplashStatus(win, '后端启动失败', { error: true, detail: String(err) })
+      dialog.showErrorBox('Failed to start backend', String(err))
+      app.quit()
+      return
+    }
+
+    await splashReady
+    setSplashStatus(win, '正在启动服务…')
+    const ok = await waitForBackend()
+    if (!ok) {
+      const detail = `Could not reach ${HEALTH_URL}.\nPython: ${pythonCmd()}\n\n${backendLogTail()}`
+      setSplashStatus(win, '启动超时', { error: true, detail })
+      dialog.showErrorBox('Backend startup timeout', detail)
+      stopBackend()
+      app.quit()
+      return
+    }
+    backendReady = true
+    for (const w of [...windows]) {
+      if (!w.isDestroyed()) loadAppInto(w)
+    }
+  } finally {
+    booting = false
   }
-  loadApp()
 }
 
 const gotLock = app.requestSingleInstanceLock()
@@ -436,13 +505,15 @@ if (!gotLock) {
   app.quit()
 } else {
   app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore()
-      mainWindow.focus()
+    // Cursor-like: another launch opens a new window (shared backend).
+    if (backendReady) {
+      void openNewWindow()
+      return
     }
+    if (!focusExistingWindow()) void openNewWindow()
   })
   ipcMain.handle('desktop:pick-directory', async () => {
-    const win = BrowserWindow.getFocusedWindow() || mainWindow
+    const win = primaryWindow()
     const result = await dialog.showOpenDialog(win || undefined, {
       properties: ['openDirectory', 'createDirectory'],
     })
@@ -454,12 +525,20 @@ if (!gotLock) {
     return chromeTheme
   })
   ipcMain.handle('desktop:get-theme', () => chromeTheme)
+  ipcMain.handle('desktop:new-window', async () => {
+    const win = await openNewWindow()
+    return Boolean(win && !win.isDestroyed())
+  })
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).
     Menu.setApplicationMenu(null)
     chromeTheme = loadStoredChromeTheme()
     nativeTheme.themeSource = chromeTheme
     return boot()
+  })
+  app.on('activate', () => {
+    // macOS dock click with no windows open.
+    if (windows.size === 0) void openNewWindow()
   })
 }
 
@@ -468,6 +547,8 @@ app.on('before-quit', () => {
 })
 
 app.on('window-all-closed', () => {
+  // Keep process on macOS until explicit quit (Dock activate can reopen).
+  if (process.platform === 'darwin') return
   stopBackend()
   app.quit()
 })

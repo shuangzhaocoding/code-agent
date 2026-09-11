@@ -86,6 +86,8 @@
     "items": {
       "openWorkspace": "ワークスペースを開く…",
       "newChat": "新しいチャット",
+      "newWindow": "新しいウィンドウ",
+      "newWindowFailed": "新しいウィンドウを開けませんでした",
       "openFile": "ファイルを開く…",
       "save": "保存",
       "exportLayout": "レイアウトを書き出し…",
@@ -104,6 +106,7 @@
     "searchFiles": "ファイル内検索",
     "save": "ファイルを保存",
     "newChat": "新しいチャット",
+    "newWindow": "新しいウィンドウ",
     "close": "オーバーレイ / メニューを閉じる"
   },
   "time": {

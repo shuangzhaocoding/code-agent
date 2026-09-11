@@ -86,6 +86,8 @@
     "items": {
       "openWorkspace": "Arbeitsbereich öffnen…",
       "newChat": "Neuer Chat",
+      "newWindow": "Neues Fenster",
+      "newWindowFailed": "Neues Fenster konnte nicht geöffnet werden",
       "openFile": "Datei öffnen…",
       "save": "Speichern",
       "exportLayout": "Layout exportieren…",
@@ -104,6 +106,7 @@
     "searchFiles": "In Dateien suchen",
     "save": "Datei speichern",
     "newChat": "Neuer Chat",
+    "newWindow": "Neues Fenster",
     "close": "Overlay / Menü schließen"
   },
   "time": {
