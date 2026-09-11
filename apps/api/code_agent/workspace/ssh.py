@@ -282,11 +282,15 @@ class SshWorkspaceBackend:
             return False
 
     async def walk_files(
-        self, extra_ignores: list[str] | None = None, limit: int = 5000
+        self,
+        extra_ignores: list[str] | None = None,
+        limit: int = 5000,
+        root_rel: str = "",
     ) -> list[tuple[str, str]]:
         sftp = await self._sftp()
         ignores = list(getattr(self._ws, "ignore_globs", None) or []) + (extra_ignores or [])
         out: list[tuple[str, str]] = []
+        start_rel = (root_rel or "").strip().replace("\\", "/").strip("/")
 
         async def _walk(dir_abs: str, rel_dir: str) -> None:
             if len(out) >= limit:
@@ -315,7 +319,7 @@ class SshWorkspaceBackend:
                 except Exception:
                     continue
 
-        await _walk(await self._abs("."), "")
+        await _walk(await self._abs(start_rel or "."), start_rel)
         return out
 
     async def search(

@@ -16,6 +16,8 @@ export type ExplorerDragApi = {
   resolveDestDir: (item: FsItem) => string
   dropTo: (destDir: string) => Promise<void>
   dropFiles: (destDir: string, files: FileList | File[]) => Promise<void>
+  /** Prefer this for OS drops so folder structure is preserved. */
+  dropDataTransfer: (destDir: string, dt: DataTransfer | null | undefined) => Promise<void>
 }
 
 export function isOsFileDrag(e: DragEvent) {

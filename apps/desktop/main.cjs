@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require('electron')
 const { spawn } = require('child_process')
 const http = require('http')
+const net = require('net')
 const path = require('path')
 const fs = require('fs')
 
@@ -8,6 +9,7 @@ const PORT = Number(process.env.CODE_AGENT_PORT || 4060)
 const HOST = process.env.CODE_AGENT_HOST || '127.0.0.1'
 const HEALTH_URL = `http://${HOST}:${PORT}/api/health`
 const TITLEBAR_HEIGHT = 38
+const RELATED_PORTS = [PORT, PORT + 2, PORT + 3, PORT + 4]
 
 const CHROME = {
   dark: { background: '#121218', overlay: '#121218', symbol: '#c4c4cc' },
@@ -338,12 +340,120 @@ function probeHealth() {
   })
 }
 
+/** True when something accepts TCP on host:port (not necessarily our API). */
+function isPortBusy(port, host = HOST) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host }, () => {
+      socket.destroy()
+      resolve(true)
+    })
+    socket.on('error', () => resolve(false))
+    socket.setTimeout(800, () => {
+      socket.destroy()
+      resolve(false)
+    })
+  })
+}
+
+function portHint(port = PORT) {
+  return `请关闭占用该端口的程序后重试，或设置环境变量 CODE_AGENT_PORT（当前 ${port}）。`
+}
+
+function reasonFromBackendLog(log) {
+  const text = String(log || '')
+  const portMatch = text.match(/:\s*(\d{2,5})\b/) || text.match(/\bport\s+(\d{2,5})\b/i)
+  const mentioned = portMatch ? Number(portMatch[1]) : PORT
+  if (/address already in use|EADDRINUSE|only one usage of each socket address|通常每个套接字地址/i.test(text)) {
+    return `端口 ${mentioned} 已被占用，服务无法绑定。\n${portHint(mentioned)}`
+  }
+  if (/Permission denied|权限不够|WinError 10013/i.test(text)) {
+    return `没有权限绑定端口 ${mentioned}。\n可尝试更换 CODE_AGENT_PORT，或以管理员权限运行。`
+  }
+  if (/ModuleNotFoundError|No module named/i.test(text)) {
+    return 'Python 依赖缺失或运行时不完整，后端无法启动。'
+  }
+  if (/ImportError/i.test(text)) {
+    return 'Python 模块导入失败，后端无法启动。'
+  }
+  return ''
+}
+
+function apiExitReason() {
+  const api = backends.find((b) => b.name === 'api')
+  if (!api || api.proc.exitCode == null) return ''
+  const code = api.proc.exitCode
+  const signal = api.proc.signalCode
+  if (signal) return `API 进程被信号终止（${signal}）。`
+  return `API 进程异常退出（退出码 ${code}）。`
+}
+
+/**
+ * Build a user-facing startup failure message.
+ * @returns {Promise<{ title: string, summary: string, detail: string }>}
+ */
+async function describeStartupFailure(fallbackSummary = '后端启动失败') {
+  const log = backendLogTail(1600)
+  const fromLog = reasonFromBackendLog(log)
+  if (fromLog) {
+    return {
+      title: '启动失败',
+      summary: fromLog.split('\n')[0],
+      detail: `${fromLog}\n\n${log}`,
+    }
+  }
+
+  const exited = apiExitReason()
+  if (exited) {
+    return {
+      title: '启动失败',
+      summary: exited,
+      detail: `${exited}\nPython: ${pythonCmd()}\n\n${log}`,
+    }
+  }
+
+  const busy = await isPortBusy(PORT)
+  const healthy = await probeHealth()
+  if (busy && !healthy) {
+    const summary = `端口 ${HOST}:${PORT} 已被其他程序占用`
+    const detail =
+      `${summary}，且不是可用的 Code Agent 服务。\n${portHint()}\n\n` +
+      `健康检查地址：${HEALTH_URL}\n\n${log}`
+    return { title: '启动失败', summary, detail }
+  }
+
+  const otherBusy = []
+  for (const p of RELATED_PORTS) {
+    if (p === PORT) continue
+    if (await isPortBusy(p)) otherBusy.push(p)
+  }
+  if (otherBusy.length) {
+    const summary = `相关端口被占用：${otherBusy.join(', ')}`
+    return {
+      title: '启动失败',
+      summary,
+      detail: `${summary}\nAPI 端口 ${PORT} 可能已启动，但附属服务无法绑定。\n${portHint()}\n\n${log}`,
+    }
+  }
+
+  return {
+    title: '启动失败',
+    summary: fallbackSummary,
+    detail: `${fallbackSummary}\n无法连接 ${HEALTH_URL}\nPython: ${pythonCmd()}\n\n${log}`,
+  }
+}
+
+function showStartupFailure(win, info) {
+  setSplashStatus(win, info.summary || info.title, { error: true, detail: info.detail })
+  dialog.showErrorBox(info.title || '启动失败', info.detail || info.summary || '未知错误')
+}
+
 async function waitForBackend(timeoutMs = 120000) {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     const api = backends.find((b) => b.name === 'api')
     // Only API is required for health; other split services may restart independently.
     if (api && api.proc.exitCode != null) return false
+    if (reasonFromBackendLog(backendLog)) return false
     if (await probeHealth()) return true
     await new Promise((r) => setTimeout(r, 400))
   }
@@ -470,12 +580,26 @@ async function boot(seedWin = null) {
       return
     }
 
+    // Fail fast: port taken by something that is not a healthy Code Agent.
+    if (await isPortBusy(PORT)) {
+      await splashReady
+      const summary = `端口 ${HOST}:${PORT} 已被其他程序占用`
+      const detail = `${summary}，且不是可用的 Code Agent 服务。\n${portHint()}\n\n健康检查地址：${HEALTH_URL}`
+      showStartupFailure(win, { title: '启动失败', summary, detail })
+      app.quit()
+      return
+    }
+
     try {
       startBackend()
     } catch (err) {
       await splashReady
-      setSplashStatus(win, '后端启动失败', { error: true, detail: String(err) })
-      dialog.showErrorBox('Failed to start backend', String(err))
+      const msg = String(err && err.message ? err.message : err)
+      showStartupFailure(win, {
+        title: '启动失败',
+        summary: msg,
+        detail: msg,
+      })
       app.quit()
       return
     }
@@ -484,9 +608,8 @@ async function boot(seedWin = null) {
     setSplashStatus(win, '正在启动服务…')
     const ok = await waitForBackend()
     if (!ok) {
-      const detail = `Could not reach ${HEALTH_URL}.\nPython: ${pythonCmd()}\n\n${backendLogTail()}`
-      setSplashStatus(win, '启动超时', { error: true, detail })
-      dialog.showErrorBox('Backend startup timeout', detail)
+      const info = await describeStartupFailure('后端启动失败或超时')
+      showStartupFailure(win, info)
       stopBackend()
       app.quit()
       return
@@ -528,6 +651,13 @@ if (!gotLock) {
   ipcMain.handle('desktop:new-window', async () => {
     const win = await openNewWindow()
     return Boolean(win && !win.isDestroyed())
+  })
+  ipcMain.handle('desktop:set-title', (event, title) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return false
+    const next = typeof title === 'string' && title.trim() ? title.trim() : 'Code Agent'
+    win.setTitle(next)
+    return true
   })
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).

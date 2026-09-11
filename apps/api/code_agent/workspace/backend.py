@@ -38,9 +38,12 @@ class WorkspaceBackend(Protocol):
     async def is_file(self, rel: str) -> bool: ...
 
     async def walk_files(
-        self, extra_ignores: list[str] | None = None, limit: int = 5000
+        self,
+        extra_ignores: list[str] | None = None,
+        limit: int = 5000,
+        root_rel: str = "",
     ) -> list[tuple[str, str]]:
-        """Return list of (rel_path, abs_or_remote_path)."""
+        """Return list of (rel_path, abs_or_remote_path), optionally under root_rel."""
 
     async def search(
         self,

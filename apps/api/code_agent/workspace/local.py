@@ -129,13 +129,17 @@ class LocalWorkspaceBackend:
         return await run_sync(path.is_file)
 
     async def walk_files(
-        self, extra_ignores: list[str] | None = None, limit: int = 5000
+        self,
+        extra_ignores: list[str] | None = None,
+        limit: int = 5000,
+        root_rel: str = "",
     ) -> list[tuple[str, str]]:
         ignores = list(self._ws.ignore_globs or []) + (extra_ignores or [])
+        start = (root_rel or "").strip().replace("\\", "/").strip("/")
 
         def _walk() -> list[tuple[str, str]]:
             out: list[tuple[str, str]] = []
-            for rel, p in path_tools.walk_files(self.root_path, ignores, limit):
+            for rel, p in path_tools.walk_files(self.root_path, ignores, limit, root_rel=start):
                 out.append((rel, str(p)))
             return out
 

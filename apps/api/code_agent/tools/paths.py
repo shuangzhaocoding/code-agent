@@ -128,11 +128,20 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
     return items
 
 
-def walk_files(root: str, extra_ignores: list[str] | None = None, limit: int = 5000):
+def walk_files(
+    root: str,
+    extra_ignores: list[str] | None = None,
+    limit: int = 5000,
+    root_rel: str = "",
+):
     base = workspace_root(root)
+    start_rel = (root_rel or "").strip().replace("\\", "/").strip("/")
+    start = base / start_rel if start_rel else base
+    if not start.is_dir():
+        return
     ignores = load_ignore_file(root) + (extra_ignores or [])
     count = 0
-    for dirpath, dirnames, filenames in os.walk(base):
+    for dirpath, dirnames, filenames in os.walk(start):
         rel_dir = os.path.relpath(dirpath, base)
         if rel_dir == ".":
             rel_dir = ""

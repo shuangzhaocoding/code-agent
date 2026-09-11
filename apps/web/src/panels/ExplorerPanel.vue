@@ -11,6 +11,7 @@ import {
   isOsFileDrag,
   type FsDragPayload,
 } from '@/panels/explorerDrag'
+import { collectDataTransferFiles } from '@/utils/fsDrop'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -22,6 +23,7 @@ const error = ref('')
 const renamingPath = ref<string | null>(null)
 const selectedItem = ref<FsItem | null>(null)
 const uploadInput = ref<HTMLInputElement | null>(null)
+const uploadDirInput = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const uploadRatio = ref(0)
 let uploadDestDir = ''
@@ -105,6 +107,16 @@ async function dropFiles(destDir: string, files: FileList | File[]) {
   }
 }
 
+async function dropDataTransfer(destDir: string, dt: DataTransfer | null | undefined) {
+  try {
+    const files = await collectDataTransferFiles(dt)
+    await dropFiles(destDir, files)
+  } catch (err) {
+    endDrag()
+    error.value = err instanceof Error ? err.message : t('explorer.uploadFail')
+  }
+}
+
 provide(explorerDragKey, {
   dragSrc,
   dropHoverPath,
@@ -115,6 +127,7 @@ provide(explorerDragKey, {
   resolveDestDir,
   dropTo,
   dropFiles,
+  dropDataTransfer,
 })
 
 function onTreeDragOver(e: DragEvent) {
@@ -140,11 +153,11 @@ function onTreeDragOver(e: DragEvent) {
 function onTreeDrop(e: DragEvent) {
   const types = e.dataTransfer?.types
   const isOurs = !!dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
-  const files = e.dataTransfer?.files
-  if (!isOurs && files?.length) {
+  const isFiles = isOsFileDrag(e)
+  if (!isOurs && isFiles) {
     e.preventDefault()
     const dest = dropDestDir ?? ''
-    void dropFiles(dest, files)
+    void dropDataTransfer(dest, e.dataTransfer)
     return
   }
   if (!isOurs) return
@@ -159,6 +172,17 @@ function startUpload(e?: Event) {
   // Open the picker while the click gesture is still valid and the menu button
   // is still in the DOM. Closing the menu first cancels the dialog in Chromium.
   const input = uploadInput.value
+  if (!input) return
+  input.value = ''
+  input.click()
+  closeMenu()
+}
+
+function startUploadDir(e?: Event) {
+  e?.preventDefault()
+  e?.stopPropagation()
+  uploadDestDir = targetDir()
+  const input = uploadDirInput.value
   if (!input) return
   input.value = ''
   input.click()
@@ -341,15 +365,22 @@ async function onDelete() {
 
 function onDownload() {
   const item = menu.value?.item
-  if (!item || item.is_dir || !store.workspaceId) return
+  if (!item || !store.workspaceId) return
   closeMenu()
-  const url =
-    `/api/workspaces/${store.workspaceId}/file/raw` +
-    `?path=${encodeURIComponent(item.path)}&download=1`
   const a = document.createElement('a')
-  a.href = url
-  a.download = item.name
   a.rel = 'noopener'
+  if (item.is_dir) {
+    const base = item.name || 'folder'
+    a.href =
+      `/api/workspaces/${store.workspaceId}/archive` +
+      `?path=${encodeURIComponent(item.path)}`
+    a.download = `${base}.zip`
+  } else {
+    a.href =
+      `/api/workspaces/${store.workspaceId}/file/raw` +
+      `?path=${encodeURIComponent(item.path)}&download=1`
+    a.download = item.name
+  }
   document.body.appendChild(a)
   a.click()
   a.remove()
@@ -632,6 +663,10 @@ onUnmounted(() => {
         <AppIcon class="ctx-ico" name="upload" :size="15" />
         <span>{{ t('explorer.uploadFile') }}</span>
       </button>
+      <button type="button" @click="startUploadDir($event)">
+        <AppIcon class="ctx-ico" name="folder" :size="15" />
+        <span>{{ t('explorer.uploadDir') }}</span>
+      </button>
 
       <!-- 对话 -->
       <template v-if="menu.item">
@@ -679,9 +714,9 @@ onUnmounted(() => {
       <!-- 文件操作 -->
       <template v-if="menu.item">
         <div class="ctx-sep" />
-        <button v-if="!menu.item.is_dir" type="button" @click="onDownload">
+        <button type="button" @click="onDownload">
           <AppIcon class="ctx-ico" name="download" :size="15" />
-          <span>{{ t('common.download') }}</span>
+          <span>{{ menu.item.is_dir ? t('explorer.downloadDir') : t('common.download') }}</span>
         </button>
         <button type="button" @click="startRename">
           <AppIcon class="ctx-ico" name="pencil" :size="15" />
@@ -721,6 +756,17 @@ onUnmounted(() => {
       class="explorer-upload-input"
       type="file"
       multiple
+      tabindex="-1"
+      aria-hidden="true"
+      @change="onUploadInputChange"
+    />
+    <input
+      ref="uploadDirInput"
+      class="explorer-upload-input"
+      type="file"
+      multiple
+      webkitdirectory
+      directory
       tabindex="-1"
       aria-hidden="true"
       @change="onUploadInputChange"

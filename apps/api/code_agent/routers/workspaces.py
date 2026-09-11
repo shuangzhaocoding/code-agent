@@ -4,6 +4,8 @@ import mimetypes
 import os
 import posixpath
 import shutil
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -11,6 +13,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from code_agent.async_io import run_sync
 from code_agent.db.models import Workspace
@@ -24,6 +27,9 @@ router = APIRouter(prefix="/api/workspaces", tags=["workspaces"])
 
 RAW_FILE_MAX_BYTES = 80 * 1024 * 1024
 UPLOAD_MAX_BYTES = 80 * 1024 * 1024
+ARCHIVE_MAX_FILES = 5000
+ARCHIVE_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+ARCHIVE_MAX_FILE_BYTES = RAW_FILE_MAX_BYTES
 
 
 def _content_disposition(disposition: str, filename: str) -> str:
@@ -659,6 +665,133 @@ async def get_file_raw(workspace_id: str, path: str, download: bool = False):
         content=data,
         media_type=media_type,
         headers={"Content-Disposition": _content_disposition(disposition, filename)},
+    )
+
+
+def _archive_prefix(path: str) -> str:
+    rel = (path or "").strip().replace("\\", "/").strip("/")
+    if not rel or rel == ".":
+        return ""
+    if ".." in rel.split("/"):
+        raise HTTPException(status_code=400, detail={"code": "path.invalid"})
+    return rel
+
+
+def _arcname_for(rel: str, prefix: str, folder_name: str) -> str:
+    if not prefix:
+        return rel
+    rest = rel[len(prefix) :].lstrip("/")
+    return f"{folder_name}/{rest}" if rest else folder_name
+
+
+@router.get("/{workspace_id}/archive")
+async def download_archive(workspace_id: str, path: str = ""):
+    """Download a workspace directory as a ZIP archive."""
+    prefix = _archive_prefix(path)
+    if prefix and is_protected(prefix):
+        raise HTTPException(status_code=403, detail={"code": "path.protected"})
+
+    ws = await _get_ws(workspace_id)
+    backend = await get_workspace_backend(ws)
+    if prefix:
+        if not await backend.exists(prefix):
+            raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+        if not await backend.is_dir(prefix):
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "path.not_dir", "message": "Archive download requires a directory"},
+            )
+
+    folder_name = posixpath.basename(prefix) if prefix else (ws.name or "workspace")
+    folder_name = folder_name.replace("\\", "_").replace("/", "_") or "folder"
+
+    walked = await backend.walk_files(
+        extra_ignores=ws.ignore_globs,
+        limit=ARCHIVE_MAX_FILES + 1,
+        root_rel=prefix,
+    )
+    selected: list[tuple[str, str]] = []
+    for rel, abs_or_remote in walked:
+        if is_protected(rel):
+            continue
+        selected.append((rel, abs_or_remote))
+        if len(selected) > ARCHIVE_MAX_FILES:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "archive.too_many_files",
+                    "message": f"Directory has more than {ARCHIVE_MAX_FILES} files",
+                },
+            )
+
+    tmp = tempfile.NamedTemporaryFile(prefix="ca-archive-", suffix=".zip", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    total_bytes = 0
+    try:
+        with zipfile.ZipFile(tmp_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            if not selected:
+                # Keep empty dirs downloadable.
+                zf.writestr(f"{folder_name}/", b"")
+            elif not workspace_is_ssh(ws):
+                for rel, abs_path in selected:
+                    file_path = Path(abs_path)
+                    try:
+                        size = file_path.stat().st_size
+                    except OSError:
+                        continue
+                    if size > ARCHIVE_MAX_FILE_BYTES:
+                        continue
+                    total_bytes += size
+                    if total_bytes > ARCHIVE_MAX_UNCOMPRESSED_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail={
+                                "code": "archive.too_large",
+                                "message": f"Archive exceeds {ARCHIVE_MAX_UNCOMPRESSED_BYTES} bytes",
+                            },
+                        )
+                    arc = _arcname_for(rel, prefix, folder_name)
+                    zf.write(file_path, arcname=arc)
+            else:
+                for rel, _remote in selected:
+                    try:
+                        data = await backend.read_bytes(rel, max_bytes=ARCHIVE_MAX_FILE_BYTES + 1)
+                    except Exception:
+                        continue
+                    if len(data) > ARCHIVE_MAX_FILE_BYTES:
+                        continue
+                    total_bytes += len(data)
+                    if total_bytes > ARCHIVE_MAX_UNCOMPRESSED_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail={
+                                "code": "archive.too_large",
+                                "message": f"Archive exceeds {ARCHIVE_MAX_UNCOMPRESSED_BYTES} bytes",
+                            },
+                        )
+                    arc = _arcname_for(rel, prefix, folder_name)
+                    zf.writestr(arc, data)
+    except HTTPException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    filename = f"{folder_name}.zip"
+    return FileResponse(
+        path=tmp_path,
+        media_type="application/zip",
+        filename=filename,
+        content_disposition_type="attachment",
+        background=BackgroundTask(lambda: os.unlink(tmp_path) if os.path.exists(tmp_path) else None),
     )
 
 

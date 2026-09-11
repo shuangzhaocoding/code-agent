@@ -12,6 +12,7 @@ import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/
 import { parseChatFileRef } from '@/utils/chatFileLinks'
 import { acceptHunkIntoBefore, rejectHunkFromAfter, textsEqual } from '@/utils/diffHunk'
 import { t } from '@/i18n'
+import { fileRelativePath } from '@/utils/fsDrop'
 
 export type Workspace = {
   id: string
@@ -1348,6 +1349,32 @@ export const useAppStore = defineStore('app', () => {
     })
   }
 
+  function planWorkspaceUploadPaths(destDir: string, files: File[]): { file: File; rel: string; label: string }[] {
+    const planned: { file: File; relRaw: string }[] = []
+    for (const file of files) {
+      const relRaw = fileRelativePath(file)
+      if (!relRaw) continue
+      planned.push({ file, relRaw })
+    }
+    if (!planned.length) return []
+
+    const topNames = [...new Set(planned.map((p) => p.relRaw.split('/')[0]!))]
+    const renameTop = new Map<string, string>()
+    for (const name of topNames) {
+      const unique = uniqueChildPath(destDir, name)
+      const uniqueName = unique.split('/').filter(Boolean).pop() || name
+      if (uniqueName !== name) renameTop.set(name, uniqueName)
+    }
+
+    return planned.map(({ file, relRaw }) => {
+      const parts = relRaw.split('/')
+      const top = parts[0]!
+      if (renameTop.has(top)) parts[0] = renameTop.get(top)!
+      const rel = joinPath(destDir, parts.join('/'))
+      return { file, rel, label: parts.join('/') }
+    })
+  }
+
   async function uploadWorkspaceFiles(
     destDir: string,
     files: FileList | File[],
@@ -1356,27 +1383,31 @@ export const useAppStore = defineStore('app', () => {
     if (!workspaceId.value) return []
     const list = Array.from(files).filter((f) => f && f.name)
     if (!list.length) return []
+    const UPLOAD_MAX_FILES = 2000
+    if (list.length > UPLOAD_MAX_FILES) {
+      throw new Error(t('explorer.uploadTooMany', { max: UPLOAD_MAX_FILES }))
+    }
     if (destDir) await expandDir(destDir)
     else await loadTree('')
 
-    const weights = list.map((f) => Math.max(f.size, 1))
+    const planned = planWorkspaceUploadPaths(destDir, list)
+    if (!planned.length) return []
+
+    const weights = planned.map((p) => Math.max(p.file.size, 1))
     const totalWeight = weights.reduce((sum, n) => sum + n, 0)
     let doneWeight = 0
     const uploaded: string[] = []
-    const total = list.length
+    const total = planned.length
 
-    for (let i = 0; i < list.length; i++) {
-      const file = list[i]
-      const baseName = file.name.replace(/[\\/]+/g, '').trim()
-      if (!baseName || baseName === '.' || baseName === '..') continue
+    for (let i = 0; i < planned.length; i++) {
+      const { file, rel, label } = planned[i]
       const weight = weights[i]
-      const rel = uniqueChildPath(destDir, baseName)
       await uploadWorkspaceFile(rel, file, (loaded, totalBytes) => {
         const part = Math.min(1, loaded / Math.max(totalBytes || weight, 1))
         onProgress?.({
           current: i + 1,
           total,
-          name: baseName,
+          name: label,
           ratio: Math.min(0.999, (doneWeight + part * weight) / totalWeight),
         })
       })
@@ -1386,7 +1417,7 @@ export const useAppStore = defineStore('app', () => {
       onProgress?.({
         current: i + 1,
         total,
-        name: baseName,
+        name: label,
         ratio: Math.min(1, doneWeight / totalWeight),
       })
     }

@@ -151,12 +151,11 @@ function onDrop(e: DragEvent) {
   if (!drag) return
   const types = e.dataTransfer?.types
   const isOurs = !!drag.dragSrc.value || (types != null && [...types].includes(FS_DRAG_MIME))
-  const files = e.dataTransfer?.files
-  if (!isOurs && files?.length) {
+  if (!isOurs && isOsFileDrag(e)) {
     e.preventDefault()
     e.stopPropagation()
     const dest = drag.resolveDestDir(props.item)
-    void drag.dropFiles(dest, files)
+    void drag.dropDataTransfer(dest, e.dataTransfer)
     return
   }
   if (!isOurs) return

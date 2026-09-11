@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld('codeAgentDesktop', {
   setTheme: (theme) => ipcRenderer.invoke('desktop:set-theme', theme),
   getTheme: () => ipcRenderer.invoke('desktop:get-theme'),
   newWindow: () => ipcRenderer.invoke('desktop:new-window'),
+  setTitle: (title) => ipcRenderer.invoke('desktop:set-title', title),
 })
