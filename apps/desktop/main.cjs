@@ -67,20 +67,46 @@ function apiDir() {
   return path.join(repoRoot(), 'apps', 'api')
 }
 
-function bundledPythonWin() {
-  const candidates = [
-    path.join(process.resourcesPath || '', 'python-win', 'python.exe'),
-    path.join(__dirname, 'runtime', 'python-win', 'python.exe'),
-  ]
-  return candidates.find((p) => p && fs.existsSync(p)) || null
+function bundledPythonBases() {
+  const bases = []
+  if (process.resourcesPath) {
+    bases.push(path.join(process.resourcesPath, 'python'))
+    // Legacy Windows layout from earlier builds.
+    bases.push(path.join(process.resourcesPath, 'python-win'))
+  }
+  bases.push(
+    path.join(__dirname, 'runtime', 'python-win'),
+    path.join(__dirname, 'runtime', 'python-linux'),
+    path.join(__dirname, 'runtime', 'python-macos'),
+  )
+  return bases
+}
+
+function bundledPython() {
+  for (const base of bundledPythonBases()) {
+    if (!base) continue
+    if (process.platform === 'win32') {
+      const exe = path.join(base, 'python.exe')
+      if (fs.existsSync(exe)) return exe
+      continue
+    }
+    for (const rel of ['bin/python3', 'bin/python']) {
+      const exe = path.join(base, rel)
+      if (fs.existsSync(exe)) return exe
+    }
+  }
+  return null
 }
 
 function pythonCmd() {
   if (process.env.CODE_AGENT_PYTHON) return process.env.CODE_AGENT_PYTHON
   if (app.isPackaged || process.platform === 'win32') {
-    const bundled = bundledPythonWin()
+    const bundled = bundledPython()
     if (bundled) return bundled
   }
+  // Dev on Linux/macOS: prefer a local bundle when present, else system Python.
+  const bundled = bundledPython()
+  if (bundled) return bundled
   return process.platform === 'win32' ? 'python' : 'python3.11'
 }
 

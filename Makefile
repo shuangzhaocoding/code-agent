@@ -1,4 +1,4 @@
-.PHONY: api web install build prod start dev worker terminal-svc preview-svc split up down restart status desktop desktop-win
+.PHONY: api web install build prod start dev worker terminal-svc preview-svc split up down restart status desktop desktop-win desktop-linux desktop-mac
 
 API_PORT ?= 4060
 DEV_UI_PORT ?= 4061
@@ -83,8 +83,26 @@ status:
 desktop: build
 	cd apps/desktop && npm install && npm start
 
-# 交叉打包 Windows zip（内嵌 Python，目标机免安装）
+# 交叉打包 Windows：NSIS 安装向导（自定义路径/快捷方式）+ zip 便携包
+# Linux 上构建 NSIS 需 wine/wine32；无显示器时可用 xvfb-run
 desktop-win: build
-	cd apps/desktop && npm install && npm run pack:win
-	@echo "Windows zip: apps/desktop/release/"
+	cd apps/desktop && npm install && \
+	  if command -v xvfb-run >/dev/null 2>&1 && [ "$$(uname -s)" = Linux ]; then \
+	    xvfb-run -a npm run pack:win; \
+	  else \
+	    npm run pack:win; \
+	  fi
+	@echo "Windows installer + zip: apps/desktop/release/"
 	@ls -lah apps/desktop/release/ | sed -n '1,30p'
+
+# Linux AppImage + deb（开始菜单快捷方式）+ tar.gz（需在 Linux 主机打包）
+desktop-linux: build
+	cd apps/desktop && npm install && npm run pack:linux
+	@echo "Linux artifacts: apps/desktop/release/"
+	@ls -lah apps/desktop/release/ | sed -n '1,40p'
+
+# macOS dmg（拖到 Applications）+ zip（须在 macOS 主机打包）
+desktop-mac: build
+	cd apps/desktop && npm install && npm run pack:mac
+	@echo "macOS artifacts: apps/desktop/release/"
+	@ls -lah apps/desktop/release/ | sed -n '1,40p'

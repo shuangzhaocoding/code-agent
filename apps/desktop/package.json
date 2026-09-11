@@ -2,14 +2,24 @@
   "name": "code-agent-desktop",
   "version": "1.0.2",
   "private": true,
-  "description": "Code Agent Electron shell with embedded Windows Python",
+  "description": "Code Agent Electron shell with embedded Python runtime",
+  "desktopName": "code-agent",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
     "bundle:python-win": "bash scripts/bundle-python-win.sh",
-    "pack:win": "npm run bundle:python-win && electron-builder --win zip --x64",
+    "bundle:python-linux": "bash scripts/bundle-python-linux.sh",
+    "bundle:python-macos": "bash scripts/bundle-python-macos.sh",
+    "pack:win": "npm run bundle:python-win && electron-builder --win nsis zip --x64",
+    "pack:win:installer": "npm run bundle:python-win && electron-builder --win nsis --x64",
+    "pack:win:portable": "npm run bundle:python-win && electron-builder --win zip --x64",
     "pack:win:dir": "npm run bundle:python-win && electron-builder --win dir --x64",
-    "pack:linux": "electron-builder --linux dir --x64"
+    "pack:linux": "npm run bundle:python-linux && electron-builder --linux AppImage deb tar.gz --x64",
+    "pack:linux:dir": "npm run bundle:python-linux && electron-builder --linux dir --x64",
+    "pack:mac": "npm run bundle:python-macos && electron-builder --mac dmg zip --publish never",
+    "pack:mac:arm64": "bash scripts/bundle-python-macos.sh arm64 && electron-builder --mac dmg zip --arm64 --publish never",
+    "pack:mac:x64": "bash scripts/bundle-python-macos.sh x86_64 && electron-builder --mac dmg zip --x64 --publish never",
+    "pack:mac:dir": "npm run bundle:python-macos && electron-builder --mac dir --publish never"
   },
   "devDependencies": {
     "electron": "^37.2.0",
@@ -47,14 +57,16 @@
           "!**/tests/**",
           "!**/.pytest_cache/**"
         ]
-      },
-      {
-        "from": "runtime/python-win",
-        "to": "python-win"
       }
     ],
     "win": {
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "zip",
           "arch": [
@@ -62,13 +74,106 @@
           ]
         }
       ],
-      "artifactName": "CodeAgent-${version}-Windows-x64-amd64-Python3.11.${ext}"
+      "artifactName": "CodeAgent-${version}-Windows-x64-amd64-Python3.11.${ext}",
+      "signAndEditExecutable": false,
+      "extraResources": [
+        {
+          "from": "runtime/python-win",
+          "to": "python"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Code Agent",
+      "uninstallDisplayName": "Code Agent",
+      "include": "build/installer.nsh",
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
+      "displayLanguageSelector": true,
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "license": "../../LICENSE"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "title": "Code Agent ${version}"
     },
     "linux": {
       "target": [
-        "dir"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
-      "artifactName": "CodeAgent-${version}-Linux-${arch}-glibc-Python3.11.${ext}"
+      "category": "Development",
+      "artifactName": "CodeAgent-${version}-Linux-${arch}-glibc-Python3.11.${ext}",
+      "extraResources": [
+        {
+          "from": "runtime/python-linux",
+          "to": "python"
+        }
+      ]
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1"
+      ],
+      "priority": "optional",
+      "packageCategory": "devel"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "artifactName": "CodeAgent-${version}-macOS-${arch}-Python3.11.${ext}",
+      "extraResources": [
+        {
+          "from": "runtime/python-macos",
+          "to": "python"
+        }
+      ]
     },
     "asar": true,
     "npmRebuild": false
