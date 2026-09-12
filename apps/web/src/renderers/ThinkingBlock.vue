@@ -20,7 +20,7 @@ let renderRaf = 0
 let lastRenderAt = 0
 let scrollRaf = 0
 const STREAM_RENDER_MS = 80
-const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
+const purifyOpts = { ADD_ATTR: ['target', 'rel', 'data-path', 'data-line', 'data-ca-file'] }
 
 function toMs(v: number | string | undefined): number {
   if (!v) return 0

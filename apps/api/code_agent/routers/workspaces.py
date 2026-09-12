@@ -6,11 +6,12 @@ import posixpath
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -773,6 +774,85 @@ async def get_file_raw(workspace_id: str, path: str, download: bool = False):
         media_type=media_type,
         headers={"Content-Disposition": _content_disposition(disposition, filename)},
     )
+
+
+async def _prepare_sqlite_path(ws: Workspace, path: str) -> tuple[Path, Callable[[], None]]:
+    backend = await get_workspace_backend(ws)
+    if not await backend.is_file(path):
+        raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": "文件不存在"})
+    if not workspace_is_ssh(ws):
+        from code_agent.tools.paths import resolve_in_workspace
+
+        return resolve_in_workspace(ws.root_path, path), lambda: None
+
+    data = await backend.read_bytes(path, max_bytes=RAW_FILE_MAX_BYTES)
+    fd, tmp = tempfile.mkstemp(suffix=".sqlite3")
+    try:
+        os.write(fd, data)
+        os.close(fd)
+        fd = -1
+    except Exception:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+    def cleanup() -> None:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+
+    return Path(tmp), cleanup
+
+
+def _sqlite_http_error(err: Exception) -> HTTPException:
+    from code_agent.workspace.sqlite_preview import SqlitePreviewError
+
+    if isinstance(err, SqlitePreviewError):
+        return HTTPException(status_code=err.status, detail={"code": err.code, "message": err.message})
+    return HTTPException(status_code=400, detail={"code": "sqlite.failed", "message": str(err)})
+
+
+@router.get("/{workspace_id}/sqlite")
+async def sqlite_inspect(workspace_id: str, path: str):
+    from code_agent.workspace.sqlite_preview import SqlitePreviewError, inspect_sqlite
+
+    ws = await _get_ws(workspace_id)
+    file_path, cleanup = await _prepare_sqlite_path(ws, path)
+    try:
+        data = await run_sync(inspect_sqlite, file_path)
+        data["path"] = path
+        return data
+    except SqlitePreviewError as err:
+        raise _sqlite_http_error(err) from err
+    finally:
+        cleanup()
+
+
+@router.get("/{workspace_id}/sqlite/rows")
+async def sqlite_rows(
+    workspace_id: str,
+    path: str,
+    table: str,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+):
+    from code_agent.workspace.sqlite_preview import SqlitePreviewError, query_sqlite
+
+    ws = await _get_ws(workspace_id)
+    file_path, cleanup = await _prepare_sqlite_path(ws, path)
+    try:
+        data = await run_sync(query_sqlite, file_path, table, offset, limit)
+        data["path"] = path
+        return data
+    except SqlitePreviewError as err:
+        raise _sqlite_http_error(err) from err
+    finally:
+        cleanup()
 
 
 def _archive_prefix(path: str) -> str:

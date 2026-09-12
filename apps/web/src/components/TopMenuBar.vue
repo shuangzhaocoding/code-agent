@@ -79,6 +79,7 @@ const PANEL_ICONS: Record<string, AppIconName> = {
   explorer: 'folder',
   search: 'search',
   editor: 'file',
+  preview: 'globe',
   terminal: 'terminal',
   ports: 'ports',
   git: 'git',
@@ -336,7 +337,7 @@ const menus = computed(() => {
 
   const PANEL_GROUPS: string[][] = [
     ['agent', 'trajectory'],
-    ['explorer', 'search', 'editor', 'terminal'],
+    ['explorer', 'search', 'editor', 'preview', 'terminal'],
     ['ports', 'git'],
     ['skills', 'memory', 'plugins', 'models', 'settings'],
   ]

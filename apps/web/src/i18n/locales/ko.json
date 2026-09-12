@@ -108,6 +108,7 @@
     "searchFiles": "파일에서 검색",
     "save": "파일 저장",
     "formatDocument": "문서 서식",
+    "runFile": "현재 스크립트를 터미널에서 실행",
     "newChat": "새 대화",
     "newWindow": "새 창",
     "undoDelete": "방금 삭제한 파일 복원",
@@ -127,6 +128,7 @@
     "editor": "편집기",
     "terminal": "터미널",
     "ports": "포트",
+    "preview": "미리보기",
     "git": "Git",
     "skills": "Skill",
     "plugins": "플러그인",
@@ -273,7 +275,8 @@
         "theme": "테마",
         "font_size": "UI 글꼴 크기",
         "send_on_enter": "Enter로 보내기",
-        "format_on_save": "저장 시 서식"
+        "format_on_save": "저장 시 서식",
+        "url_preview": "링크 미리보기 방식"
       },
       "uploads": {
         "dir": "업로드 디렉터리"
@@ -298,6 +301,10 @@
         "theme": {
           "dark": "어둡게",
           "light": "밝게"
+        },
+        "url_preview": {
+          "app": "앱 내 미리보기",
+          "browser": "시스템 브라우저"
         }
       }
     }
@@ -325,6 +332,7 @@
     "openEditor": "편집기 열기",
     "openTerminal": "터미널 열기",
     "openPorts": "포트 열기",
+    "openPreview": "미리보기 열기",
     "openGit": "Git 열기",
     "openSkills": "Skill 열기",
     "openPlugins": "플러그인 열기",
@@ -336,7 +344,8 @@
     "popoutTrajectory": "궤적 패널 분리",
     "toggleTheme": "테마 전환",
     "inlineEdit": "인라인 편집",
-    "gotoDefinition": "정의로 이동"
+    "gotoDefinition": "정의로 이동",
+    "runFile": "현재 스크립트 실행"
   },
   "confirm": {
     "confirm": "확인",
@@ -362,6 +371,13 @@
   },
   "file": {
     "openFailed": "파일을 열지 못했습니다"
+  },
+  "preview": {
+    "empty": "채팅의 링크를 클릭하거나 주소 표시줄에 URL을 입력하세요",
+    "addressPlaceholder": "URL을 입력하고 Enter",
+    "newTab": "새 탭",
+    "closeTab": "탭 닫기",
+    "untitled": "새 탭"
   },
   "thinking": {
     "off": {
@@ -420,6 +436,12 @@
     "emptyHint": "명령 팔레트 열기",
     "loadingConversation": "대화 불러오는 중…",
     "copied": "복사됨",
+    "openInBrowser": "브라우저에서 열기",
+    "urlPreviewTitle": "링크 미리보기",
+    "urlPreviewBlocked": "이 페이지는 앱에 삽입할 수 없습니다. 브라우저에서 여세요.",
+    "urlPreviewHint": "일부 사이트는 앱 내 미리보기를 차단합니다. 비어 있으면 브라우저로 여세요",
+    "urlLinkTitle": "앱에서 열기 · Shift+클릭으로 브라우저",
+    "urlLinkTitleBrowser": "브라우저에서 열기 · Shift+클릭으로 미리보기",
     "expandAll": "모두 펼치기",
     "collapse": "접기",
     "rollbackMenuTitle": "대화 되돌리기",
@@ -792,6 +814,9 @@
     "nextFile": "다음 파일",
     "diffCount": "변경 {i}/{n}",
     "openFromSidebar": "사이드바에서 파일 열기",
+    "runFile": "실행",
+    "runFileHint": "터미널에서 이 파일 실행 (F5)",
+    "runNotSupported": "이 파일 형식은 바로 실행할 수 없습니다",
     "splitRight": "편집기 오른쪽 분할",
     "splitDown": "편집기 아래 분할",
     "closeSplit": "분할 닫기",
@@ -1012,7 +1037,17 @@
     "fitWindow": "창에 맞추기",
     "actualSize": "원본 크기",
     "prevImage": "이전 이미지",
-    "nextImage": "다음 이미지"
+    "nextImage": "다음 이미지",
+    "sqlite": "데이터베이스 읽는 중…",
+    "sqliteEmpty": "테이블 또는 뷰 없음",
+    "sqliteEmptyTable": "빈 테이블",
+    "sqliteTables": "테이블",
+    "sqliteView": "뷰",
+    "sqliteRows": "{from}–{to} / {total}",
+    "sqliteRowsUnknown": "{from}–{to}",
+    "sqliteNull": "NULL",
+    "sqliteBlob": "BLOB ({n})",
+    "sqliteNoWorkspace": "열린 워크스페이스 없음"
   },
   "usage": {
     "title": "컨텍스트 토큰 사용량",

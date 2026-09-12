@@ -14,6 +14,7 @@ import { isPreviewKind } from '@/preview/classify'
 import { langOf } from '@/utils/editorLang'
 import { canFormatPath, formatDocumentText } from '@/utils/formatDocument'
 import { expandInlineRange, findLocalDefinitions, identifierAt } from '@/utils/gotoSymbol'
+import { isRunnableScript, isWindowsRoot, scriptRunCommand } from '@/utils/scriptRun'
 import { api } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { t } from '@/i18n'
@@ -128,6 +129,39 @@ const activeIsBinaryPreview = computed(() => {
 })
 
 const showFilePreview = computed(() => activeIsBinaryPreview.value || showHtmlPreview.value)
+const runningScript = ref(false)
+const canRunScript = computed(() => {
+  const path = store.activePath
+  const file = store.openFile
+  if (!path || !file || file.readonly || showingDiff.value || showFilePreview.value) return false
+  return isRunnableScript(path)
+})
+
+async function runActiveScript(path = store.activePath) {
+  if (!path || runningScript.value) return
+  const command = scriptRunCommand(path, { windows: isWindowsRoot(store.workspace?.root_path) })
+  if (!command) {
+    toast.error(t('editor.runNotSupported'))
+    return
+  }
+  runningScript.value = true
+  try {
+    if (path !== store.activePath) store.activateFile(path)
+    await nextTick()
+    if (store.openFile?.path === path && store.openFile.dirty) await onEditorSave()
+    window.dispatchEvent(new CustomEvent('ca-run-in-terminal', {
+      detail: { command, cwd: store.parentPath(path) },
+    }))
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : t('common.saveFailed'))
+  } finally {
+    runningScript.value = false
+  }
+}
+
+function onRunFileEvent() {
+  void runActiveScript()
+}
 
 function cssColor(name: string, fallback: string) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
@@ -832,6 +866,9 @@ function bindEditorCommands(ed: import('monaco-editor').editor.IStandaloneCodeEd
   ed.addCommand(monacoMod.KeyCode.F12, () => {
     void gotoDefinition()
   })
+  ed.addCommand(monacoMod.KeyCode.F5, () => {
+    void runActiveScript()
+  })
   editorInputDisposables.push(
     ed.onKeyDown((e) => {
       if (
@@ -1357,6 +1394,7 @@ onMounted(async () => {
   window.addEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
   window.addEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
   window.addEventListener('ca-goto-definition', onGotoEvent as EventListener)
+  window.addEventListener('ca-run-file', onRunFileEvent as EventListener)
   window.addEventListener('keydown', onGotoModifierKey, true)
   window.addEventListener('keyup', onGotoModifierKey, true)
   window.addEventListener('blur', onWindowBlur)
@@ -1539,6 +1577,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
   window.removeEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
   window.removeEventListener('ca-goto-definition', onGotoEvent as EventListener)
+  window.removeEventListener('ca-run-file', onRunFileEvent as EventListener)
   window.removeEventListener('keydown', onGotoModifierKey, true)
   window.removeEventListener('keyup', onGotoModifierKey, true)
   window.removeEventListener('blur', onWindowBlur)
@@ -1648,6 +1687,12 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
     { id: 'add-to-chat', label: t('editor.addToChat'), icon: 'chat' },
     { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
     { id: 'open-terminal', label: t('editor.openInTerminal'), icon: 'terminal' },
+    {
+      id: 'run-file',
+      label: t('editor.runFile'),
+      icon: 'play',
+      disabled: !isRunnableScript(path) || Boolean(file?.readonly),
+    },
     { id: 'sep-split', separator: true },
     {
       id: 'split-right',
@@ -1698,6 +1743,10 @@ const tabMenuActions: Record<string, (path: string) => void | Promise<void>> = {
   },
   'open-terminal': (path) => {
     window.dispatchEvent(new CustomEvent('ca-open-terminal', { detail: { cwd: store.parentPath(path) } }))
+  },
+  'run-file': async (path) => {
+    store.activateFile(path)
+    await runActiveScript(path)
   },
   'split-right': async (path) => {
     await splitEditor('right', path)
@@ -1766,6 +1815,12 @@ const editorMenuItems = computed((): ContextMenuItem[] => {
     { id: 'sep-nav', separator: true },
     { id: 'reveal', label: t('editor.revealInExplorer'), icon: 'tree' },
     { id: 'open-terminal', label: t('editor.openInTerminal'), icon: 'terminal' },
+    {
+      id: 'run-file',
+      label: t('editor.runFile'),
+      icon: 'play',
+      disabled: !canRunScript.value,
+    },
     { id: 'copy-relative', label: t('editor.copyRelativePath'), icon: 'path-relative' },
     { id: 'copy-absolute', label: t('editor.copyAbsolutePath'), icon: 'path-absolute' },
     { id: 'sep-file', separator: true },
@@ -1893,6 +1948,10 @@ async function onEditorMenuSelect(id: string) {
     window.dispatchEvent(new CustomEvent('ca-open-terminal', { detail: { cwd: dir } }))
     return
   }
+  if (id === 'run-file') {
+    await runActiveScript(path)
+    return
+  }
   if (id === 'copy-relative') {
     await copyText(path)
     return
@@ -1971,6 +2030,17 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
         </div>
       </div>
       <div class="file-bar-tools">
+        <button
+          v-if="canRunScript"
+          type="button"
+          class="ghost-icon-btn file-bar-run"
+          :title="t('editor.runFileHint')"
+          :disabled="runningScript"
+          :aria-label="t('editor.runFile')"
+          @click="runActiveScript()"
+        >
+          <AppIcon name="play" :size="15" :stroke-width="1.75" />
+        </button>
         <button
           type="button"
           class="ghost-icon-btn"
@@ -2266,6 +2336,13 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+}
+.file-bar-run {
+  color: var(--primary);
+}
+.file-bar-run:hover:not(:disabled) {
+  background: var(--primary-soft);
+  opacity: 1;
 }
 .file-bar-tools .ghost-icon-btn:disabled {
   opacity: 0.28;

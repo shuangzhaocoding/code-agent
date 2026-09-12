@@ -25,7 +25,10 @@ import {
 } from '@/utils/layoutPresets'
 import { getMenuBarPosition, isMenuBarPosition, type MenuBarPosition } from '@/utils/layoutPrefs'
 import { hasCustomTitleBar } from '@/utils/desktop'
-import { queueTerminalCwd } from '@/utils/terminalOpen'
+import { queueTerminalCwd, queueTerminalRun } from '@/utils/terminalOpen'
+import type { TerminalRunRequest } from '@/utils/scriptRun'
+import { chatExternalHref, isHttpUrl, openExternalUrl, preferInAppPreview } from '@/utils/openUrl'
+import { openUrlPreview } from '@/composables/useUrlPreview'
 
 const TrajectoryDockPanel = defineAsyncComponent(() => import('@/panels/TrajectoryDockPanel.vue'))
 const WorkspacePanel = defineAsyncComponent(() => import('@/panels/WorkspacePanel.vue'))
@@ -39,6 +42,7 @@ const ModelsPanel = defineAsyncComponent(() => import('@/panels/ModelsPanel.vue'
 const SettingsPanel = defineAsyncComponent(() => import('@/panels/SettingsPanel.vue'))
 const GitPanel = defineAsyncComponent(() => import('@/panels/GitPanel.vue'))
 const PortsPanel = defineAsyncComponent(() => import('@/panels/PortsPanel.vue'))
+const UrlPreviewPanel = defineAsyncComponent(() => import('@/panels/UrlPreviewPanel.vue'))
 const MemoryPanel = defineAsyncComponent(() => import('@/panels/MemoryPanel.vue'))
 
 const store = useAppStore()
@@ -63,6 +67,7 @@ const components = {
   settings: SettingsPanel,
   git: GitPanel,
   ports: PortsPanel,
+  preview: UrlPreviewPanel,
   memory: MemoryPanel,
   trajectory: TrajectoryDockPanel,
 } as unknown as Record<string, VueComponent>
@@ -78,7 +83,26 @@ function onMenuPosition(e: Event) {
   if (isMenuBarPosition(position)) menuPosition.value = position
 }
 
+function onChatUrlClick(e: MouseEvent) {
+  if (e.defaultPrevented) return
+  if (e.button !== 0 && e.button !== 1) return
+  const url = chatExternalHref(e.target)
+  if (!url) return
+  const el = e.target instanceof Element ? e.target : null
+  if (!el?.closest('.markdown-body, .markdown-inline, .think-body, .user-text, .user-files')) return
+  e.preventDefault()
+  e.stopPropagation()
+  const openInApp = preferInAppPreview(e)
+  if (openInApp && isHttpUrl(url)) {
+    openUrlPreview(url)
+    return
+  }
+  void openExternalUrl(url)
+}
+
 onMounted(() => {
+  window.addEventListener('click', onChatUrlClick, true)
+  window.addEventListener('auxclick', onChatUrlClick, true)
   window.addEventListener('ca-theme', onTheme)
   window.addEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.addEventListener('ca-focus-editor', focusEditor)
@@ -87,8 +111,10 @@ onMounted(() => {
   window.addEventListener('ca-open-search', openSearch)
   window.addEventListener('ca-open-explorer', openExplorer)
   window.addEventListener('ca-open-terminal', onOpenTerminal)
+  window.addEventListener('ca-run-in-terminal', onRunInTerminal)
   window.addEventListener('ca-open-skills', openSkills)
   window.addEventListener('ca-open-git', openGit)
+  window.addEventListener('ca-open-url-preview', openUrlPreviewPanel)
   window.addEventListener('ca-layout-reset', onLayoutReset)
   window.addEventListener('ca-layout-preset', onLayoutPreset as EventListener)
   window.addEventListener('ca-layout-export', onLayoutExport)
@@ -97,6 +123,8 @@ onMounted(() => {
   window.addEventListener('ca-locale', retitlePanels)
 })
 onUnmounted(() => {
+  window.removeEventListener('click', onChatUrlClick, true)
+  window.removeEventListener('auxclick', onChatUrlClick, true)
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.removeEventListener('ca-focus-editor', focusEditor)
@@ -105,8 +133,10 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-search', openSearch)
   window.removeEventListener('ca-open-explorer', openExplorer)
   window.removeEventListener('ca-open-terminal', onOpenTerminal)
+  window.removeEventListener('ca-run-in-terminal', onRunInTerminal)
   window.removeEventListener('ca-open-skills', openSkills)
   window.removeEventListener('ca-open-git', openGit)
+  window.removeEventListener('ca-open-url-preview', openUrlPreviewPanel)
   window.removeEventListener('ca-layout-reset', onLayoutReset)
   window.removeEventListener('ca-layout-preset', onLayoutPreset as EventListener)
   window.removeEventListener('ca-layout-export', onLayoutExport)
@@ -148,8 +178,22 @@ async function onOpenTerminal(e: Event) {
   window.dispatchEvent(new Event('ca-terminal-cwd'))
 }
 
+async function onRunInTerminal(e: Event) {
+  const detail = (e as CustomEvent<TerminalRunRequest>).detail
+  if (!detail?.command) return
+  queueTerminalRun(detail)
+  openTerminal()
+  await nextTick()
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  window.dispatchEvent(new Event('ca-terminal-run'))
+}
+
 function openGit() {
   openPanel('git', 'git', panelTitle('git'))
+}
+
+function openUrlPreviewPanel() {
+  openPanel('preview', 'preview', panelTitle('preview'))
 }
 
 function openSkills() {
@@ -421,7 +465,9 @@ function panelPosition(apiRef: DockviewApi, id: string): PanelPlace | undefined 
     return agent ? { referencePanel: agent, direction: 'below' } : undefined
   }
 
-  if (id === 'editor') {
+  if (id === 'editor' || id === 'preview') {
+    const other = id === 'preview' ? 'editor' : 'preview'
+    if (apiRef.getPanel(other)) return { referencePanel: other, direction: 'within' }
     const left = findExisting(apiRef, LEFT_PANELS)
     if (left) return { referencePanel: left, direction: 'right' }
     const agent = findExisting(apiRef, AGENT_PANELS)

@@ -21,7 +21,7 @@ const checked = ref<Set<number>>(new Set())
 const executing = ref(false)
 /** After confirm execute succeeds, freeze selection so the plan can't be re-submitted. */
 const locked = ref(false)
-const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
+const purifyOpts = { ADD_ATTR: ['target', 'rel', 'data-path', 'data-line', 'data-ca-file'] }
 
 watch(
   () => props.steps.map((s) => s.index).join(','),
@@ -129,7 +129,9 @@ async function confirmExecute() {
         :disabled="locked"
         role="checkbox"
         @click="toggleAll"
-      />
+      >
+        <span class="plan-box-mark" aria-hidden="true" />
+      </button>
       <span class="plan-kicker">{{ t('plan.title') }}</span>
       <span class="plan-count">{{ t('plan.count', { n: steps.length }) }}</span>
       <span v-if="locked" class="plan-locked-badge">{{ t('plan.executed') }}</span>
@@ -151,7 +153,9 @@ async function confirmExecute() {
             :disabled="locked"
             role="checkbox"
             @click.stop="toggleCheck(step.index)"
-          />
+          >
+            <span class="plan-box-mark" aria-hidden="true" />
+          </button>
           <button
             type="button"
             class="plan-main"
@@ -194,6 +198,8 @@ async function confirmExecute() {
   flex-direction: column;
   gap: 8px;
   margin: 2px 0 6px;
+  position: relative;
+  z-index: 0;
 }
 .plan-head {
   display: flex;
@@ -201,6 +207,8 @@ async function confirmExecute() {
   gap: 8px;
   min-height: 20px;
   padding: 0 2px;
+  position: relative;
+  z-index: 0;
 }
 .plan-kicker {
   font-size: 11px;
@@ -221,7 +229,7 @@ async function confirmExecute() {
   font-weight: 600;
   color: var(--text-muted);
 }
-/* CSS-only checkbox — no SVG, avoids half-clipped AppIcon paint bugs */
+/* In-flow checkbox mark — avoid absolute ::after, which can paint against .agent in web Chromium */
 .plan-box {
   box-sizing: border-box;
   width: 14px;
@@ -229,13 +237,26 @@ async function confirmExecute() {
   margin: 0;
   padding: 0;
   flex-shrink: 0;
+  align-self: center;
   border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, var(--border));
   border-radius: 3px;
   background: var(--panel-bg);
+  color: inherit;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  inset: auto;
+  isolation: isolate;
+  overflow: hidden;
+  transform: translateZ(0);
 }
 .plan-box:disabled {
   cursor: default;
@@ -251,26 +272,28 @@ async function confirmExecute() {
 .plan-box.partial {
   background: color-mix(in srgb, var(--primary) 12%, var(--panel-bg));
 }
-.plan-box.on::after {
-  content: '';
-  position: absolute;
-  left: 3.5px;
-  top: 0.5px;
+.plan-box-mark {
+  display: none;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+.plan-box.on .plan-box-mark {
+  display: block;
   width: 4px;
   height: 7px;
+  margin-top: -1px;
   border: solid #fff;
   border-width: 0 1.5px 1.5px 0;
   transform: rotate(45deg);
 }
-.plan-box.partial::after {
-  content: '';
-  position: absolute;
-  left: 2px;
-  top: 5px;
+.plan-box.partial .plan-box-mark {
+  display: block;
   width: 8px;
   height: 1.5px;
+  border: 0;
   border-radius: 1px;
   background: var(--primary);
+  transform: none;
 }
 .plan-list {
   list-style: none;

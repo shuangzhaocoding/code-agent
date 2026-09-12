@@ -147,6 +147,7 @@ ui:
   font_size: 13
   send_on_enter: true
   format_on_save: true
+  url_preview: app
 
 # Phase 2 — multi-process runtime (split = default)
 runtime:

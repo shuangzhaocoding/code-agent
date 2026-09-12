@@ -291,10 +291,7 @@ function createWindow(opts = {}) {
     if (!win.isDestroyed()) win.show()
   })
 
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  bindWindowNavigation(win)
 
   win.on('closed', () => {
     windows.delete(win)
@@ -304,6 +301,49 @@ function createWindow(opts = {}) {
     win.loadFile(splashPath(), { query: { theme: chromeTheme } })
   }
   return win
+}
+
+function canOpenExternal(url) {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' || parsed.protocol === 'mailto:'
+  } catch {
+    return false
+  }
+}
+
+function isAppShellUrl(url) {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol === 'file:') return true
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+    const hostOk = parsed.hostname === HOST || parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+    if (!hostOk) return false
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80')
+    return port === String(PORT)
+  } catch {
+    return false
+  }
+}
+
+function openExternalUrl(url) {
+  if (!canOpenExternal(url)) return Promise.resolve(false)
+  return shell.openExternal(url).then(
+    () => true,
+    () => false,
+  )
+}
+
+function bindWindowNavigation(win) {
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void openExternalUrl(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isAppShellUrl(url)) return
+    event.preventDefault()
+    void openExternalUrl(url)
+  })
 }
 
 function loadAppInto(win) {
@@ -658,6 +698,10 @@ if (!gotLock) {
     const next = typeof title === 'string' && title.trim() ? title.trim() : 'Code Agent'
     win.setTitle(next)
     return true
+  })
+  ipcMain.handle('desktop:open-external', async (_event, url) => {
+    if (typeof url !== 'string') return false
+    return openExternalUrl(url)
   })
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).

@@ -27,7 +27,7 @@ let lastRenderAt = 0
 /** Keep markdown while streaming; coalesce parse to ~1–2 frames. */
 const STREAM_RENDER_MS = 80
 
-const purifyOpts = { ADD_ATTR: ['target', 'data-path', 'data-line', 'data-ca-file'] }
+const purifyOpts = { ADD_ATTR: ['target', 'rel', 'data-path', 'data-line', 'data-ca-file'] }
 
 function toHtml(text: string) {
   if (!text.trim()) return ''

@@ -10,6 +10,7 @@ export type CodeAgentDesktop = {
   getTheme?: () => Promise<'light' | 'dark' | string>
   newWindow?: () => Promise<boolean>
   setTitle?: (title: string) => void | Promise<void>
+  openExternal?: (url: string) => Promise<boolean>
 }
 
 export const DESKTOP_TITLEBAR_HEIGHT = 38

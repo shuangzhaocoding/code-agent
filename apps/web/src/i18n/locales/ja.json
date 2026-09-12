@@ -108,6 +108,7 @@
     "searchFiles": "ファイル内検索",
     "save": "ファイルを保存",
     "formatDocument": "ドキュメントのフォーマット",
+    "runFile": "現在のスクリプトをターミナルで実行",
     "newChat": "新しいチャット",
     "newWindow": "新しいウィンドウ",
     "undoDelete": "削除したファイルを元に戻す",
@@ -127,6 +128,7 @@
     "editor": "エディター",
     "terminal": "ターミナル",
     "ports": "ポート",
+    "preview": "プレビュー",
     "git": "Git",
     "skills": "Skill",
     "plugins": "プラグイン",
@@ -273,7 +275,8 @@
         "theme": "テーマ",
         "font_size": "UI フォントサイズ",
         "send_on_enter": "Enter で送信",
-        "format_on_save": "保存時にフォーマット"
+        "format_on_save": "保存時にフォーマット",
+        "url_preview": "リンクの開き方"
       },
       "uploads": {
         "dir": "アップロードディレクトリ"
@@ -298,6 +301,10 @@
         "theme": {
           "dark": "ダーク",
           "light": "ライト"
+        },
+        "url_preview": {
+          "app": "アプリ内プレビュー",
+          "browser": "システムブラウザ"
         }
       }
     }
@@ -325,6 +332,7 @@
     "openEditor": "エディターを開く",
     "openTerminal": "ターミナルを開く",
     "openPorts": "ポートを開く",
+    "openPreview": "プレビューを開く",
     "openGit": "Git を開く",
     "openSkills": "Skill を開く",
     "openPlugins": "プラグインを開く",
@@ -336,7 +344,8 @@
     "popoutTrajectory": "軌跡パネルをポップアウト",
     "toggleTheme": "テーマ切替",
     "inlineEdit": "インライン編集",
-    "gotoDefinition": "定義へ移動"
+    "gotoDefinition": "定義へ移動",
+    "runFile": "現在のスクリプトを実行"
   },
   "confirm": {
     "confirm": "確認",
@@ -362,6 +371,13 @@
   },
   "file": {
     "openFailed": "ファイルを開けませんでした"
+  },
+  "preview": {
+    "empty": "チャットのリンクをクリックするか、アドレスバーに URL を入力してください",
+    "addressPlaceholder": "URL を入力して Enter",
+    "newTab": "新しいタブ",
+    "closeTab": "タブを閉じる",
+    "untitled": "新しいタブ"
   },
   "thinking": {
     "off": {
@@ -420,6 +436,12 @@
     "emptyHint": "コマンドパレットを開く",
     "loadingConversation": "会話を読み込み中…",
     "copied": "コピーしました",
+    "openInBrowser": "ブラウザで開く",
+    "urlPreviewTitle": "リンクプレビュー",
+    "urlPreviewBlocked": "このページは埋め込めません。ブラウザで開いてください。",
+    "urlPreviewHint": "一部のサイトはアプリ内プレビューを拒否します。空白ならブラウザで開いてください",
+    "urlLinkTitle": "アプリ内で開く · Shift+クリックでブラウザ",
+    "urlLinkTitleBrowser": "ブラウザで開く · Shift+クリックでプレビュー",
     "expandAll": "すべて展開",
     "collapse": "折りたたむ",
     "rollbackMenuTitle": "会話を巻き戻す",
@@ -792,6 +814,9 @@
     "nextFile": "次のファイル",
     "diffCount": "変更 {i}/{n}",
     "openFromSidebar": "サイドバーからファイルを開く",
+    "runFile": "実行",
+    "runFileHint": "ターミナルでこのファイルを実行 (F5)",
+    "runNotSupported": "このファイルは直接実行できません",
     "splitRight": "エディターを右に分割",
     "splitDown": "エディターを下に分割",
     "closeSplit": "分割を閉じる",
@@ -1012,7 +1037,17 @@
     "fitWindow": "ウィンドウに合わせる",
     "actualSize": "実際のサイズ",
     "prevImage": "前の画像",
-    "nextImage": "次の画像"
+    "nextImage": "次の画像",
+    "sqlite": "データベースを読み込み中…",
+    "sqliteEmpty": "テーブルまたはビューがありません",
+    "sqliteEmptyTable": "空のテーブル",
+    "sqliteTables": "テーブル",
+    "sqliteView": "ビュー",
+    "sqliteRows": "{from}–{to} / {total}",
+    "sqliteRowsUnknown": "{from}–{to}",
+    "sqliteNull": "NULL",
+    "sqliteBlob": "BLOB（{n}）",
+    "sqliteNoWorkspace": "ワークスペースが開かれていません"
   },
   "usage": {
     "title": "コンテキスト Token 使用量",

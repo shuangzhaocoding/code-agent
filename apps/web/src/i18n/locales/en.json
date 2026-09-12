@@ -108,6 +108,7 @@
     "searchFiles": "Search in files",
     "save": "Save file",
     "formatDocument": "Format document",
+    "runFile": "Run current script in terminal",
     "newChat": "New chat",
     "newWindow": "New window",
     "undoDelete": "Restore last deleted file",
@@ -127,6 +128,7 @@
     "editor": "Editor",
     "terminal": "Terminal",
     "ports": "Ports",
+    "preview": "Preview",
     "git": "Git",
     "skills": "Skills",
     "memory": "Memory",
@@ -290,7 +292,8 @@
         "theme": "Theme",
         "font_size": "UI font size",
         "send_on_enter": "Enter to send",
-        "format_on_save": "Format on save"
+        "format_on_save": "Format on save",
+        "url_preview": "Default link preview"
       },
       "uploads": {
         "dir": "Upload directory"
@@ -323,6 +326,10 @@
         "theme": {
           "dark": "Dark",
           "light": "Light"
+        },
+        "url_preview": {
+          "app": "In-app preview",
+          "browser": "System browser"
         }
       },
       "storage": {
@@ -364,6 +371,7 @@
     "openEditor": "Open editor",
     "openTerminal": "Open terminal",
     "openPorts": "Open ports",
+    "openPreview": "Open preview",
     "openGit": "Open Git",
     "openSkills": "Open Skills",
     "openPlugins": "Open plugins",
@@ -375,7 +383,8 @@
     "popoutTrajectory": "Pop out trajectory",
     "toggleTheme": "Toggle theme",
     "inlineEdit": "Inline edit",
-    "gotoDefinition": "Go to definition"
+    "gotoDefinition": "Go to definition",
+    "runFile": "Run current script"
   },
   "confirm": {
     "confirm": "Confirm",
@@ -401,6 +410,13 @@
   },
   "file": {
     "openFailed": "Failed to open file"
+  },
+  "preview": {
+    "empty": "Click a link in chat, or type a URL in the address bar",
+    "addressPlaceholder": "Enter a URL and press Enter",
+    "newTab": "New tab",
+    "closeTab": "Close tab",
+    "untitled": "New tab"
   },
   "thinking": {
     "off": {
@@ -459,6 +475,12 @@
     "emptyHint": "Open command palette",
     "loadingConversation": "Loading conversation…",
     "copied": "Copied",
+    "openInBrowser": "Open in browser",
+    "urlPreviewTitle": "Link preview",
+    "urlPreviewBlocked": "This page cannot be embedded. Open it in the browser instead.",
+    "urlPreviewHint": "Some sites block in-app preview; use the browser if the page is blank",
+    "urlLinkTitle": "Open in app · Shift+click for browser",
+    "urlLinkTitleBrowser": "Open in browser · Shift+click to preview",
     "expandAll": "Expand all",
     "collapse": "Collapse",
     "rollbackMenuTitle": "Rollback conversation",
@@ -848,6 +870,9 @@
     "acceptBlock": "Accept this change",
     "rejectBlock": "Reject this change",
     "openInTerminal": "Open folder in terminal",
+    "runFile": "Run",
+    "runFileHint": "Run this file in the terminal (F5)",
+    "runNotSupported": "This file type cannot be run directly",
     "commandPalette": "Command palette",
     "preview": "Preview",
     "source": "Source",
@@ -1148,7 +1173,17 @@
     "fitWindow": "Fit to window",
     "actualSize": "Actual size",
     "prevImage": "Previous image",
-    "nextImage": "Next image"
+    "nextImage": "Next image",
+    "sqlite": "Loading database…",
+    "sqliteEmpty": "No tables or views",
+    "sqliteEmptyTable": "Empty table",
+    "sqliteTables": "Tables",
+    "sqliteView": "view",
+    "sqliteRows": "{from}–{to} of {total}",
+    "sqliteRowsUnknown": "{from}–{to}",
+    "sqliteNull": "NULL",
+    "sqliteBlob": "BLOB ({n})",
+    "sqliteNoWorkspace": "No workspace open"
   },
   "usage": {
     "title": "Context token usage",

@@ -1,4 +1,6 @@
 /** Detect and open file paths mentioned in chat markdown. */
+import { t } from '@/i18n'
+import { safeExternalUrl, urlOpenMode } from '@/utils/openUrl'
 
 export type ChatFileRef = {
   /** Path to pass to the workspace file API / editor tab. */
@@ -170,6 +172,22 @@ function shouldSkipElement(el: Element): boolean {
   return tag === 'PRE' || tag === 'CODE' || tag === 'A' || tag === 'SCRIPT' || tag === 'STYLE'
 }
 
+function decorateExternalLinks(root: ParentNode) {
+  for (const a of [...root.querySelectorAll('a[href]')]) {
+    if (a.classList.contains('ca-file-link') || a.getAttribute('data-ca-file')) continue
+    const url = safeExternalUrl(a.getAttribute('href') || '')
+    if (!url) continue
+    a.setAttribute('href', url)
+    a.setAttribute('target', '_blank')
+    a.setAttribute('rel', 'noopener noreferrer')
+    a.classList.add('ca-ext-link')
+    a.setAttribute(
+      'title',
+      t(urlOpenMode() === 'browser' ? 'chat.urlLinkTitleBrowser' : 'chat.urlLinkTitle'),
+    )
+  }
+}
+
 /**
  * Wrap detectable file paths in sanitized markdown HTML as `.ca-file-link` anchors.
  */
@@ -211,6 +229,7 @@ export function linkifyFilePathsInHtml(html: string, workspaceRoot = ''): string
   }
   for (const textNode of texts) linkifyTextNode(textNode, workspaceRoot)
 
+  decorateExternalLinks(tpl.content)
   return tpl.innerHTML
 }
 

@@ -8,6 +8,7 @@ export type OpenFileKind =
   | 'docx'
   | 'xlsx'
   | 'pptx'
+  | 'sqlite'
   | 'binary'
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'])
@@ -18,6 +19,7 @@ const PDF_EXT = new Set(['pdf'])
 const DOCX_EXT = new Set(['docx'])
 const XLSX_EXT = new Set(['xlsx', 'xls'])
 const PPTX_EXT = new Set(['pptx'])
+const SQLITE_EXT = new Set(['sqlite', 'sqlite3', 'db', 'db3', 's3db', 'sl3'])
 
 /** Known text-ish extensions that should stay in Monaco even if binary sniffing would fail later. */
 const TEXT_EXT = new Set([
@@ -104,6 +106,7 @@ export function classifyOpenKind(path: string): OpenFileKind {
   if (DOCX_EXT.has(ext)) return 'docx'
   if (XLSX_EXT.has(ext)) return 'xlsx'
   if (PPTX_EXT.has(ext)) return 'pptx'
+  if (SQLITE_EXT.has(ext)) return 'sqlite'
   if (!ext || TEXT_EXT.has(ext)) return 'text'
   // Unknown extension: try text first via API; binary falls back in openPath on file.binary
   return 'text'

@@ -108,6 +108,7 @@
     "searchFiles": "In Dateien suchen",
     "save": "Datei speichern",
     "formatDocument": "Dokument formatieren",
+    "runFile": "Aktuelles Skript im Terminal ausführen",
     "newChat": "Neuer Chat",
     "newWindow": "Neues Fenster",
     "undoDelete": "Zuletzt gelöschte Datei wiederherstellen",
@@ -127,6 +128,7 @@
     "editor": "Editor",
     "terminal": "Terminal",
     "ports": "Ports",
+    "preview": "Vorschau",
     "git": "Git",
     "skills": "Skills",
     "plugins": "Plugins",
@@ -273,7 +275,8 @@
         "theme": "Design",
         "font_size": "UI-Schriftgröße",
         "send_on_enter": "Senden mit Enter",
-        "format_on_save": "Beim Speichern formatieren"
+        "format_on_save": "Beim Speichern formatieren",
+        "url_preview": "Linkvorschau"
       },
       "uploads": {
         "dir": "Upload-Verzeichnis"
@@ -298,6 +301,10 @@
         "theme": {
           "dark": "Dunkel",
           "light": "Hell"
+        },
+        "url_preview": {
+          "app": "In-App-Vorschau",
+          "browser": "Systembrowser"
         }
       }
     }
@@ -325,6 +332,7 @@
     "openEditor": "Editor öffnen",
     "openTerminal": "Terminal öffnen",
     "openPorts": "Ports öffnen",
+    "openPreview": "Vorschau öffnen",
     "openGit": "Git öffnen",
     "openSkills": "Skills öffnen",
     "openPlugins": "Plugins öffnen",
@@ -336,7 +344,8 @@
     "popoutTrajectory": "Verlauf lösen",
     "toggleTheme": "Design wechseln",
     "inlineEdit": "Inline-Bearbeitung",
-    "gotoDefinition": "Zur Definition"
+    "gotoDefinition": "Zur Definition",
+    "runFile": "Aktuelles Skript ausführen"
   },
   "confirm": {
     "confirm": "Bestätigen",
@@ -362,6 +371,13 @@
   },
   "file": {
     "openFailed": "Datei konnte nicht geöffnet werden"
+  },
+  "preview": {
+    "empty": "Klicke einen Link im Chat oder gib eine URL in die Adressleiste ein",
+    "addressPlaceholder": "URL eingeben und Enter drücken",
+    "newTab": "Neuer Tab",
+    "closeTab": "Tab schließen",
+    "untitled": "Neuer Tab"
   },
   "thinking": {
     "off": {
@@ -420,6 +436,12 @@
     "emptyHint": "Befehlspalette öffnen",
     "loadingConversation": "Unterhaltung wird geladen…",
     "copied": "Kopiert",
+    "openInBrowser": "Im Browser öffnen",
+    "urlPreviewTitle": "Linkvorschau",
+    "urlPreviewBlocked": "Diese Seite lässt sich nicht einbetten. Bitte im Browser öffnen.",
+    "urlPreviewHint": "Manche Seiten blockieren die Vorschau; bei leerer Anzeige den Browser nutzen",
+    "urlLinkTitle": "In der App öffnen · Umschalt+Klick für Browser",
+    "urlLinkTitleBrowser": "Im Browser öffnen · Umschalt+Klick für Vorschau",
     "expandAll": "Alles aufklappen",
     "collapse": "Einklappen",
     "rollbackMenuTitle": "Unterhaltung zurücksetzen",
@@ -793,6 +815,9 @@
     "nextFile": "Nächste Datei",
     "diffCount": "Änderung {i}/{n}",
     "openFromSidebar": "Datei in der Seitenleiste öffnen",
+    "runFile": "Ausführen",
+    "runFileHint": "Datei im Terminal ausführen (F5)",
+    "runNotSupported": "Dieser Dateityp kann nicht direkt ausgeführt werden",
     "splitRight": "Editor rechts teilen",
     "splitDown": "Editor unten teilen",
     "closeSplit": "Teilung schließen",
@@ -1013,7 +1038,17 @@
     "fitWindow": "An Fenster anpassen",
     "actualSize": "Originalgröße",
     "prevImage": "Vorheriges Bild",
-    "nextImage": "Nächstes Bild"
+    "nextImage": "Nächstes Bild",
+    "sqlite": "Datenbank wird gelesen…",
+    "sqliteEmpty": "Keine Tabellen oder Sichten",
+    "sqliteEmptyTable": "Leere Tabelle",
+    "sqliteTables": "Tabellen",
+    "sqliteView": "Sicht",
+    "sqliteRows": "{from}–{to} von {total}",
+    "sqliteRowsUnknown": "{from}–{to}",
+    "sqliteNull": "NULL",
+    "sqliteBlob": "BLOB ({n})",
+    "sqliteNoWorkspace": "Kein Arbeitsbereich geöffnet"
   },
   "usage": {
     "title": "Kontext-Token-Nutzung",

@@ -9,6 +9,7 @@ import PdfPreview from '@/preview/adapters/PdfPreview.vue'
 import DocxPreview from '@/preview/adapters/DocxPreview.vue'
 import XlsxPreview from '@/preview/adapters/XlsxPreview.vue'
 import PptxPreview from '@/preview/adapters/PptxPreview.vue'
+import SqlitePreview from '@/preview/adapters/SqlitePreview.vue'
 import BinaryFallback from '@/preview/adapters/BinaryFallback.vue'
 
 const adapters: PreviewAdapter[] = [
@@ -20,6 +21,7 @@ const adapters: PreviewAdapter[] = [
   { id: 'docx', component: DocxPreview },
   { id: 'xlsx', component: XlsxPreview },
   { id: 'pptx', component: PptxPreview },
+  { id: 'sqlite', component: SqlitePreview },
   { id: 'binary', component: BinaryFallback },
 ]
 

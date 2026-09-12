@@ -43,6 +43,7 @@ const icons: Record<string, string> = {
   agent: 'atom',
   terminal: 'terminal',
   ports: 'ports',
+  preview: 'globe',
   git: 'git',
   skills: 'book',
   plugins: 'puzzle',

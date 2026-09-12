@@ -9,7 +9,7 @@ import { api } from '@/api/http'
 import { currentTheme, type Theme } from '@/theme'
 import AppIcon from '@/components/AppIcon.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
-import { takeTerminalCwd } from '@/utils/terminalOpen'
+import { takeTerminalCwd, takeTerminalRun } from '@/utils/terminalOpen'
 import {
   TERMINAL_MENTION_PATH,
   terminalSelectionRange,
@@ -244,18 +244,83 @@ async function connectEntry(entry: TermEntry) {
   const socket = new WebSocket(`${proto}://${location.host}/api/terminals/${entry.id}/ws`)
   socket.binaryType = 'arraybuffer'
   entry.ws = socket
-  socket.onopen = () => {
-    entry.alive = true
-    if (entry.fit && entry.term) {
-      entry.fit.fit()
-      socket.send(JSON.stringify({ type: 'resize', cols: entry.term.cols, rows: entry.term.rows }))
+  const opened = new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('terminal timeout')), 8000)
+    socket.onopen = () => {
+      window.clearTimeout(timer)
+      entry.alive = true
+      if (entry.fit && entry.term) {
+        entry.fit.fit()
+        socket.send(JSON.stringify({ type: 'resize', cols: entry.term.cols, rows: entry.term.rows }))
+      }
+      resolve()
     }
-  }
+    socket.onerror = () => {
+      window.clearTimeout(timer)
+      reject(new Error('terminal socket error'))
+    }
+  })
   socket.onmessage = (ev) => {
     if (typeof ev.data === 'string') return
     entry.term?.write(new Uint8Array(ev.data as ArrayBuffer))
   }
   socket.onclose = () => { entry.alive = false }
+  try {
+    await opened
+  } catch {
+    entry.alive = false
+  }
+}
+
+function waitForSocket(entry: TermEntry, timeoutMs = 5000): Promise<void> {
+  if (entry.ws?.readyState === WebSocket.OPEN) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const started = Date.now()
+    const timer = window.setInterval(() => {
+      if (entry.ws?.readyState === WebSocket.OPEN) {
+        window.clearInterval(timer)
+        resolve()
+      } else if (Date.now() - started > timeoutMs) {
+        window.clearInterval(timer)
+        reject(new Error('terminal timeout'))
+      }
+    }, 30)
+  })
+}
+
+function sendTerminalInput(entry: TermEntry, data: string) {
+  if (entry.ws?.readyState !== WebSocket.OPEN) return false
+  entry.ws.send(JSON.stringify({ type: 'input', data }))
+  return true
+}
+
+function liveEntry(): TermEntry | null {
+  const active = activeEntry()
+  if (active?.alive && active.ws?.readyState === WebSocket.OPEN) return active
+  return tabs.find((row) => row.alive && row.ws?.readyState === WebSocket.OPEN) || null
+}
+
+async function runQueuedCommand() {
+  const queued = takeTerminalRun()
+  if (!queued?.command) return
+  let entry = liveEntry()
+  if (!entry) {
+    try {
+      await addTerminal(queued.cwd)
+    } catch {
+      return
+    }
+    entry = activeEntry()
+    if (!entry) return
+    try {
+      await waitForSocket(entry)
+    } catch {
+      return
+    }
+  }
+  activateTab(entry.id)
+  sendTerminalInput(entry, `${queued.command}\r`)
+  entry.term?.focus()
 }
 
 function activateTab(id: string) {
@@ -368,11 +433,17 @@ function onDragStart(e: MouseEvent) {
   window.addEventListener('mouseup', onUp)
 }
 
+function onTerminalRun() {
+  void runQueuedCommand()
+}
+
 onMounted(async () => {
   window.addEventListener('ca-theme', onTheme as EventListener)
   window.addEventListener('ca-terminal-cwd', flushQueuedTerminal)
   await loadExisting()
   await flushQueuedTerminal()
+  window.addEventListener('ca-terminal-run', onTerminalRun)
+  await runQueuedCommand()
 })
 
 watch(() => store.workspaceId, async () => {
@@ -390,6 +461,7 @@ watch(() => store.workspaceId, async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('ca-terminal-cwd', flushQueuedTerminal)
+  window.removeEventListener('ca-terminal-run', onTerminalRun)
   for (const entry of tabs) {
     entry.ws?.close()
     entry.observer?.disconnect()

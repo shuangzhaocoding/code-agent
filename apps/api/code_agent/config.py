@@ -357,6 +357,12 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "title": "保存时格式化",
             "default": True,
         },
+        "ui.url_preview": {
+            "type": "string",
+            "title": "默认预览方式",
+            "enum": ["app", "browser"],
+            "default": "app",
+        },
         "uploads.dir": {
             "type": "string",
             "title": "上传目录",

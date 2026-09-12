@@ -5,6 +5,7 @@ import AppIcon from '@/components/AppIcon.vue'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import { formatRelativeTime, isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
+import { isRunnableScript } from '@/utils/scriptRun'
 
 type PaletteItem = {
   id: string
@@ -54,6 +55,7 @@ const staticCommands = computed<PaletteItem[]>(() => [
   { id: 'explorer', title: t('commandPalette.openExplorer'), icon: 'folder', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'explorer', 'explorer', t('panels.explorer')) },
   { id: 'search', title: t('commandPalette.openSearch'), icon: 'search', group: t('commandPalette.groupPanel'), keywords: 'find replace grep', run: () => store.openSearch() },
   { id: 'editor', title: t('commandPalette.openEditor'), icon: 'file', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'editor', 'editor', t('panels.editor')) },
+  { id: 'preview', title: t('commandPalette.openPreview'), icon: 'globe', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'preview', 'preview', t('panels.preview')) },
   { id: 'terminal', title: t('commandPalette.openTerminal'), icon: 'terminal', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'terminal', 'terminal', t('panels.terminal')) },
   { id: 'ports', title: t('commandPalette.openPorts'), icon: 'ports', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'ports', 'ports', t('panels.ports')) },
   { id: 'git', title: t('commandPalette.openGit'), icon: 'git', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'git', 'git', t('panels.git')) },
@@ -86,6 +88,20 @@ const staticCommands = computed<PaletteItem[]>(() => [
       window.dispatchEvent(new Event('ca-goto-definition'))
     },
   },
+  ...(isRunnableScript(store.activePath)
+    ? [{
+        id: 'run-file',
+        title: t('commandPalette.runFile'),
+        icon: 'play',
+        group: t('commandPalette.groupEditor'),
+        keywords: 'run python node shell ruby perl execute f5 script',
+        run: () => {
+          emit('openPanel', 'editor', 'editor', t('panels.editor'))
+          window.dispatchEvent(new Event('ca-focus-editor'))
+          window.dispatchEvent(new Event('ca-run-file'))
+        },
+      }]
+    : []),
   { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
 ])
 

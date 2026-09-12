@@ -7,11 +7,13 @@ import type { Block } from '@/protocol/applyEvent'
 import { useAppStore } from '@/stores/app'
 import { detectAttachmentFileTypeFromMeta } from '@/utils/fileTypes'
 import { openImageLightbox } from '@/composables/useImageLightbox'
+import { linkifyFilePathsInHtml } from '@/utils/chatFileLinks'
 import SkillMentionChip from '@/components/SkillMentionChip.vue'
 
 const props = defineProps<{ block: Block }>()
 const store = useAppStore()
 const { t } = useI18n()
+const purifyOpts = { ADD_ATTR: ['target', 'rel', 'data-path', 'data-line', 'data-ca-file'] }
 
 type AttachmentFile = { name: string; url: string; size?: number; type?: string }
 
@@ -59,7 +61,11 @@ function inlineTextHtml(text: string) {
     .split('\n')
     .map((line) => {
       if (!line.trim()) return '<br>'
-      return DOMPurify.sanitize(marked.parseInline(line, { breaks: true }) as string)
+      const linked = linkifyFilePathsInHtml(
+        marked.parseInline(line, { breaks: true }) as string,
+        store.workspace?.root_path || '',
+      )
+      return DOMPurify.sanitize(linked, purifyOpts)
     })
     .join('<br>')
 }
@@ -95,7 +101,8 @@ const hasInlineMentions = computed(() => segments.value.some((s) => s.kind === '
 
 const plainHtml = computed(() => {
   const raw = props.block.text || ''
-  return DOMPurify.sanitize(marked.parse(raw, { breaks: true }) as string)
+  const linked = linkifyFilePathsInHtml(marked.parse(raw, { breaks: true }) as string, store.workspace?.root_path || '')
+  return DOMPurify.sanitize(linked, purifyOpts)
 })
 
 const files = computed<AttachmentFile[]>(() => {

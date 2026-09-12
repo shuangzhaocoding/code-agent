@@ -110,6 +110,17 @@
   background: color-mix(in srgb, var(--primary) 12%, var(--code-bg));
 }
 
+.markdown-body a.ca-ext-link {
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.markdown-inline a {
+  color: var(--primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .markdown-body hr {
   border: 0;
   border-top: var(--border-width) solid var(--border);

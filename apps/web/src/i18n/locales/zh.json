@@ -108,6 +108,7 @@
     "searchFiles": "在文件中搜索",
     "save": "保存文件",
     "formatDocument": "格式化文档",
+    "runFile": "在终端运行当前脚本",
     "newChat": "新建对话",
     "newWindow": "新建窗口",
     "undoDelete": "恢复刚删除的文件",
@@ -127,6 +128,7 @@
     "editor": "编辑器",
     "terminal": "终端",
     "ports": "端口",
+    "preview": "预览",
     "git": "Git",
     "skills": "Skill",
     "memory": "记忆",
@@ -290,7 +292,8 @@
         "theme": "主题",
         "font_size": "界面字号",
         "send_on_enter": "Enter 发送",
-        "format_on_save": "保存时格式化"
+        "format_on_save": "保存时格式化",
+        "url_preview": "默认预览方式"
       },
       "uploads": {
         "dir": "上传目录"
@@ -323,6 +326,10 @@
         "theme": {
           "dark": "深色",
           "light": "浅色"
+        },
+        "url_preview": {
+          "app": "应用内预览",
+          "browser": "系统浏览器"
         }
       },
       "storage": {
@@ -364,6 +371,7 @@
     "openEditor": "打开编辑器",
     "openTerminal": "打开终端",
     "openPorts": "打开端口",
+    "openPreview": "打开预览",
     "openGit": "打开 Git",
     "openSkills": "打开 Skill",
     "openPlugins": "打开插件",
@@ -375,7 +383,8 @@
     "popoutTrajectory": "弹出轨迹面板",
     "toggleTheme": "切换主题",
     "inlineEdit": "内联编辑",
-    "gotoDefinition": "转到定义"
+    "gotoDefinition": "转到定义",
+    "runFile": "运行当前脚本"
   },
   "confirm": {
     "confirm": "确认",
@@ -401,6 +410,13 @@
   },
   "file": {
     "openFailed": "打开文件失败"
+  },
+  "preview": {
+    "empty": "点击对话中的链接，或在地址栏输入网址",
+    "addressPlaceholder": "输入网址，回车打开",
+    "newTab": "新标签页",
+    "closeTab": "关闭标签页",
+    "untitled": "新标签页"
   },
   "thinking": {
     "off": {
@@ -459,6 +475,12 @@
     "emptyHint": "打开命令面板",
     "loadingConversation": "正在加载会话…",
     "copied": "已复制",
+    "openInBrowser": "在浏览器打开",
+    "urlPreviewTitle": "链接预览",
+    "urlPreviewBlocked": "该网页不允许内嵌预览，请改用浏览器打开。",
+    "urlPreviewHint": "部分网站无法内嵌显示，空白时可改用浏览器打开",
+    "urlLinkTitle": "应用内打开 · Shift+单击用浏览器打开",
+    "urlLinkTitleBrowser": "在浏览器打开 · Shift+单击应用内预览",
     "expandAll": "展开全部",
     "collapse": "收起",
     "rollbackMenuTitle": "回退对话",
@@ -850,6 +872,9 @@
     "acceptHunk": "接受此处",
     "rejectHunk": "拒绝此处",
     "openInTerminal": "在终端中打开所在目录",
+    "runFile": "运行",
+    "runFileHint": "在终端运行此文件 (F5)",
+    "runNotSupported": "当前文件不支持直接运行",
     "commandPalette": "命令面板",
     "preview": "预览",
     "source": "源码",
@@ -1148,7 +1173,17 @@
     "fitWindow": "适应窗口",
     "actualSize": "原始尺寸",
     "prevImage": "上一张",
-    "nextImage": "下一张"
+    "nextImage": "下一张",
+    "sqlite": "正在读取数据库…",
+    "sqliteEmpty": "没有表或视图",
+    "sqliteEmptyTable": "空表",
+    "sqliteTables": "表",
+    "sqliteView": "视图",
+    "sqliteRows": "{from}–{to} / {total}",
+    "sqliteRowsUnknown": "{from}–{to}",
+    "sqliteNull": "NULL",
+    "sqliteBlob": "BLOB（{n}）",
+    "sqliteNoWorkspace": "未打开工作区"
   },
   "usage": {
     "title": "上下文 Token 用量",

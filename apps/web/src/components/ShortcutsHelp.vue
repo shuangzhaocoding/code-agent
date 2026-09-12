@@ -15,6 +15,7 @@ const rows = computed(() => {
     { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.commandPaletteAlt') },
     { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.inlineEdit') },
     { keys: 'F12', label: t('shortcuts.gotoDefinition') },
+    { keys: 'F5', label: t('shortcuts.runFile') },
     { keys: isMacMod() ? '⌘P' : 'Ctrl+P', label: t('shortcuts.openFile') },
     { keys: isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F', label: t('shortcuts.searchFiles') },
     { keys: `${mod}S`, label: t('shortcuts.save') },
