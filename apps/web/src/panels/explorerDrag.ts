@@ -18,6 +18,8 @@ export type ExplorerDragApi = {
   dropFiles: (destDir: string, files: FileList | File[]) => Promise<void>
   /** Prefer this for OS drops so folder structure is preserved. */
   dropDataTransfer: (destDir: string, dt: DataTransfer | null | undefined) => Promise<void>
+  showItemTip: (item: FsItem, e: MouseEvent) => void
+  scheduleHideTip: () => void
 }
 
 export function isOsFileDrag(e: DragEvent) {

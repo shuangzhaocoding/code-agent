@@ -199,6 +199,7 @@
       "removeSummary": "确定移除「{name}」？不会删除磁盘上的文件。",
       "removeConfirm": "移除",
       "currentWorkspace": "当前工作空间",
+      "rootMissingBadge": "目录失效",
       "loading": "加载中…",
       "retry": "重试",
       "noSessions": "暂无会话",
@@ -670,7 +671,13 @@
     "copyAbsolutePath": "复制绝对路径",
     "copyFail": "复制失败",
     "cannotMoveIntoSelf": "不能移动到自身或其子目录中",
-    "moveFail": "移动失败"
+    "moveFail": "移动失败",
+    "kindFile": "文件",
+    "kindDir": "目录",
+    "tipRelativePath": "相对路径",
+    "tipAbsolutePath": "绝对路径",
+    "tipSize": "大小",
+    "tipModified": "修改时间"
   },
   "plan": {
     "title": "执行计划",

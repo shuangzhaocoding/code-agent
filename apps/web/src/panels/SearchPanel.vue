@@ -281,7 +281,7 @@ onUnmounted(() => window.clearTimeout(searchTimer))
       <span class="spacer" />
       <button
         type="button"
-        class="icon-btn icon-btn-ghost"
+        class="ghost-icon-btn"
         :class="{ active: viewMode === 'list' }"
         title="普通列表"
         @click="viewMode = 'list'"
@@ -290,17 +290,17 @@ onUnmounted(() => window.clearTimeout(searchTimer))
       </button>
       <button
         type="button"
-        class="icon-btn icon-btn-ghost"
+        class="ghost-icon-btn"
         :class="{ active: viewMode === 'tree' }"
         title="树形展示"
         @click="viewMode = 'tree'"
       >
         <AppIcon name="tree" :size="16" :stroke-width="1.75" />
       </button>
-      <button type="button" class="icon-btn icon-btn-ghost" title="刷新" :disabled="!searchingMode" @click="runSearch(query.trim())">
+      <button type="button" class="ghost-icon-btn" title="刷新" :disabled="!searchingMode" @click="runSearch(query.trim())">
         <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
-      <button type="button" class="icon-btn icon-btn-ghost" title="清除" @click="clearResults">
+      <button type="button" class="ghost-icon-btn" title="清除" @click="clearResults">
         <AppIcon name="close" :size="16" :stroke-width="1.75" />
       </button>
     </div>
@@ -317,14 +317,14 @@ onUnmounted(() => window.clearTimeout(searchTimer))
         />
         <button
           type="button"
-          class="icon-btn icon-btn-ghost search-toggle"
+          class="ghost-icon-btn search-toggle"
           :class="{ active: caseSensitive }"
           title="区分大小写"
           @click="caseSensitive = !caseSensitive"
         >Aa</button>
         <button
           type="button"
-          class="icon-btn icon-btn-ghost search-toggle"
+          class="ghost-icon-btn search-toggle"
           :class="{ active: showReplace }"
           :title="showReplace ? '收起替换' : '展开替换'"
           @click="showReplace = !showReplace"

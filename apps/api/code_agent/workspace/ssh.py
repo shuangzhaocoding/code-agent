@@ -127,6 +127,7 @@ class SshWorkspaceBackend:
             if mode:
                 is_dir = bool(statmod.S_ISDIR(mode))
                 size = int(getattr(attrs, "size", 0) or 0) if not is_dir else None
+                mtime_raw = getattr(attrs, "mtime", None)
             else:
                 # Fallback when server omits attrs in directory listing
                 try:
@@ -134,10 +135,15 @@ class SshWorkspaceBackend:
                     mode = int(getattr(st, "permissions", 0) or 0)
                     is_dir = bool(mode and statmod.S_ISDIR(mode))
                     size = int(getattr(st, "size", 0) or 0) if not is_dir else None
+                    mtime_raw = getattr(st, "mtime", None)
                 except Exception:
                     is_dir = False
                     size = None
-            items.append({"name": name_s, "path": rel_child, "is_dir": is_dir, "size": size})
+                    mtime_raw = None
+            mtime = int(mtime_raw) if mtime_raw is not None else None
+            items.append(
+                {"name": name_s, "path": rel_child, "is_dir": is_dir, "size": size, "mtime": mtime}
+            )
             if len(items) >= max_children:
                 break
         return items

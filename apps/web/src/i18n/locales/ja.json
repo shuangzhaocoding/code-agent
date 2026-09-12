@@ -197,6 +197,7 @@
       "removeSummary": "「{name}」を削除しますか？ディスク上のファイルは削除されません。",
       "removeConfirm": "削除",
       "currentWorkspace": "現在のワークスペース",
+      "rootMissingBadge": "欠落",
       "loading": "読み込み中…",
       "retry": "再試行",
       "noSessions": "セッションなし",
@@ -634,7 +635,13 @@
     "copyAbsolutePath": "絶対パスをコピー",
     "copyFail": "コピーに失敗しました",
     "cannotMoveIntoSelf": "自身またはそのサブディレクトリには移動できません",
-    "moveFail": "移動に失敗しました"
+    "moveFail": "移動に失敗しました",
+    "kindFile": "ファイル",
+    "kindDir": "フォルダー",
+    "tipRelativePath": "相対パス",
+    "tipAbsolutePath": "絶対パス",
+    "tipSize": "サイズ",
+    "tipModified": "更新日時"
   },
   "plan": {
     "title": "実行計画",

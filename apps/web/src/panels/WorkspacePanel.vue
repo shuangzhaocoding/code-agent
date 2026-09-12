@@ -688,6 +688,10 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                 <AppIcon class="ws-icon" name="folder" :size="14" :stroke-width="1.75" />
                 <span class="ws-copy">
                   <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
+                  <span
+                    v-if="ws.id === store.workspaceId && store.workspaceRootMissing"
+                    class="ws-missing-badge"
+                  >{{ t('workspace.panel.rootMissingBadge') }}</span>
                 </span>
               </button>
               <div class="ws-end">
@@ -1001,6 +1005,22 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   cursor: default;
 }
 
+.ws-missing-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent);
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
 .workspace-body {
   flex: 1;
   min-height: 0;
@@ -1110,15 +1130,26 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .host-tool {
+  box-sizing: border-box;
   width: 22px;
   height: 22px;
+  min-width: 22px;
+  padding: 0;
+  margin: 0;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  flex-shrink: 0;
   cursor: pointer;
+}
+
+.host-tool :deep(.app-icon) {
+  display: block;
 }
 
 .host-tool:hover {
@@ -1315,6 +1346,9 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 .ws-copy {
   min-width: 0;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 0;
 }
 
 .ws-name {
@@ -1325,6 +1359,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   font-size: 12px;
   font-weight: 600;
   line-height: 17px;
+  min-width: 0;
 }
 
 .ws-dot {

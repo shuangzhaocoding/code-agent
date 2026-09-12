@@ -109,7 +109,7 @@ async function copyHash() {
       <span class="spacer" />
       <button
         type="button"
-        class="icon-btn icon-btn-ghost"
+        class="ghost-icon-btn"
         :class="{ active: viewMode === 'list' }"
         title="普通列表"
         @click="viewMode = 'list'"
@@ -118,7 +118,7 @@ async function copyHash() {
       </button>
       <button
         type="button"
-        class="icon-btn icon-btn-ghost"
+        class="ghost-icon-btn"
         :class="{ active: viewMode === 'tree' }"
         title="树形展示"
         @click="viewMode = 'tree'"

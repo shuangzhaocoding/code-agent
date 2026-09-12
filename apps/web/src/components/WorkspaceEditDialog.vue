@@ -152,8 +152,8 @@ async function save() {
         <p v-if="error" class="err">{{ error }}</p>
 
         <footer class="actions">
-          <button type="button" class="btn ghost" :disabled="saving" @click="emit('close')">取消</button>
-          <button type="button" class="btn primary" :disabled="saving" @click="save">
+          <button type="button" class="btn btn-ghost" :disabled="saving" @click="emit('close')">取消</button>
+          <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
             {{ saving ? '保存中…' : '保存' }}
           </button>
         </footer>

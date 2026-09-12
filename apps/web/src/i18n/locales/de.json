@@ -197,6 +197,7 @@
       "removeSummary": "„{name}“ entfernen? Dateien auf dem Datenträger bleiben erhalten.",
       "removeConfirm": "Entfernen",
       "currentWorkspace": "Aktueller Arbeitsbereich",
+      "rootMissingBadge": "Fehlt",
       "loading": "Laden…",
       "retry": "Erneut",
       "noSessions": "Keine Sitzungen",
@@ -635,7 +636,13 @@
     "copyAbsolutePath": "Absoluten Pfad kopieren",
     "copyFail": "Kopieren fehlgeschlagen",
     "cannotMoveIntoSelf": "Kann nicht in sich selbst oder ein Unterverzeichnis verschoben werden",
-    "moveFail": "Verschieben fehlgeschlagen"
+    "moveFail": "Verschieben fehlgeschlagen",
+    "kindFile": "Datei",
+    "kindDir": "Ordner",
+    "tipRelativePath": "Relativ",
+    "tipAbsolutePath": "Absolut",
+    "tipSize": "Größe",
+    "tipModified": "Geändert"
   },
   "plan": {
     "title": "Ausführungsplan",

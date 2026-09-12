@@ -452,7 +452,7 @@ function openCommit(row: GitCommit) {
       <template v-if="tab === 'changes'">
         <button
           type="button"
-          class="icon-btn icon-btn-ghost"
+          class="ghost-icon-btn"
           :class="{ active: viewMode === 'list' }"
           title="普通列表"
           @click="viewMode = 'list'"
@@ -461,7 +461,7 @@ function openCommit(row: GitCommit) {
         </button>
         <button
           type="button"
-          class="icon-btn icon-btn-ghost"
+          class="ghost-icon-btn"
           :class="{ active: viewMode === 'tree' }"
           title="树形展示"
           @click="viewMode = 'tree'"
@@ -469,7 +469,7 @@ function openCommit(row: GitCommit) {
           <AppIcon name="tree" :size="16" :stroke-width="1.75" />
         </button>
       </template>
-      <button type="button" class="icon-btn icon-btn-ghost" title="刷新" @click="refresh(true)">
+      <button type="button" class="ghost-icon-btn" title="刷新" @click="refresh(true)">
         <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
     </div>

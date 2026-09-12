@@ -714,7 +714,7 @@ function capabilityTags(m: LlmModel) {
               <div class="card-actions inline">
                 <button
                   type="button"
-                  class="icon-btn icon-btn-ghost"
+                  class="ghost-icon-btn"
                   title="同步模型"
                   :disabled="syncingId === p.id"
                   @click="syncModels(p.id)"
@@ -723,7 +723,7 @@ function capabilityTags(m: LlmModel) {
                 </button>
                 <button
                   type="button"
-                  class="icon-btn icon-btn-ghost"
+                  class="ghost-icon-btn"
                   :class="{ testing: testingId === p.id }"
                   title="测试连接"
                   :disabled="testingId === p.id"
@@ -731,10 +731,10 @@ function capabilityTags(m: LlmModel) {
                 >
                   <AppIcon name="zap" :size="16" />
                 </button>
-                <button type="button" class="icon-btn icon-btn-ghost" title="编辑" @click="startEditProvider(p)">
+                <button type="button" class="ghost-icon-btn" title="编辑" @click="startEditProvider(p)">
                   <AppIcon name="pencil" :size="16" />
                 </button>
-                <button type="button" class="icon-btn icon-btn-ghost danger" title="删除" @click="removeProvider(p)">
+                <button type="button" class="ghost-icon-btn danger" title="删除" @click="removeProvider(p)">
                   <AppIcon name="trash" :size="16" />
                 </button>
               </div>
@@ -751,7 +751,7 @@ function capabilityTags(m: LlmModel) {
               </template>
               <button
                 type="button"
-                class="icon-btn icon-btn-ghost"
+                class="ghost-icon-btn"
                 title="刷新余额"
                 :disabled="balances[p.id]?.loading"
                 @click="loadBalance(p.id, true)"
@@ -895,10 +895,10 @@ function capabilityTags(m: LlmModel) {
                     <span v-for="tag in capabilityTags(m)" :key="tag" class="cap-tag">{{ tag }}</span>
                   </div>
                   <div class="model-actions">
-                    <button type="button" class="icon-btn icon-btn-ghost" title="编辑" @click="startEditModel(m)">
+                    <button type="button" class="ghost-icon-btn" title="编辑" @click="startEditModel(m)">
                       <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
                     </button>
-                    <button type="button" class="icon-btn icon-btn-ghost danger" title="删除" @click="removeModel(m, p.name)">
+                    <button type="button" class="ghost-icon-btn danger" title="删除" @click="removeModel(m, p.name)">
                       <AppIcon name="trash" :size="16" :stroke-width="1.75" />
                     </button>
                   </div>

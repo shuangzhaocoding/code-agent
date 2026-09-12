@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, provide, ref, watch } from 
 import { useI18n } from 'vue-i18n'
 import { useAppStore, type FsItem } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
+import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 import {
@@ -46,6 +47,7 @@ function resolveDestDir(item: FsItem) {
 }
 
 function beginDrag(item: FsItem) {
+  clearItemTip()
   dragSrc.value = { path: item.path, is_dir: item.is_dir }
   dropHoverPath.value = null
   dropDestDir = null
@@ -128,7 +130,143 @@ provide(explorerDragKey, {
   dropTo,
   dropFiles,
   dropDataTransfer,
+  showItemTip,
+  scheduleHideTip,
 })
+
+const tipEl = ref<HTMLElement | null>(null)
+const hoverItem = ref<FsItem | null>(null)
+const hoverReady = ref(false)
+const tipStyle = ref<Record<string, string>>({})
+let hoverHideTimer = 0
+let tipShowTimer = 0
+let tipRaf = 0
+
+function clearHoverHide() {
+  if (hoverHideTimer) {
+    clearTimeout(hoverHideTimer)
+    hoverHideTimer = 0
+  }
+}
+
+function clearTipShow() {
+  if (tipShowTimer) {
+    clearTimeout(tipShowTimer)
+    tipShowTimer = 0
+  }
+}
+
+function clearItemTip() {
+  clearHoverHide()
+  clearTipShow()
+  if (tipRaf) {
+    cancelAnimationFrame(tipRaf)
+    tipRaf = 0
+  }
+  hoverItem.value = null
+  hoverReady.value = false
+}
+
+function placeTip(anchor: DOMRect) {
+  const el = tipEl.value
+  const width = el?.offsetWidth || 300
+  const height = el?.offsetHeight || 140
+  const gap = 10
+  const margin = 8
+  let left = anchor.right + gap
+  if (left + width > window.innerWidth - margin) {
+    left = Math.max(margin, anchor.left - width - gap)
+  }
+  let top = anchor.top
+  if (top + height > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - height - margin)
+  }
+  tipStyle.value = {
+    position: 'fixed',
+    left: `${left}px`,
+    top: `${top}px`,
+    zIndex: '13000',
+  }
+  hoverReady.value = true
+}
+
+function scheduleTipPlace(anchor: DOMRect, stillValid: () => boolean) {
+  hoverReady.value = false
+  void nextTick(() => {
+    if (tipRaf) cancelAnimationFrame(tipRaf)
+    tipRaf = requestAnimationFrame(() => {
+      tipRaf = 0
+      if (!stillValid()) return
+      placeTip(anchor)
+    })
+  })
+}
+
+function showItemTip(item: FsItem, e: MouseEvent) {
+  if (menu.value || dragSrc.value) {
+    clearItemTip()
+    return
+  }
+  clearHoverHide()
+  clearTipShow()
+  const row = (e.currentTarget as HTMLElement | null) || null
+  const anchor = row?.getBoundingClientRect()
+  if (!anchor) return
+  tipShowTimer = window.setTimeout(() => {
+    tipShowTimer = 0
+    if (menu.value || dragSrc.value) return
+    hoverItem.value = item
+    scheduleTipPlace(anchor, () => hoverItem.value?.path === item.path)
+  }, 260)
+}
+
+function scheduleHideTip() {
+  clearTipShow()
+  clearHoverHide()
+  hoverHideTimer = window.setTimeout(() => {
+    clearItemTip()
+    hoverHideTimer = 0
+  }, 120)
+}
+
+function keepTip() {
+  clearHoverHide()
+  clearTipShow()
+}
+
+function formatFileSize(bytes: number | null | undefined) {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return null
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB', 'TB']
+  let n = bytes / 1024
+  let i = 0
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024
+    i += 1
+  }
+  return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${units[i]}`
+}
+
+function formatItemMtime(mtime: number | null | undefined) {
+  if (mtime == null || !Number.isFinite(mtime) || mtime <= 0) return null
+  try {
+    return new Date(mtime * 1000).toLocaleString()
+  } catch {
+    return null
+  }
+}
+
+const tipAbsPath = computed(() => {
+  const item = hoverItem.value
+  if (!item) return ''
+  return toAbsolutePath(item.path)
+})
+const tipSizeLabel = computed(() =>
+  hoverItem.value && !hoverItem.value.is_dir ? formatFileSize(hoverItem.value.size) : null,
+)
+const tipMtimeLabel = computed(() =>
+  hoverItem.value ? formatItemMtime(hoverItem.value.mtime) : null,
+)
 
 function onTreeDragOver(e: DragEvent) {
   const types = e.dataTransfer?.types
@@ -217,6 +355,7 @@ function closeMenu() {
 function onContext(e: MouseEvent, item: FsItem | null) {
   e.preventDefault()
   e.stopPropagation()
+  clearItemTip()
   selectedItem.value = item
   menuPos.value = { left: e.clientX, top: e.clientY }
   menu.value = { x: e.clientX, y: e.clientY, item }
@@ -570,6 +709,7 @@ onUnmounted(() => {
   window.removeEventListener('ca-reveal-in-tree', onRevealInTree as EventListener)
   window.removeEventListener('resize', placeMenu)
   if (scrollTimer) clearTimeout(scrollTimer)
+  clearItemTip()
 })
 </script>
 
@@ -578,19 +718,19 @@ onUnmounted(() => {
     <div class="explorer-bar">
       <span class="explorer-title" :title="workspaceTitle">{{ workspaceTitle }}</span>
       <div class="explorer-actions">
-        <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newFile')" @click.stop="startCreate('file')">
+        <button type="button" class="ghost-icon-btn" :title="t('explorer.newFile')" @click.stop="startCreate('file')">
           <AppIcon name="file-plus" :size="14" :stroke-width="1.75" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" :title="t('explorer.newDir')" @click.stop="startCreate('dir')">
+        <button type="button" class="ghost-icon-btn" :title="t('explorer.newDir')" @click.stop="startCreate('dir')">
           <AppIcon name="folder-plus" :size="14" :stroke-width="1.75" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" @click.stop="store.refreshTree()">
+        <button type="button" class="ghost-icon-btn" :title="t('common.refresh')" @click.stop="store.refreshTree()">
           <AppIcon name="refresh" :size="14" :stroke-width="1.75" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.collapseAll')" @click.stop="store.collapseAllDirs()">
+        <button type="button" class="ghost-icon-btn" :title="t('common.collapseAll')" @click.stop="store.collapseAllDirs()">
           <AppIcon name="collapse-all" :size="14" :stroke-width="1.75" />
         </button>
-        <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.expandAll')" @click.stop="store.expandAllDirs()">
+        <button type="button" class="ghost-icon-btn" :title="t('common.expandAll')" @click.stop="store.expandAllDirs()">
           <AppIcon name="expand-all" :size="14" :stroke-width="1.75" />
         </button>
       </div>
@@ -614,6 +754,7 @@ onUnmounted(() => {
       }"
       @dragover="onTreeDragOver"
       @drop="onTreeDrop"
+      @scroll.passive="clearItemTip"
     >
       <ExplorerCreateRow
         v-if="creating && creating.dir === ''"
@@ -771,6 +912,50 @@ onUnmounted(() => {
       aria-hidden="true"
       @change="onUploadInputChange"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="hoverItem"
+        ref="tipEl"
+        class="ex-tip"
+        :class="{ ready: hoverReady }"
+        :style="tipStyle"
+        role="tooltip"
+        @mouseenter="keepTip"
+        @mouseleave="scheduleHideTip"
+      >
+        <div class="ex-tip-head">
+          <FileTreeIcon
+            class="ex-tip-icon"
+            :kind="hoverItem.is_dir ? 'dir' : 'file'"
+            :path="hoverItem.path"
+            :size="16"
+          />
+          <div class="ex-tip-titles">
+            <strong>{{ hoverItem.name }}</strong>
+            <span class="ex-tip-badge">{{ hoverItem.is_dir ? t('explorer.kindDir') : t('explorer.kindFile') }}</span>
+          </div>
+        </div>
+        <dl class="ex-tip-meta">
+          <div>
+            <dt>{{ t('explorer.tipRelativePath') }}</dt>
+            <dd class="mono" :title="hoverItem.path">{{ hoverItem.path || '.' }}</dd>
+          </div>
+          <div v-if="tipAbsPath">
+            <dt>{{ t('explorer.tipAbsolutePath') }}</dt>
+            <dd class="mono" :title="tipAbsPath">{{ tipAbsPath }}</dd>
+          </div>
+          <div v-if="tipSizeLabel">
+            <dt>{{ t('explorer.tipSize') }}</dt>
+            <dd>{{ tipSizeLabel }}</dd>
+          </div>
+          <div v-if="tipMtimeLabel">
+            <dt>{{ t('explorer.tipModified') }}</dt>
+            <dd>{{ tipMtimeLabel }}</dd>
+          </div>
+        </dl>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -913,4 +1098,89 @@ onUnmounted(() => {
 .ctx button:hover .ctx-ico { color: var(--text-h); }
 .ctx button.danger { color: var(--danger); }
 .ctx button.danger .ctx-ico { color: var(--danger); }
+</style>
+
+<style scoped>
+.ex-tip {
+  width: min(320px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: var(--dropdown-shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.ex-tip.ready {
+  opacity: 1;
+  pointer-events: auto;
+}
+html[data-theme='dark'] .ex-tip {
+  box-shadow: var(--dropdown-shadow-dark);
+}
+.ex-tip-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.ex-tip-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.ex-tip-titles {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ex-tip-titles strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+.ex-tip-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+.ex-tip-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+.ex-tip-meta > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+.ex-tip-meta dt {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.ex-tip-meta dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.4;
+  word-break: break-all;
+}
+.ex-tip-meta dd.mono {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11px;
+}
 </style>

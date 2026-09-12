@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWorkspaceBrowse } from '@/composables/useWorkspaceBrowse'
 import { useSshWorkspaceBrowse } from '@/composables/useSshWorkspaceBrowse'
@@ -33,6 +33,32 @@ const local = reactive(useWorkspaceBrowse())
 const ssh = reactive(useSshWorkspaceBrowse())
 const showAuthOverride = ref(false)
 
+function localBrowseStart(): string {
+  const ws = store.workspace
+  if (!ws?.root_path) return '~'
+  // SSH root_path is remote — never use it for local browse.
+  if (String(ws.kind || 'local').toLowerCase() === 'ssh') return '~'
+  return ws.root_path
+}
+
+async function ensureLocalBrowse() {
+  const start = localBrowseStart()
+  try {
+    await local.browse(start)
+  } catch (err) {
+    if (start !== '~') {
+      try {
+        await local.browse('~')
+        return
+      } catch (err2) {
+        local.error = local.errMessage(err2)
+        return
+      }
+    }
+    local.error = local.errMessage(err)
+  }
+}
+
 onMounted(async () => {
   if (props.prefill?.mode === 'ssh') {
     mode.value = 'ssh'
@@ -50,8 +76,12 @@ onMounted(async () => {
     }
   } else {
     mode.value = props.prefill?.mode || 'local'
-    await local.browse(store.workspace?.root_path || '~')
+    await ensureLocalBrowse()
   }
+})
+
+watch(mode, (next) => {
+  if (next === 'local' && !local.path) void ensureLocalBrowse()
 })
 
 async function openLocal() {

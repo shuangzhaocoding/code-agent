@@ -194,7 +194,7 @@ onMounted(() => void load())
             </div>
             <button
               type="button"
-              class="card-delete-btn icon-btn icon-btn-ghost danger"
+              class="card-delete-btn ghost-icon-btn danger"
               :title="t('common.delete')"
               :disabled="deletingId === row.id"
               @click="remove(row)"

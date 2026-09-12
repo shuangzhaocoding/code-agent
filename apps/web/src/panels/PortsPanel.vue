@@ -148,7 +148,7 @@ function onToggleAuto() {
         <input type="checkbox" :checked="autoRefresh" @change="onToggleAuto" />
         {{ t('ports.autoRefresh') }}
       </label>
-      <button type="button" class="icon-btn icon-btn-ghost" :title="t('common.refresh')" :disabled="loading" @click="refresh">
+      <button type="button" class="ghost-icon-btn" :title="t('common.refresh')" :disabled="loading" @click="refresh">
         <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
       </button>
     </div>
@@ -188,15 +188,15 @@ function onToggleAuto() {
             <span class="addr">{{ item.address }} · {{ item.connect_host || '127.0.0.1' }} · pid {{ item.pid ?? '—' }}</span>
           </span>
           <span class="actions" @click.stop>
-            <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.openProxy')" @click="openExternal(item)">
+            <button type="button" class="ghost-icon-btn" :title="t('ports.openProxy')" @click="openExternal(item)">
               <AppIcon name="globe" :size="16" :stroke-width="1.75" />
             </button>
-            <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.copyLocal', { url: item.url })" @click="copyUrl(item)">
+            <button type="button" class="ghost-icon-btn" :title="t('ports.copyLocal', { url: item.url })" @click="copyUrl(item)">
               <AppIcon name="file" :size="16" :stroke-width="1.75" />
             </button>
             <button
               type="button"
-              class="icon-btn icon-btn-ghost"
+              class="ghost-icon-btn"
               :title="t('ports.preview')"
               :disabled="item.self"
               @click="openPreview(item)"
@@ -205,7 +205,7 @@ function onToggleAuto() {
             </button>
             <button
               type="button"
-              class="icon-btn icon-btn-ghost danger"
+              class="ghost-icon-btn danger"
               :title="t('ports.kill')"
               :disabled="item.self || !item.pid || killing === item.port"
               @click="killPort(item)"
@@ -223,7 +223,7 @@ function onToggleAuto() {
           <span class="hint">{{ t('ports.previewHint') }}</span>
           <span class="spacer" />
           <a class="link" :href="previewUrl" target="_blank" rel="noopener">{{ t('ports.openTab') }}</a>
-          <button type="button" class="icon-btn icon-btn-ghost" :title="t('ports.closePreview')" @click="closePreview">×</button>
+          <button type="button" class="ghost-icon-btn" :title="t('ports.closePreview')" @click="closePreview">×</button>
         </div>
         <iframe class="frame" :src="previewUrl" title="Port preview" />
       </div>

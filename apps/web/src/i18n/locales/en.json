@@ -199,6 +199,7 @@
       "removeSummary": "Remove “{name}”? Files on disk will not be deleted.",
       "removeConfirm": "Remove",
       "currentWorkspace": "Current workspace",
+      "rootMissingBadge": "Missing",
       "loading": "Loading…",
       "retry": "Retry",
       "noSessions": "No sessions",
@@ -670,7 +671,13 @@
     "copyAbsolutePath": "Copy absolute path",
     "copyFail": "Failed to copy",
     "cannotMoveIntoSelf": "Cannot move into itself or a subdirectory",
-    "moveFail": "Failed to move"
+    "moveFail": "Failed to move",
+    "kindFile": "File",
+    "kindDir": "Folder",
+    "tipRelativePath": "Relative",
+    "tipAbsolutePath": "Absolute",
+    "tipSize": "Size",
+    "tipModified": "Modified"
   },
   "plan": {
     "title": "Execution plan",

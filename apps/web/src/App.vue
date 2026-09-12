@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import WorkspacePicker from '@/components/WorkspacePicker.vue'
 import Workbench from '@/layouts/Workbench.vue'
@@ -24,11 +24,23 @@ watch(
   { immediate: true },
 )
 
+function onVisibility() {
+  if (document.visibilityState === 'visible' && store.workspaceId) {
+    void store.refreshWorkspaceStatus()
+  }
+}
+
 onMounted(async () => {
+  document.addEventListener('visibilitychange', onVisibility)
   await store.loadWorkspaces()
   if (store.workspaceId) {
     await store.selectWorkspace(store.workspaceId, { openExplorer: false })
   }
+})
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibility)
+  store.stopWorkspaceStatusWatch()
 })
 </script>
 

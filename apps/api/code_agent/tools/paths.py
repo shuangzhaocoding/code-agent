@@ -115,12 +115,18 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
             rel_child = str(child)
         if matches_ignore(rel_child, ignores):
             continue
+        try:
+            st = child.stat()
+        except OSError:
+            continue
+        is_dir = child.is_dir()
         items.append(
             {
                 "name": child.name,
                 "path": rel_child,
-                "is_dir": child.is_dir(),
-                "size": child.stat().st_size if child.is_file() else None,
+                "is_dir": is_dir,
+                "size": None if is_dir else int(st.st_size),
+                "mtime": int(st.st_mtime),
             }
         )
         if len(items) >= max_children:

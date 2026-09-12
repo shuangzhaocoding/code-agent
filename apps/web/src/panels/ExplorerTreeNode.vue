@@ -164,6 +164,15 @@ function onDrop(e: DragEvent) {
   const dest = drag.resolveDestDir(props.item)
   void drag.dropTo(dest)
 }
+
+function onRowEnter(e: MouseEvent) {
+  if (isRenaming.value) return
+  drag?.showItemTip(props.item, e)
+}
+
+function onRowLeave() {
+  drag?.scheduleHideTip()
+}
 </script>
 
 <template>
@@ -187,6 +196,8 @@ function onDrop(e: DragEvent) {
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
+      @mouseenter="onRowEnter"
+      @mouseleave="onRowLeave"
     >
       <span class="twist" :class="{ on: item.is_dir && store.isExpanded(item.path), hidden: !item.is_dir }" />
       <FileTreeIcon

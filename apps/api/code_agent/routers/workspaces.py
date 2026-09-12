@@ -350,7 +350,16 @@ async def open_workspace(workspace_id: str):
     if workspace_is_ssh(row):
         await get_workspace_backend(row)
     plugins = await _activate_workspace_plugins(row)
-    return {**_ws(row), "plugins": plugins}
+    status = await _workspace_root_status(row)
+    return {**_ws(row), "plugins": plugins, **status}
+
+
+@router.get("/{workspace_id}/status")
+async def workspace_status(workspace_id: str):
+    """Lightweight probe: whether the workspace root still exists (local disk / SSH)."""
+    row = await _get_ws(workspace_id)
+    status = await _workspace_root_status(row)
+    return {**_ws(row), **status}
 
 
 @router.post("/{workspace_id}/plugins/reload")
@@ -990,6 +999,36 @@ async def _activate_workspace_plugins(row: Workspace) -> list[dict]:
 
     result = await activate_workspace_plugins_for(row)
     return result.get("plugins") or []
+
+
+def _local_root_ok(root_path: str) -> bool:
+    raw = (root_path or "").strip()
+    if not raw:
+        return False
+    try:
+        path = Path(raw).expanduser()
+        try:
+            path = path.resolve(strict=False)
+        except TypeError:
+            # Python < 3.9 compat — resolve() has no strict kw in very old builds.
+            path = path.resolve()
+        return path.is_dir()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+async def _workspace_root_status(row: Workspace) -> dict:
+    """Return root_ok / root_missing for local or SSH workspace roots."""
+    if workspace_is_ssh(row):
+        try:
+            backend = await get_workspace_backend(row)
+            ok = await backend.is_dir(".")
+            return {"root_ok": bool(ok), "root_missing": not bool(ok)}
+        except Exception:
+            return {"root_ok": False, "root_missing": True}
+
+    ok = await run_sync(_local_root_ok, row.root_path)
+    return {"root_ok": bool(ok), "root_missing": not bool(ok)}
 
 
 def _ws(row: Workspace) -> dict:

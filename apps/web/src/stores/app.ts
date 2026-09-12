@@ -27,6 +27,9 @@ export type Workspace = {
   display_path?: string | null
   created_at?: string | null
   last_opened_at?: string | null
+  /** Present after status/open probes — directory missing on disk/remote. */
+  root_missing?: boolean
+  root_ok?: boolean
 }
 export type Conversation = {
   id: string
@@ -41,7 +44,13 @@ export type Conversation = {
   updated_at?: string | null
 }
 
-export type FsItem = { name: string; path: string; is_dir: boolean }
+export type FsItem = {
+  name: string
+  path: string
+  is_dir: boolean
+  size?: number | null
+  mtime?: number | null
+}
 export type FileTreeMark = {
   show: boolean
   title: string
@@ -117,6 +126,11 @@ export const useAppStore = defineStore('app', () => {
   const conversations = ref<Conversation[]>([])
   const conversationId = ref<string | null>(null)
   const messages = ref<ChatMessage[]>([])
+  /** Current workspace root missing on disk / remote (from status poll). */
+  const workspaceRootMissing = ref(false)
+  let workspaceStatusTimer: ReturnType<typeof setInterval> | null = null
+  let workspaceStatusInFlight = false
+  const WORKSPACE_STATUS_MS = 10_000
   /** Non-null while switching conversation / workspace — shown as loading tip in Agent panel. */
   const switchLoading = ref<string | null>(null)
   let switchLoadGen = 0
@@ -245,6 +259,50 @@ export const useAppStore = defineStore('app', () => {
     }),
   )
 
+  function stopWorkspaceStatusWatch() {
+    if (workspaceStatusTimer) {
+      clearInterval(workspaceStatusTimer)
+      workspaceStatusTimer = null
+    }
+  }
+
+  function patchWorkspaceStatus(id: string, missing: boolean) {
+    workspaces.value = workspaces.value.map((w) =>
+      w.id === id ? { ...w, root_missing: missing, root_ok: !missing } : w,
+    )
+  }
+
+  async function refreshWorkspaceStatus() {
+    const id = workspaceId.value
+    if (!id) {
+      workspaceRootMissing.value = false
+      return
+    }
+    if (workspaceStatusInFlight) return
+    workspaceStatusInFlight = true
+    try {
+      const st = await api<Workspace & { root_missing?: boolean; root_ok?: boolean }>(
+        `/api/workspaces/${id}/status`,
+      )
+      if (workspaceId.value !== id) return
+      const missing = Boolean(st.root_missing ?? st.root_ok === false)
+      workspaceRootMissing.value = missing
+      patchWorkspaceStatus(id, missing)
+    } catch {
+      /* transient network — keep last known state */
+    } finally {
+      workspaceStatusInFlight = false
+    }
+  }
+
+  function startWorkspaceStatusWatch() {
+    stopWorkspaceStatusWatch()
+    void refreshWorkspaceStatus()
+    workspaceStatusTimer = setInterval(() => {
+      void refreshWorkspaceStatus()
+    }, WORKSPACE_STATUS_MS)
+  }
+
   async function loadWorkspaces() {
     workspaces.value = await api('/api/workspaces')
     if (workspaceId.value && !workspaces.value.some((w) => w.id === workspaceId.value)) {
@@ -319,6 +377,8 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function clearWorkspace() {
+    stopWorkspaceStatusWatch()
+    workspaceRootMissing.value = false
     detachRun()
     workspaceId.value = null
     localStorage.removeItem('ca.workspace')
@@ -434,9 +494,14 @@ export const useAppStore = defineStore('app', () => {
     const gen = ++switchLoadGen
     switchLoading.value = t('workspace.switching')
     try {
-      await api(`/api/workspaces/${id}/open`, { method: 'POST' })
+      const opened = await api<Workspace & { root_missing?: boolean; plugins?: unknown }>(
+        `/api/workspaces/${id}/open`,
+        { method: 'POST' },
+      )
       workspaceId.value = id
       localStorage.setItem('ca.workspace', id)
+      const missingOnOpen = Boolean(opened.root_missing)
+      workspaceRootMissing.value = missingOnOpen
       // Drop previous workspace chat immediately so the UI never keeps showing
       // remote/local messages from the workspace we just left.
       detachRun()
@@ -458,7 +523,16 @@ export const useAppStore = defineStore('app', () => {
       ackedTreeMarks.value = {}
       fsClipboard.value = null
       // Critical path first — git / editor restore are deferred so chat UI unlocks sooner.
-      await Promise.all([loadConversations(), loadTree(''), loadSkills(), loadProviders()])
+      await Promise.all([
+        loadConversations(),
+        loadTree('').catch(() => {
+          if (workspaceId.value !== id) return
+          fileTree.value = []
+          childrenMap.value = { ...childrenMap.value, '': [] }
+        }),
+        loadSkills(),
+        loadProviders(),
+      ])
       if (workspaceId.value !== id || gen !== switchLoadGen) return
       void loadGitChangedPaths()
       const expandTask = restoreExpandedDirs(savedExpanded)
@@ -481,7 +555,10 @@ export const useAppStore = defineStore('app', () => {
         persistEditorState()
       })
       if (opts?.openExplorer !== false) openExplorerPanel()
-      void loadWorkspaces()
+      void loadWorkspaces().then(() => {
+        patchWorkspaceStatus(id, missingOnOpen)
+      })
+      startWorkspaceStatusWatch()
     } finally {
       if (gen === switchLoadGen) switchLoading.value = null
     }
@@ -2501,6 +2578,10 @@ export const useAppStore = defineStore('app', () => {
     recentWorkspaces,
     workspaceId,
     workspace,
+    workspaceRootMissing,
+    refreshWorkspaceStatus,
+    startWorkspaceStatusWatch,
+    stopWorkspaceStatusWatch,
     conversations,
     conversationId,
     messages,
