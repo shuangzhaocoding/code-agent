@@ -251,6 +251,15 @@
       "storage": "存储"
     },
     "languageLead": "切换界面语言，立即生效。",
+    "logo": "应用图标",
+    "logoLead": "点选即可对比，立即应用到标题栏和标签页图标。",
+    "logos": {
+      "atom": "原子",
+      "ca": "CA",
+      "brackets": "括号",
+      "cursor": "光标",
+      "hex": "六边形"
+    },
     "uploads": {
       "hint": "填写 auto（默认，与 SQLite 同属数据目录下的 uploads）、相对路径或绝对路径。保存后立即生效，无需重启。桌面端可点选目录。",
       "resolved": "当前实际目录：{path}"

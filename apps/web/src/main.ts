@@ -3,6 +3,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { i18n } from '@/i18n'
 import { initTheme } from './theme'
+import { initBrandMark } from './utils/brandMark'
 import { initDesktopChrome } from './utils/desktop'
 import { installAppTooltip } from '@/utils/appTooltip'
 import 'dockview-vue/dist/styles/dockview.css'
@@ -12,6 +13,7 @@ import './styles/markdown.css'
 
 initDesktopChrome()
 initTheme()
+initBrandMark()
 
 const app = createApp(App)
 app.use(createPinia())

@@ -249,6 +249,15 @@
       "storage": "Speicher"
     },
     "languageLead": "Oberflächensprache wechseln. Wirkt sofort.",
+    "logo": "App-Symbol",
+    "logoLead": "Zum Vergleichen klicken. Wirkt sofort in Titelleiste und Tab-Symbol.",
+    "logos": {
+      "atom": "Atom",
+      "ca": "CA",
+      "brackets": "Klammern",
+      "cursor": "Cursor",
+      "hex": "Sechseck"
+    },
     "uploads": {
       "hint": "auto (Standard: uploads unter dem SQLite-Datenverzeichnis), relativer oder absoluter Pfad. Speichern wirkt sofort ohne Neustart. Desktop kann Ordner wählen.",
       "resolved": "Aktueller Pfad: {path}"

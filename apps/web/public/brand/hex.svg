@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" fill="none" viewBox="0 0 32 32">
+  <defs>
+    <linearGradient id="ca-hex-grad" x1="4" y1="2" x2="28" y2="30" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <path d="M16 2.2 28.1 9.2v13.6L16 29.8 3.9 22.8V9.2Z" fill="url(#ca-hex-grad)"/>
+  <circle cx="16" cy="16" r="3.1" fill="#fff" fill-opacity=".95"/>
+  <ellipse cx="16" cy="16" rx="8.6" ry="3.4" stroke="#fff" stroke-width="1.45" stroke-opacity=".92"/>
+  <ellipse cx="16" cy="16" rx="8.6" ry="3.4" stroke="#fff" stroke-width="1.45" stroke-opacity=".92" transform="rotate(70 16 16)"/>
+</svg>

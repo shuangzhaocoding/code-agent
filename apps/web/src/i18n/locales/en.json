@@ -251,6 +251,15 @@
       "storage": "Storage"
     },
     "languageLead": "Switch the UI language. Takes effect immediately.",
+    "logo": "App icon",
+    "logoLead": "Click to compare. Applies to the title bar and tab icon immediately.",
+    "logos": {
+      "atom": "Atom",
+      "ca": "CA",
+      "brackets": "Brackets",
+      "cursor": "Cursor",
+      "hex": "Hex"
+    },
     "uploads": {
       "hint": "Use auto (default: uploads under the SQLite data directory), a path relative to the data directory, or an absolute path. Saves take effect immediately—no restart. Desktop can browse for a folder.",
       "resolved": "Resolved path: {path}"

@@ -6,8 +6,10 @@ import AppIcon from '@/components/AppIcon.vue'
 import FormSelect from '@/components/FormSelect.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
 import LayoutControls from '@/components/LayoutControls.vue'
+import BrandMark from '@/components/BrandMark.vue'
 import { useToast } from '@/composables/useToast'
 import { useGitDiffTarget } from '@/composables/useGitDiffTarget'
+import { BRAND_MARKS, useBrandMark } from '@/utils/brandMark'
 
 type SchemaSpec = {
   title?: string
@@ -25,6 +27,7 @@ const { t, te } = useI18n()
 const store = useAppStore()
 const toast = useToast()
 const { diffTarget, setDiffTarget } = useGitDiffTarget()
+const { brandMark, setBrandMark } = useBrandMark()
 const local = reactive<Record<string, unknown>>({})
 const saved = ref(false)
 const saving = ref(false)
@@ -234,6 +237,28 @@ async function save() {
                 <p class="setting-key">{{ t('settings.languageLead') }}</p>
               </div>
               <LanguageSelect :show-label="false" />
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <label>{{ t('settings.logo') }}</label>
+                <p class="setting-key">{{ t('settings.logoLead') }}</p>
+              </div>
+              <div class="logo-pick" role="radiogroup" :aria-label="t('settings.logo')">
+                <button
+                  v-for="id in BRAND_MARKS"
+                  :key="id"
+                  type="button"
+                  class="logo-pick-btn"
+                  role="radio"
+                  :aria-checked="brandMark === id"
+                  :class="{ active: brandMark === id }"
+                  :title="t(`settings.logos.${id}`)"
+                  @click="setBrandMark(id)"
+                >
+                  <BrandMark :variant="id" :size="36" />
+                  <span>{{ t(`settings.logos.${id}`) }}</span>
+                </button>
+              </div>
             </div>
             <div class="setting-row">
               <div class="setting-copy">
@@ -516,6 +541,35 @@ async function save() {
   background: color-mix(in srgb, var(--primary) 6%, var(--panel-bg));
 }
 .choice-btn.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg));
+  color: var(--primary);
+  font-weight: 600;
+}
+.logo-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.logo-pick-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: 76px;
+  padding: 8px 6px 7px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.logo-pick-btn:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, var(--panel-bg));
+}
+.logo-pick-btn.active {
   border-color: var(--primary);
   background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg));
   color: var(--primary);
