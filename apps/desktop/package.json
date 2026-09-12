@@ -1,6 +1,6 @@
 {
   "name": "code-agent-desktop",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Code Agent Electron shell with embedded Python runtime",
   "homepage": "https://github.com/shuangzhaocoding/code-agent",
@@ -57,7 +57,10 @@
           "!**/.venv/**",
           "!**/*.egg-info/**",
           "!**/tests/**",
-          "!**/.pytest_cache/**"
+          "!**/.pytest_cache/**",
+          "!**/.env",
+          "!**/.env.*",
+          "!**/master.key"
         ]
       }
     ],
