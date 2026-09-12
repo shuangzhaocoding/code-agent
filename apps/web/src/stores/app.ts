@@ -893,10 +893,6 @@ export const useAppStore = defineStore('app', () => {
   const fsUndoStack = ref<FsUndoDelete[]>([])
   const canUndoFs = computed(() => fsUndoStack.value.length > 0)
 
-  function clearFsUndo() {
-    fsUndoStack.value = []
-  }
-
   function pushFsUndo(item: FsUndoDelete) {
     fsUndoStack.value = [...fsUndoStack.value, item].slice(-20)
   }
