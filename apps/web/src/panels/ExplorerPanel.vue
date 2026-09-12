@@ -496,7 +496,7 @@ async function onDelete() {
   })
   if (!ok) return
   try {
-    await store.deleteEntry(item.path)
+    await store.deleteEntry(item.path, item.is_dir)
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   }

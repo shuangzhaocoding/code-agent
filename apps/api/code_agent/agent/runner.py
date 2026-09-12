@@ -70,90 +70,96 @@ async def run_agent_graph(
             "kind": getattr(workspace, "kind", None) or "local",
         },
     )
-    tools = registry.enabled_tools(run.mode)
+    from code_agent.mcp.bridge import refresh_mcp_tools, shutdown_mcp_sessions
 
-    skill_name = (run.model_snapshot or {}).get("skill_name")
-    if not skill_name and latest_user:
-        skill_meta = (latest_user.blocks[0].get("meta") or {}).get("skill") if latest_user.blocks else None
-        if isinstance(skill_meta, dict):
-            skill_name = skill_meta.get("name")
-    skill_body = None
-    if skill_name:
-        from code_agent.skills.registry import ensure_skills_ready, load_skill_body
+    try:
+        await refresh_mcp_tools(workspace.root_path, persist_sessions=True)
+        tools = registry.enabled_tools(run.mode)
 
-        await ensure_skills_ready(workspace)
-        skill_body = load_skill_body(workspace, str(skill_name))
-        if skill_body:
-            block_id = new_id()
-            await broker.publish(
-                run_id,
-                "block.started",
-                {"block_id": block_id, "block_type": "skill.activated", "meta": {"name": skill_name}},
-            )
-            await broker.publish(run_id, "block.delta", {"block_id": block_id, "text": skill_body[:500]})
-            await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
+        skill_name = (run.model_snapshot or {}).get("skill_name")
+        if not skill_name and latest_user:
+            skill_meta = (latest_user.blocks[0].get("meta") or {}).get("skill") if latest_user.blocks else None
+            if isinstance(skill_meta, dict):
+                skill_name = skill_meta.get("name")
+        skill_body = None
+        if skill_name:
+            from code_agent.skills.registry import ensure_skills_ready, load_skill_body
 
-    thread = graph_thread_id(str(workspace.id), str(conv.id))
-    run.graph_thread_id = thread
-    await run.save(update_fields=["graph_thread_id"])
-
-    recursion_limit = int(settings.get("agent.max_steps") or 80)
-    stored_limit = await Setting.get_or_none(key="agent.max_steps")
-    if stored_limit is not None and stored_limit.value_json is not None:
-        try:
-            recursion_limit = int(stored_limit.value_json)
-        except (TypeError, ValueError):
-            pass
-
-    graph = build_agent_graph(tools)
-    input_state = {
-        "workspace_id": str(workspace.id),
-        "conversation_id": str(conv.id),
-        "run_id": run_id,
-        "mode": run.mode,
-        "thinking_level": thinking_level,
-        "messages": [],
-    }
-    config = {
-        "configurable": {
-            "thread_id": thread,
-            "model": model,
-            "tools": tools,
-            "vision": vision,
-            "need_vision": need_vision,
-            "skill_name": str(skill_name) if skill_name and skill_body else None,
-            "skill_body": skill_body,
-            "user_query": current_text,
-        },
-        "recursion_limit": max(1, recursion_limit),
-    }
-
-    await stream_graph_events(
-        run_id,
-        graph,
-        input_state,
-        config,
-        thinking_level=thinking_level,
-        cancel_event=cancel_event,
-    )
-
-    if cancel_event.is_set():
-        return
-
-    # Memory extraction is internal — run in background so run.completed is not delayed.
-    if settings.get("agent.memory.enabled", True):
-
-        async def _extract_bg() -> None:
-            from code_agent.agent.memory.extract import extract_workspace_memories
-
-            try:
-                await extract_workspace_memories(
-                    workspace_id=str(workspace.id),
-                    conversation_id=str(conv.id),
-                    run_id=run_id,
-                    model=model,
+            await ensure_skills_ready(workspace)
+            skill_body = load_skill_body(workspace, str(skill_name))
+            if skill_body:
+                block_id = new_id()
+                await broker.publish(
+                    run_id,
+                    "block.started",
+                    {"block_id": block_id, "block_type": "skill.activated", "meta": {"name": skill_name}},
                 )
-            except Exception:
+                await broker.publish(run_id, "block.delta", {"block_id": block_id, "text": skill_body[:500]})
+                await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
+
+        thread = graph_thread_id(str(workspace.id), str(conv.id))
+        run.graph_thread_id = thread
+        await run.save(update_fields=["graph_thread_id"])
+
+        recursion_limit = int(settings.get("agent.max_steps") or 80)
+        stored_limit = await Setting.get_or_none(key="agent.max_steps")
+        if stored_limit is not None and stored_limit.value_json is not None:
+            try:
+                recursion_limit = int(stored_limit.value_json)
+            except (TypeError, ValueError):
                 pass
 
-        asyncio.create_task(_extract_bg())
+        graph = build_agent_graph(tools)
+        input_state = {
+            "workspace_id": str(workspace.id),
+            "conversation_id": str(conv.id),
+            "run_id": run_id,
+            "mode": run.mode,
+            "thinking_level": thinking_level,
+            "messages": [],
+        }
+        config = {
+            "configurable": {
+                "thread_id": thread,
+                "model": model,
+                "tools": tools,
+                "vision": vision,
+                "need_vision": need_vision,
+                "skill_name": str(skill_name) if skill_name and skill_body else None,
+                "skill_body": skill_body,
+                "user_query": current_text,
+            },
+            "recursion_limit": max(1, recursion_limit),
+        }
+
+        await stream_graph_events(
+            run_id,
+            graph,
+            input_state,
+            config,
+            thinking_level=thinking_level,
+            cancel_event=cancel_event,
+        )
+
+        if cancel_event.is_set():
+            return
+
+        # Memory extraction is internal — run in background so run.completed is not delayed.
+        if settings.get("agent.memory.enabled", True):
+
+            async def _extract_bg() -> None:
+                from code_agent.agent.memory.extract import extract_workspace_memories
+
+                try:
+                    await extract_workspace_memories(
+                        workspace_id=str(workspace.id),
+                        conversation_id=str(conv.id),
+                        run_id=run_id,
+                        model=model,
+                    )
+                except Exception:
+                    pass
+
+            asyncio.create_task(_extract_bg())
+    finally:
+        await shutdown_mcp_sessions()

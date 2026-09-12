@@ -62,6 +62,30 @@ const staticCommands = computed<PaletteItem[]>(() => [
   { id: 'models', title: t('commandPalette.openModels'), icon: 'chip', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'models', 'models', t('panels.models')) },
   { id: 'settings', title: t('commandPalette.openSettings'), icon: 'sliders', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'settings', 'settings', t('panels.settings')) },
   { id: 'workspace', title: t('commandPalette.openWorkspace'), icon: 'home', group: t('commandPalette.groupPanel'), run: () => emit('openPanel', 'workspace', 'workspace', t('panels.workspace')) },
+  {
+    id: 'inline-edit',
+    title: t('commandPalette.inlineEdit'),
+    icon: 'sparkles',
+    group: t('commandPalette.groupEditor'),
+    keywords: 'inline edit cmd k ctrl k rewrite',
+    run: () => {
+      emit('openPanel', 'editor', 'editor', t('panels.editor'))
+      window.dispatchEvent(new Event('ca-focus-editor'))
+      window.dispatchEvent(new Event('ca-inline-edit'))
+    },
+  },
+  {
+    id: 'goto-definition',
+    title: t('commandPalette.gotoDefinition'),
+    icon: 'search',
+    group: t('commandPalette.groupEditor'),
+    keywords: 'go to definition f12 symbol jump',
+    run: () => {
+      emit('openPanel', 'editor', 'editor', t('panels.editor'))
+      window.dispatchEvent(new Event('ca-focus-editor'))
+      window.dispatchEvent(new Event('ca-goto-definition'))
+    },
+  },
   { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
 ])
 
@@ -226,7 +250,7 @@ function onWindowKey(e: KeyboardEvent) {
   if (!mod) return
   const key = e.key.toLowerCase()
   const inEditor = e.target instanceof Element && !!e.target.closest('.monaco-editor, .xterm, .xterm-helper-textarea')
-  // Ctrl/Cmd+Shift+P or Ctrl/Cmd+K → command palette
+  // Ctrl/Cmd+Shift+P always; Ctrl/Cmd+K outside the editor (editor uses Ctrl/Cmd+K for inline edit)
   const palette = (key === 'p' && e.shiftKey) || (key === 'k' && !e.shiftKey && !inEditor)
   if (!palette) return
   e.preventDefault()

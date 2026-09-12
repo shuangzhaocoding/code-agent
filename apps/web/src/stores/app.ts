@@ -7,6 +7,7 @@ import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
 import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
+import { draftCommitFromPaths } from '@/utils/gitCommitDraft'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
 import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/approvals'
 import { parseChatFileRef } from '@/utils/chatFileLinks'
@@ -39,7 +40,10 @@ export type Conversation = {
   active_run_id: string | null
   run_status?: string | null
   awaiting_approval?: boolean
+  archived?: boolean
   turn_count?: number
+  snippet?: string | null
+  match?: string | null
   created_at?: string | null
   updated_at?: string | null
 }
@@ -50,6 +54,7 @@ export type FsItem = {
   is_dir: boolean
   size?: number | null
   mtime?: number | null
+  ignored?: boolean
 }
 export type FileTreeMark = {
   show: boolean
@@ -65,6 +70,10 @@ export type OpenFile = {
   mime?: string
   dirty: boolean
   readonly?: boolean
+}
+export type GitEditorDiff = {
+  original: string
+  modifiedReadonly?: boolean
 }
 export type FileReview = {
   path: string
@@ -244,6 +253,8 @@ export const useAppStore = defineStore('app', () => {
   const pendingModelProbe = ref(false)
   const gitChangedPaths = ref<Record<string, GitPathMark>>({})
   const gitRepoOk = ref(false)
+  const gitCommitDraft = ref('')
+  const gitEditorDiff = ref<Record<string, GitEditorDiff>>({})
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
   let treeTimer: ReturnType<typeof setTimeout> | null = null
@@ -396,8 +407,12 @@ export const useAppStore = defineStore('app', () => {
     treePath.value = ''
     gitChangedPaths.value = {}
     gitRepoOk.value = false
+    gitCommitDraft.value = ''
+    gitEditorDiff.value = {}
     sessionTreeMarks.value = {}
     ackedTreeMarks.value = {}
+    fsClipboard.value = null
+    fsUndoStack.value = []
   }
 
   function conversationStorageKey(wsId: string) {
@@ -519,9 +534,12 @@ export const useAppStore = defineStore('app', () => {
       expanded.value = new Set()
       gitChangedPaths.value = {}
       gitRepoOk.value = false
+      gitCommitDraft.value = ''
+      gitEditorDiff.value = {}
       sessionTreeMarks.value = {}
       ackedTreeMarks.value = {}
       fsClipboard.value = null
+      fsUndoStack.value = []
       // Critical path first — git / editor restore are deferred so chat UI unlocks sooner.
       await Promise.all([
         loadConversations(),
@@ -866,6 +884,22 @@ export const useAppStore = defineStore('app', () => {
 
   type FsClipboard = { mode: 'copy' | 'cut'; path: string; is_dir: boolean; workspace_id: string }
   const fsClipboard = ref<FsClipboard | null>(null)
+  type FsUndoDelete = {
+    path: string
+    isDir: boolean
+    trashPath?: string
+    files?: { path: string; content: string }[]
+  }
+  const fsUndoStack = ref<FsUndoDelete[]>([])
+  const canUndoFs = computed(() => fsUndoStack.value.length > 0)
+
+  function clearFsUndo() {
+    fsUndoStack.value = []
+  }
+
+  function pushFsUndo(item: FsUndoDelete) {
+    fsUndoStack.value = [...fsUndoStack.value, item].slice(-20)
+  }
 
   function setFsClipboard(mode: 'copy' | 'cut', item: { path: string; is_dir: boolean }) {
     if (!workspaceId.value || !item.path) {
@@ -942,8 +976,35 @@ export const useAppStore = defineStore('app', () => {
     return dest
   }
 
-  async function deleteEntry(relPath: string) {
+  async function deleteEntry(relPath: string, isDir = false) {
     if (!workspaceId.value) return
+    const name = relPath.split('/').filter(Boolean).pop() || relPath
+    const trashPath = `.code-agent/data/trash/${crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}/${name}`
+    let undo: FsUndoDelete | null = null
+    try {
+      await api(`/api/workspaces/${workspaceId.value}/copy`, {
+        method: 'POST',
+        body: JSON.stringify({ path: relPath, new_path: trashPath }),
+      })
+      undo = { path: relPath, isDir, trashPath }
+    } catch {
+      if (!isDir) {
+        try {
+          const open = openFiles.value.find((f) => f.path === relPath)
+          const content =
+            open && typeof open.content === 'string'
+              ? open.content
+              : (
+                  await api<{ content: string }>(
+                    `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(relPath)}`,
+                  )
+                ).content
+          undo = { path: relPath, isDir: false, files: [{ path: relPath, content }] }
+        } catch {
+          undo = null
+        }
+      }
+    }
     await api(`/api/workspaces/${workspaceId.value}/entries?path=${encodeURIComponent(relPath)}`, {
       method: 'DELETE',
     })
@@ -965,6 +1026,54 @@ export const useAppStore = defineStore('app', () => {
     }
     sessionTreeMarks.value = session
     void loadGitChangedPaths()
+    if (undo) {
+      pushFsUndo(undo)
+      toast.info(t('explorer.deletedUndo', { path: relPath }), 6200)
+    }
+  }
+
+  async function undoFsDelete() {
+    const item = fsUndoStack.value.at(-1)
+    if (!item || !workspaceId.value) return
+    fsUndoStack.value = fsUndoStack.value.slice(0, -1)
+    const parent = parentPath(item.path)
+    await loadTree(parent)
+    let dest = item.path
+    const name = item.path.split('/').filter(Boolean).pop() || item.path
+    if (childrenOf(parent).some((entry) => entry.path === item.path)) {
+      dest = uniqueChildPath(parent, name)
+    }
+    try {
+      if (item.trashPath) {
+        await api(`/api/workspaces/${workspaceId.value}/rename`, {
+          method: 'POST',
+          body: JSON.stringify({ path: item.trashPath, new_path: dest }),
+        })
+        const trashRoot = item.trashPath.split('/').slice(0, 4).join('/')
+        if (trashRoot.startsWith('.code-agent/data/trash/')) {
+          await api(`/api/workspaces/${workspaceId.value}/entries?path=${encodeURIComponent(trashRoot)}`, {
+            method: 'DELETE',
+          }).catch(() => undefined)
+        }
+      } else {
+        for (const file of item.files || []) {
+          const target = file.path === item.path ? dest : file.path
+          await writeWorkspaceFile(target, file.content)
+        }
+      }
+      await loadTree(parent)
+      if (item.isDir) {
+        setExpanded(new Set([...expanded.value, dest].filter(Boolean)))
+        await loadTree(dest).catch(() => undefined)
+      } else {
+        await openPath(dest, false)
+      }
+      void loadGitChangedPaths()
+      toast.info(t('explorer.restored', { path: dest }))
+    } catch (err) {
+      pushFsUndo(item)
+      toast.error(err instanceof Error ? err.message : t('explorer.restoreFail'))
+    }
   }
 
   async function openPath(path: string, isDir: boolean) {
@@ -1128,6 +1237,46 @@ export const useAppStore = defineStore('app', () => {
     await openChatFilePath(path)
   }
 
+  function clearGitEditorDiff(path?: string | null) {
+    if (!path) {
+      gitEditorDiff.value = {}
+      return
+    }
+    if (!(path in gitEditorDiff.value)) return
+    const next = { ...gitEditorDiff.value }
+    delete next[path]
+    gitEditorDiff.value = next
+  }
+
+  async function openWorkingDiff(relPath: string) {
+    if (!workspaceId.value || !relPath) return
+    let original = ''
+    try {
+      const data = await api<{ content: string }>(
+        `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(relPath)}&rev=HEAD`,
+      )
+      original = data.content ?? ''
+    } catch {
+      original = ''
+    }
+    await openPath(relPath, false)
+    if (!openFiles.value.some((f) => f.path === relPath)) {
+      openFiles.value = [
+        ...openFiles.value,
+        {
+          path: relPath,
+          kind: 'text',
+          content: '',
+          dirty: false,
+          readonly: gitChangedPaths.value[relPath]?.kind === 'deleted',
+        },
+      ]
+      activePath.value = relPath
+    }
+    gitEditorDiff.value = { ...gitEditorDiff.value, [relPath]: { original } }
+    window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
   async function openRevisionFile(relPath: string, rev = 'HEAD') {
     if (!workspaceId.value || !relPath) return
     const tabPath = `${rev}:${relPath}`
@@ -1243,9 +1392,12 @@ export const useAppStore = defineStore('app', () => {
     for (const item of [...pendingReviews.value]) await acceptReview(item.path, item.blockId)
     await loadGitChangedPaths()
     if (gitRepoOk.value && Object.keys(gitChangedPaths.value).length) {
+      const paths = Object.keys(gitChangedPaths.value)
+      const message = draftCommitFromPaths(paths, t('editor.commitDraftDefault'))
+      gitCommitDraft.value = message
       window.dispatchEvent(
         new CustomEvent('ca-git-commit-draft', {
-          detail: { message: t('editor.commitDraftDefault') },
+          detail: { message },
         }),
       )
       window.dispatchEvent(new Event('ca-open-git'))
@@ -1601,7 +1753,7 @@ export const useAppStore = defineStore('app', () => {
     void loadGitChangedPaths()
   }
 
-  async function rejectReview(path: string, blockId?: string) {
+  async function rejectReview(path: string, blockId?: string, opts?: { silent?: boolean }) {
     const review = blockId
       ? pendingReviewsForPath(path).find((item) => item.blockId === blockId)
       : pendingReview(path)
@@ -1636,7 +1788,27 @@ export const useAppStore = defineStore('app', () => {
     setReviewStatus(path, review.blockId, 'rejected')
     markReviewAcked(review.blockId)
     void loadGitChangedPaths()
-    toast.info(t('editor.reviewRejected', { path }))
+    if (!opts?.silent) toast.info(t('editor.reviewRejected', { path }))
+  }
+
+  function pendingReviewsForMessage(msg: ChatMessage) {
+    const ids = new Set((msg.blocks || []).map((block) => block.id))
+    return pendingReviews.value.filter((item) => ids.has(item.blockId))
+  }
+
+  async function rejectReviewsForMessage(msg: ChatMessage) {
+    const items = pendingReviewsForMessage(msg)
+    if (!items.length) return
+    const paths = [...new Set(items.map((item) => item.path))]
+    for (const item of items) await rejectReview(item.path, item.blockId, { silent: true })
+    toast.info(t('chat.runRejected', { n: paths.length }))
+  }
+
+  async function acceptReviewsForMessage(msg: ChatMessage) {
+    const items = pendingReviewsForMessage(msg)
+    if (!items.length) return
+    for (const item of items) await acceptReview(item.path, item.blockId)
+    toast.info(t('chat.runAccepted', { n: items.length }))
   }
 
   function activateFile(path: string) {
@@ -1648,6 +1820,7 @@ export const useAppStore = defineStore('app', () => {
     if (i < 0) return
     const next = openFiles.value.filter((f) => f.path !== path)
     openFiles.value = next
+    clearGitEditorDiff(path)
     if (activePath.value === path) {
       const neighbor = next[i] || next[i - 1]
       activePath.value = neighbor?.path ?? null
@@ -1678,6 +1851,7 @@ export const useAppStore = defineStore('app', () => {
   function closeAllFiles() {
     openFiles.value = []
     activePath.value = null
+    gitEditorDiff.value = {}
   }
 
   function reorderOpenFiles(fromIndex: number, toIndex: number) {
@@ -1744,7 +1918,38 @@ export const useAppStore = defineStore('app', () => {
 
   async function loadConversations() {
     if (!workspaceId.value) return
-    conversations.value = await api(`/api/workspaces/${workspaceId.value}/conversations`)
+    const rows = await api<Conversation[]>(`/api/workspaces/${workspaceId.value}/conversations`)
+    const currentId = conversationId.value
+    const current = conversations.value.find((c) => c.id === currentId)
+    conversations.value = rows
+    if (current?.archived && currentId && !rows.some((c) => c.id === currentId)) {
+      conversations.value = [current, ...conversations.value]
+    }
+  }
+
+  async function searchConversations(q: string, archived: 'exclude' | 'include' | 'only' = 'include') {
+    if (!workspaceId.value) return [] as Conversation[]
+    const params = new URLSearchParams()
+    const query = q.trim()
+    if (query) params.set('q', query)
+    params.set('archived', archived)
+    return api<Conversation[]>(`/api/workspaces/${workspaceId.value}/conversations?${params}`)
+  }
+
+  async function archiveConversation(id: string, archived = true) {
+    const data = await api<Conversation>(`/api/conversations/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived }),
+    })
+    if (archived) {
+      conversations.value = conversations.value
+        .map((c) => (c.id === id ? { ...c, ...data, archived: true } : c))
+        .filter((c) => !c.archived || c.id === conversationId.value)
+    } else {
+      await loadConversations()
+      conversations.value = conversations.value.map((c) => (c.id === id ? { ...c, ...data, archived: false } : c))
+    }
+    return data
   }
 
   async function newChat() {
@@ -1860,7 +2065,7 @@ export const useAppStore = defineStore('app', () => {
       const name = String((meta as { name?: string }).name || '')
       const fileOp =
         type.startsWith('file.') ||
-        ['write_file', 'search_replace', 'delete_file', 'read_file'].includes(name)
+  ['write_file', 'search_replace', 'apply_patch', 'delete_file', 'read_file'].includes(name)
       if (fileOp) scheduleTreeRefresh(path || undefined)
     }
   }
@@ -1907,6 +2112,7 @@ export const useAppStore = defineStore('app', () => {
       detachRun()
       conversationId.value = id
       rememberConversation(id)
+      conversations.value = conversations.value.filter((c) => !c.archived || c.id === id)
       reviews.value = {}
       activeReviewIndex.value = {}
       messages.value = []
@@ -2662,6 +2868,8 @@ export const useAppStore = defineStore('app', () => {
     renameEntry,
     copyEntry,
     deleteEntry,
+    canUndoFs,
+    undoFsDelete,
     fsClipboard,
     setFsClipboard,
     clearFsClipboard,
@@ -2672,11 +2880,17 @@ export const useAppStore = defineStore('app', () => {
     openPathAtLine,
     openChatFilePath,
     openAgentFile,
+    openWorkingDiff,
+    clearGitEditorDiff,
+    gitEditorDiff,
     openRevisionFile,
     acceptReview,
     acceptReviewHunk,
     rejectReviewHunk,
     rejectReview,
+    pendingReviewsForMessage,
+    rejectReviewsForMessage,
+    acceptReviewsForMessage,
     activateFile,
     closeFile,
     closeOtherFiles,
@@ -2691,9 +2905,12 @@ export const useAppStore = defineStore('app', () => {
     isFileDirty,
     fileTreeMark,
     gitRepoOk,
+    gitCommitDraft,
     loadGitChangedPaths,
     gitChangedPaths,
     loadConversations,
+    searchConversations,
+    archiveConversation,
     newChat,
     openConversation,
     deleteConversation,

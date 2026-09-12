@@ -105,6 +105,18 @@ class TestAutoRunPolicy:
         assert not await tool_needs_approval("write_file", kind="write", details={"path": "src/a.py"})
 
     @pytest.mark.asyncio
+    async def test_apply_patch_matches_write_policy(self):
+        settings._cfg["policy"]["auto_run"] = "sandbox"
+        assert not await tool_needs_approval("apply_patch", kind="write", details={"path": "src/a.py", "paths": ["src/a.py"]})
+        settings._cfg["policy"]["auto_run"] = "manual"
+        assert await tool_needs_approval("apply_patch", kind="write", details={"path": "src/a.py"})
+
+    @pytest.mark.asyncio
+    async def test_todo_write_never_needs_approval(self):
+        settings._cfg["policy"]["auto_run"] = "manual"
+        assert not await tool_needs_approval("todo_write", kind="todo", details={})
+
+    @pytest.mark.asyncio
     async def test_tool_delete_in_full(self, monkeypatch):
         settings._cfg["policy"]["auto_run"] = "full"
         assert not await tool_needs_approval("delete_file", kind="delete", details={"path": "tmp/x"})

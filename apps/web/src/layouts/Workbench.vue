@@ -219,6 +219,18 @@ function onWorkbenchKey(e: KeyboardEvent) {
     return
   }
 
+  if (e.shiftKey && key === 'z') return
+
+  // Ctrl/Cmd+Z → restore last explorer delete (not inside editor / terminal / inputs)
+  if (key === 'z') {
+    if (inEditable) return
+    if (!store.canUndoFs) return
+    e.preventDefault()
+    e.stopPropagation()
+    void store.undoFsDelete()
+    return
+  }
+
   if (e.shiftKey) return
 
   // Ctrl/Cmd+L → focus composer

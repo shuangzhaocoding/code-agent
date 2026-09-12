@@ -10,9 +10,11 @@ export const renderers: Record<string, Component> = {
   'file.write': defineAsyncComponent(() => import('./FileDiffBlock.vue')),
   'file.delete': defineAsyncComponent(() => import('./FileDiffBlock.vue')),
   'file.read': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
-  'terminal': defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
+  terminal: defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
   'skill.activated': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
-  'approval': defineAsyncComponent(() => import('./ApprovalBlock.vue')),
+  explore: defineAsyncComponent(() => import('./ExploreBlock.vue')),
+  todo: defineAsyncComponent(() => import('./TodoBlock.vue')),
+  approval: defineAsyncComponent(() => import('./ApprovalBlock.vue')),
   error: defineAsyncComponent(() => import('./ErrorBlock.vue')),
 }
 

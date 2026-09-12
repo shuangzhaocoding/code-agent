@@ -15,6 +15,7 @@ import ApprovalActionBar from '@/components/ApprovalActionBar.vue'
 import AgentSenderActions from '@/components/AgentSenderActions.vue'
 import ChatContextUsageDialog from '@/components/ChatContextUsageDialog.vue'
 import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
+import RunReviewActions from '@/components/RunReviewActions.vue'
 import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
@@ -1427,6 +1428,10 @@ function openContextUsageDialog() {
               :streaming="isAssistantStreaming(row.item)"
               @toggle="onWorkToggle"
             />
+            <RunReviewActions
+              v-if="!isAssistantStreaming(row.item)"
+              :message="row.item"
+            />
           </template>
           <div v-if="row.item.role === 'user' || !isAssistantStreaming(row.item)" class="msg-bar" :class="row.item.role">
             <span class="msg-time">
@@ -2034,11 +2039,6 @@ footer.agent-footer {
   background: transparent;
   padding: 0;
   gap: 2px;
-}
-
-:deep(.header-review-actions .bulk-sep) {
-  height: 18px;
-  margin: 0 2px;
 }
 
 .scroll-to-bottom-btn {

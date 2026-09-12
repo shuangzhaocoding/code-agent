@@ -39,6 +39,20 @@ async def is_repo(backend: WorkspaceBackend) -> bool:
         return False
 
 
+async def init_repo(backend: WorkspaceBackend) -> dict[str, Any]:
+    if await is_repo(backend):
+        status = await parse_status(backend)
+        status["output"] = "already a git repository"
+        return status
+    try:
+        out = await run_git(backend, ["init", "-b", "main"])
+    except GitError:
+        out = await run_git(backend, ["init"])
+    status = await parse_status(backend)
+    status["output"] = out
+    return status
+
+
 def _norm_rel(path: str) -> str:
     return (path or "").replace("\\", "/").strip().lstrip("/")
 
@@ -46,6 +60,22 @@ def _norm_rel(path: str) -> str:
 def _under(path: str, prefix: str) -> bool:
     target = prefix.rstrip("/")
     return path == target or path.startswith(target + "/")
+
+
+_CONFLICT_XY = frozenset({"DD", "AU", "UD", "UA", "DU", "AA", "UU"})
+
+
+def is_conflict_code(xy: str) -> bool:
+    code = (xy or "").replace(" ", "")
+    return "U" in (xy or "") or code in _CONFLICT_XY
+
+
+async def _ref_exists(backend: WorkspaceBackend, name: str) -> bool:
+    try:
+        await run_git(backend, ["rev-parse", "-q", "--verify", name], include_stderr=False)
+        return True
+    except (GitError, FileNotFoundError, TimeoutError):
+        return False
 
 
 def safe_rel_paths(paths: list[str]) -> list[str]:
@@ -60,7 +90,7 @@ def safe_rel_paths(paths: list[str]) -> list[str]:
 
 async def parse_status(backend: WorkspaceBackend) -> dict[str, Any]:
     if not await is_repo(backend):
-        return {"ok": False, "error": "not a git repository", "branch": "", "ahead": 0, "behind": 0, "files": []}
+        return {"ok": False, "error": "not a git repository", "branch": "", "ahead": 0, "behind": 0, "files": [], "merging": False, "rebasing": False, "cherry_picking": False, "conflicts": 0}
     raw = await run_git(backend, ["status", "-sb", "-z", "-uall", "--porcelain=v1"], include_stderr=False)
     chunks = raw.split("\0")
     branch = ""
@@ -110,15 +140,38 @@ async def parse_status(backend: WorkspaceBackend) -> dict[str, Any]:
                 for rel in extra.split("\0"):
                     rel = _norm_rel(rel).rstrip("/")
                     if rel:
-                        files.append({"path": rel, "code": "?", "staged": False, "unstaged": True})
+                        files.append({"path": rel, "code": "?", "staged": False, "unstaged": True, "conflict": False})
                         added = True
                 if added:
                     continue
-        files.append({"path": path, "code": code, "staged": staged, "unstaged": unstaged or xy == "??"})
+        conflict = is_conflict_code(xy)
+        files.append(
+            {
+                "path": path,
+                "code": code,
+                "staged": staged,
+                "unstaged": unstaged or xy == "??",
+                "conflict": conflict,
+            }
+        )
     uniq: dict[str, dict[str, Any]] = {}
     for item in files:
         uniq[item["path"]] = item
-    return {"ok": True, "branch": branch, "ahead": ahead, "behind": behind, "files": list(uniq.values())}
+    merging = await _ref_exists(backend, "MERGE_HEAD")
+    rebasing = await _ref_exists(backend, "REBASE_HEAD")
+    cherry = await _ref_exists(backend, "CHERRY_PICK_HEAD")
+    conflict_count = sum(1 for item in uniq.values() if item.get("conflict"))
+    return {
+        "ok": True,
+        "branch": branch,
+        "ahead": ahead,
+        "behind": behind,
+        "files": list(uniq.values()),
+        "merging": merging,
+        "rebasing": rebasing,
+        "cherry_picking": cherry,
+        "conflicts": conflict_count,
+    }
 
 
 _REV_BLOB_RE = re.compile(r"^(HEAD|[0-9a-fA-F]{7,40})$")
@@ -404,3 +457,129 @@ async def file_diff(backend: WorkspaceBackend, rel: str, staged: bool = False) -
         include_stderr=False,
         ok_codes=(0, 1),
     )
+
+
+async def list_branches(backend: WorkspaceBackend) -> dict[str, Any]:
+    if not await is_repo(backend):
+        return {"ok": False, "error": "not a git repository", "current": "", "branches": []}
+    try:
+        current = await run_git(backend, ["branch", "--show-current"], include_stderr=False)
+    except GitError:
+        current = ""
+    try:
+        raw = await run_git(
+            backend,
+            ["for-each-ref", "--format=%(refname:short)\t%(HEAD)\t%(objectname:short)\t%(contents:subject)", "refs/heads"],
+            include_stderr=False,
+        )
+    except GitError as exc:
+        return {"ok": False, "error": str(exc), "current": current, "branches": []}
+    branches: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        name, head, short, subject = (line.split("\t", 3) + ["", "", ""])[:4]
+        branches.append(
+            {
+                "name": name,
+                "current": head.strip() == "*",
+                "short": short,
+                "subject": subject,
+            }
+        )
+    branches.sort(key=lambda row: (not row["current"], row["name"]))
+    return {"ok": True, "current": current, "branches": branches}
+
+
+async def list_stashes(backend: WorkspaceBackend) -> dict[str, Any]:
+    if not await is_repo(backend):
+        return {"ok": False, "error": "not a git repository", "stashes": []}
+    try:
+        raw = await run_git(backend, ["stash", "list", "--format=%gd\t%gs"], include_stderr=False)
+    except GitError as exc:
+        return {"ok": False, "error": str(exc), "stashes": []}
+    stashes: list[dict[str, str]] = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        ref, _, msg = line.partition("\t")
+        stashes.append({"ref": ref.strip(), "message": msg.strip()})
+    return {"ok": True, "stashes": stashes}
+
+
+async def default_base_branch(backend: WorkspaceBackend) -> str:
+    try:
+        raw = await run_git(backend, ["symbolic-ref", "refs/remotes/origin/HEAD"], include_stderr=False)
+        name = raw.strip().split("/")[-1]
+        if name:
+            return name
+    except GitError:
+        pass
+    for candidate in ("main", "master"):
+        try:
+            await run_git(backend, ["rev-parse", "--verify", f"refs/remotes/origin/{candidate}"], include_stderr=False)
+            return candidate
+        except GitError:
+            continue
+    try:
+        current = await run_git(backend, ["branch", "--show-current"], include_stderr=False)
+        return current.strip() or "main"
+    except GitError:
+        return "main"
+
+
+def build_commit_message(paths: list[str], *, subject: str | None = None) -> str:
+    names = [p for p in paths if p]
+    title = (subject or "").strip() or (
+        f"Update {names[0].rsplit('/', 1)[-1]}" if len(names) == 1 else f"Update {len(names)} files"
+    )
+    if not names:
+        return title
+    body = "\n".join(f"- {p}" for p in names[:24])
+    extra = f"\n- … +{len(names) - 24} files" if len(names) > 24 else ""
+    return f"{title}\n\n{body}{extra}"
+
+
+async def build_commit_draft(backend: WorkspaceBackend, *, subject: str | None = None) -> dict[str, Any]:
+    status = await parse_status(backend)
+    paths = [str(item.get("path") or "") for item in status.get("files") or []]
+    paths = [p for p in paths if p]
+    message = build_commit_message(paths, subject=subject)
+    return {"message": message, "paths": paths, "ok": bool(status.get("ok"))}
+
+
+async def build_pr_draft(backend: WorkspaceBackend) -> dict[str, Any]:
+    status = await parse_status(backend)
+    branch = str(status.get("branch") or "")
+    base = await default_base_branch(backend)
+    lines: list[str] = []
+    try:
+        log = await run_git(
+            backend,
+            ["log", "--oneline", "--no-decorate", f"origin/{base}..HEAD"],
+            include_stderr=False,
+        )
+        lines = [ln.strip() for ln in log.splitlines() if ln.strip()][:20]
+    except GitError:
+        try:
+            log = await run_git(backend, ["log", "-8", "--oneline", "--no-decorate"], include_stderr=False)
+            lines = [ln.strip() for ln in log.splitlines() if ln.strip()]
+        except GitError:
+            lines = []
+    title = ""
+    if lines:
+        first = re.sub(r"^[0-9a-f]{7,40}\s+", "", lines[0], flags=re.I)
+        title = first[:72]
+    if not title:
+        title = f"{branch}: ready to merge" if branch else "Pull request"
+    body_bits = [f"## Commits", *[f"- {ln}" for ln in lines]] if lines else ["## Summary", ""]
+    paths = [str(item.get("path") or "") for item in status.get("files") or [] if item.get("path")]
+    if paths:
+        body_bits += ["", "## Working tree", *[f"- `{p}`" for p in paths[:16]]]
+    return {
+        "title": title,
+        "body": "\n".join(body_bits).strip() + "\n",
+        "head": branch,
+        "base": base,
+        "commits": lines,
+    }

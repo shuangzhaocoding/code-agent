@@ -454,19 +454,25 @@ onBeforeUnmount(() => {
 .term-panel {
   display: flex;
   flex-direction: row;
-  background: var(--bg-elevated);
+  background: var(--panel-bg);
 }
 .term-hosts {
   flex: 1;
   min-width: 0;
   min-height: 0;
   position: relative;
+  background: var(--panel-bg);
 }
 /* each child div injected by createAndMount() */
 .term-hosts :deep(.term-instance) {
   position: absolute;
   inset: 0;
   padding: 8px;
+  background: var(--panel-bg);
+}
+.term-hosts :deep(.xterm),
+.term-hosts :deep(.xterm-viewport) {
+  background: transparent;
 }
 .term-divider {
   flex-shrink: 0;
@@ -487,7 +493,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   border-left: var(--border-width) solid var(--border);
-  background: var(--bg);
+  background: var(--sidebar-bg);
 }
 .side-head {
   display: flex;
@@ -500,9 +506,8 @@ onBeforeUnmount(() => {
   flex: 1;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 .side-list {
   flex: 1;
@@ -519,7 +524,7 @@ onBeforeUnmount(() => {
   color: var(--text);
   font-size: 12.5px;
 }
-.side-item:hover { background: var(--bg-muted); }
+.side-item:hover { background: var(--code-bg); }
 .side-item.active { background: var(--primary-soft); color: var(--primary); }
 .side-item-name {
   flex: 1;

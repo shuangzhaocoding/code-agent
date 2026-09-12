@@ -7,6 +7,7 @@ import FormSelect from '@/components/FormSelect.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
 import LayoutControls from '@/components/LayoutControls.vue'
 import { useToast } from '@/composables/useToast'
+import { useGitDiffTarget } from '@/composables/useGitDiffTarget'
 
 type SchemaSpec = {
   title?: string
@@ -23,6 +24,7 @@ type SchemaSpec = {
 const { t, te } = useI18n()
 const store = useAppStore()
 const toast = useToast()
+const { diffTarget, setDiffTarget } = useGitDiffTarget()
 const local = reactive<Record<string, unknown>>({})
 const saved = ref(false)
 const saving = ref(false)
@@ -232,6 +234,36 @@ async function save() {
                 <p class="setting-key">{{ t('settings.languageLead') }}</p>
               </div>
               <LanguageSelect :show-label="false" />
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <label>{{ t('git.diffTarget') }}</label>
+                <p class="setting-key">{{ t('git.diffTargetLead') }}</p>
+              </div>
+              <div class="choice-row" role="radiogroup" :aria-label="t('git.diffTarget')">
+                <button
+                  type="button"
+                  class="choice-btn"
+                  role="radio"
+                  :aria-checked="diffTarget === 'panel'"
+                  :class="{ active: diffTarget === 'panel' }"
+                  @click="setDiffTarget('panel')"
+                >
+                  <AppIcon name="git" :size="14" :stroke-width="1.75" />
+                  {{ t('git.diffTargetPanel') }}
+                </button>
+                <button
+                  type="button"
+                  class="choice-btn"
+                  role="radio"
+                  :aria-checked="diffTarget === 'editor'"
+                  :class="{ active: diffTarget === 'editor' }"
+                  @click="setDiffTarget('editor')"
+                >
+                  <AppIcon name="file" :size="14" :stroke-width="1.75" />
+                  {{ t('git.diffTargetEditor') }}
+                </button>
+              </div>
             </div>
             <LayoutControls />
           </section>
@@ -460,6 +492,34 @@ async function save() {
 .setting-row:last-child {
   border-bottom: 0;
   padding-bottom: 0;
+}
+.choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.choice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  color: var(--text-h);
+  font-size: 12px;
+  cursor: pointer;
+}
+.choice-btn:hover {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, var(--panel-bg));
+}
+.choice-btn.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg));
+  color: var(--primary);
+  font-weight: 600;
 }
 .setting-copy label {
   font-size: 12px;

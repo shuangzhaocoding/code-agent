@@ -13,10 +13,14 @@ const rows = computed(() => {
   const list = [
     { keys: paletteShortcutLabel(), label: t('shortcuts.commandPalette') },
     { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.commandPaletteAlt') },
+    { keys: isMacMod() ? '⌘K' : 'Ctrl+K', label: t('shortcuts.inlineEdit') },
+    { keys: 'F12', label: t('shortcuts.gotoDefinition') },
     { keys: isMacMod() ? '⌘P' : 'Ctrl+P', label: t('shortcuts.openFile') },
     { keys: isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F', label: t('shortcuts.searchFiles') },
     { keys: `${mod}S`, label: t('shortcuts.save') },
+    { keys: isMacMod() ? '⇧⌥F' : 'Shift+Alt+F', label: t('shortcuts.formatDocument') },
     { keys: `${mod}N`, label: t('shortcuts.newChat') },
+    { keys: `${mod}Z`, label: t('shortcuts.undoDelete') },
   ]
   if (isDesktopApp()) {
     list.push({
@@ -56,7 +60,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey, true))
           </button>
         </header>
         <ul class="shortcuts-list">
-          <li v-for="row in rows" :key="row.keys" class="shortcuts-row">
+          <li v-for="row in rows" :key="`${row.keys}-${row.label}`" class="shortcuts-row">
             <span class="shortcuts-label">{{ row.label }}</span>
             <kbd class="shortcuts-keys">{{ row.keys }}</kbd>
           </li>

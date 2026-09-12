@@ -26,7 +26,7 @@ export type TimelineSpan = {
   streaming: boolean
 }
 
-const CONVERSATION_TYPES = new Set(['user.text', 'assistant.markdown', 'approval'])
+const CONVERSATION_TYPES = new Set(['user.text', 'assistant.markdown', 'approval', 'todo'])
 
 /** Markdown blocks that are not user-facing answers (e.g. leaked JSON from internal LLM calls). */
 export function isAnswerMarkdown(block: Block): boolean {
@@ -60,6 +60,7 @@ export function classifyBlock(block: Block): TrajectoryKind {
   if (block.type === 'user.text') return 'user'
   if (block.type === 'assistant.markdown') return 'assistant'
   if (block.type === 'assistant.thinking') return 'think'
+  if (block.type === 'todo') return 'other'
   if (block.type === 'error') return 'error'
   if (block.type === 'terminal') return 'terminal'
   if (block.type === 'file.diff' || block.type.startsWith('file.')) return 'diff'
@@ -67,8 +68,10 @@ export function classifyBlock(block: Block): TrajectoryKind {
 
   const name = String(block.meta.name || block.type || '')
   if (READ_TOOLS.has(name)) return 'context'
-  if (['write_file', 'search_replace', 'delete_file', 'run_command', 'load_skill', 'skill.activated'].includes(name)) {
-    return name === 'run_command' ? 'terminal' : 'tool'
+  if (['write_file', 'search_replace', 'apply_patch', 'delete_file', 'run_command', 'load_skill', 'skill.activated', 'todo_write'].includes(name)) {
+    if (name === 'run_command') return 'terminal'
+    if (name === 'todo_write' || block.type === 'todo') return 'other'
+    return 'tool'
   }
   if (['git_add', 'git_commit', 'git_push', 'git_pull', 'git_checkout', 'git_reset'].includes(name)) return 'tool'
   return 'other'
@@ -110,6 +113,7 @@ function blockLabel(block: Block, kind: TrajectoryKind): string {
     terminal: '终端',
     error: '错误',
     approval: '审批',
+    todo: '待办',
     'skill.activated': 'Skill',
   }
   if (labels[block.type]) return labels[block.type]
@@ -119,6 +123,8 @@ function blockLabel(block: Block, kind: TrajectoryKind): string {
       read_file: '读取文件',
       write_file: '写入文件',
       search_replace: '编辑文件',
+      apply_patch: '应用补丁',
+      todo_write: '更新待办',
       delete_file: '删除文件',
       list_dir: '列出目录',
       glob_search: '查找文件',

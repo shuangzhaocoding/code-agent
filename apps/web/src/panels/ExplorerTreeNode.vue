@@ -3,9 +3,11 @@ import { computed, inject, nextTick, onUnmounted, ref, watch } from 'vue'
 import type { FsItem } from '@/stores/app'
 import { useAppStore } from '@/stores/app'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
+import AppIcon from '@/components/AppIcon.vue'
 import ExplorerTreeNode from '@/panels/ExplorerTreeNode.vue'
 import ExplorerCreateRow from '@/panels/ExplorerCreateRow.vue'
 import { explorerDragKey, FS_DRAG_MIME, isOsFileDrag } from '@/panels/explorerDrag'
+import { t } from '@/i18n'
 
 const props = defineProps<{
   item: FsItem
@@ -184,10 +186,12 @@ function onRowLeave() {
       :class="{
         active: store.activePath === item.path,
         cut: isCut || isDragging,
+        ignored: item.ignored,
         'drop-target': isDropTarget,
       }"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
       :draggable="!isRenaming"
+      :title="item.ignored ? t('explorer.ignored') : undefined"
       :aria-grabbed="isCut || isDragging ? 'true' : undefined"
       @click="onRowClick"
       @contextmenu="emit('context', $event, item)"
@@ -231,6 +235,15 @@ function onRowLeave() {
         :title="mark.title"
         :aria-label="mark.title"
       />
+      <span
+        v-if="item.ignored"
+        class="ignore-mark"
+        :class="{ trail: mark.show }"
+        :title="t('explorer.ignored')"
+        :aria-label="t('explorer.ignored')"
+      >
+        <AppIcon name="ban" :size="14" :stroke-width="2" />
+      </span>
     </button>
     <template v-if="item.is_dir && store.isExpanded(item.path)">
       <ExplorerCreateRow
@@ -292,6 +305,16 @@ function onRowLeave() {
 .row.cut :deep(.file-tree-icon),
 .row.cut .twist {
   opacity: 0.85;
+}
+.row.ignored {
+  color: color-mix(in srgb, var(--text) 70%, var(--text-muted));
+}
+.row.ignored.active {
+  color: color-mix(in srgb, var(--primary) 62%, var(--text-muted));
+}
+.row.ignored :deep(.file-tree-icon),
+.row.ignored .twist {
+  opacity: 0.82;
 }
 .row.drop-target {
   background: color-mix(in srgb, var(--primary) 16%, transparent);
@@ -376,5 +399,18 @@ function onRowLeave() {
 .tree-dot--changed {
   background: var(--text-muted);
   color: var(--text-muted);
+}
+.ignore-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+}
+.ignore-mark.trail {
+  margin-left: 4px;
 }
 </style>

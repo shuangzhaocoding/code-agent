@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
+import McpServersPanel from './McpServersPanel.vue'
 
 type PluginTool = { name: string; description: string; enabled: boolean }
 type PluginProvider = { kind: string; title: string; enabled: boolean }
@@ -186,9 +187,11 @@ onMounted(() => {
             · 用户 <code>~/.code-agent/plugins/</code>
             · 工作区 <code>.code-agent/plugins/</code>
           </p>
-          <p>模型适配器实现 <code>LlmAdapter</code>，在 <code>register(registry)</code> 里调用 <code>register_llm_adapter</code>。</p>
+          <p>模型适配器实现 <code>LlmAdapter</code>，在 <code>register(registry)</code> 里调用 <code>register_llm_adapter</code>。MCP 在本页单独配置，不做应用市场。</p>
         </div>
       </section>
+
+      <McpServersPanel />
 
       <p v-if="error" class="error">{{ error }}</p>
 

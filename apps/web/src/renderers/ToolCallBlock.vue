@@ -22,6 +22,8 @@ const catalog: Record<string, { icon: string; label: string; tone: Tone }> = {
   git_reset: { icon: 'git', label: 'Git Reset', tone: 'danger' },
   write_file: { icon: 'file-plus', label: '写入文件', tone: 'tool' },
   search_replace: { icon: 'file-edit', label: '编辑文件', tone: 'tool' },
+  apply_patch: { icon: 'file-edit', label: '应用补丁', tone: 'tool' },
+  todo_write: { icon: 'list', label: '更新待办', tone: 'tool' },
   delete_file: { icon: 'trash', label: '删除文件', tone: 'danger' },
   read_file: { icon: 'eye', label: '读取文件', tone: 'default' },
   list_dir: { icon: 'folder', label: '列出目录', tone: 'default' },
@@ -30,6 +32,7 @@ const catalog: Record<string, { icon: string; label: string; tone: Tone }> = {
   run_command: { icon: 'terminal', label: '运行命令', tone: 'default' },
   load_skill: { icon: 'book', label: '加载 Skill', tone: 'tool' },
   list_skills: { icon: 'book', label: '列出 Skill', tone: 'default' },
+  explore_codebase: { icon: 'search', label: '探索代码', tone: 'think' },
   'file.read': { icon: 'eye', label: '读取文件', tone: 'default' },
   'skill.activated': { icon: 'book', label: '加载 Skill', tone: 'tool' },
   'tool.call': { icon: 'wrench', label: '工具调用', tone: 'tool' },
@@ -56,6 +59,9 @@ const toolName = computed(() => String(props.block.meta.name || props.block.type
 const spec = computed(() => {
   const name = toolName.value
   const type = props.block.type
+  if (name.startsWith('mcp_')) {
+    return { icon: 'globe', label: name.replace(/^mcp_/, 'MCP '), tone: 'tool' as Tone }
+  }
   return (
     catalog[name] ||
     catalog[type] || {
@@ -71,7 +77,7 @@ const path = computed(() =>
 )
 
 const fileOp = computed(() =>
-  ['write_file', 'search_replace', 'delete_file', 'read_file', 'file.read'].includes(toolName.value) ||
+  ['write_file', 'search_replace', 'apply_patch', 'delete_file', 'read_file', 'file.read'].includes(toolName.value) ||
   ['file.read', 'file.diff', 'file.delete'].includes(props.block.type),
 )
 

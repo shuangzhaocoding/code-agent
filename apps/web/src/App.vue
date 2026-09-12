@@ -32,7 +32,7 @@ function onVisibility() {
 
 onMounted(async () => {
   document.addEventListener('visibilitychange', onVisibility)
-  await store.loadWorkspaces()
+  await Promise.all([store.loadWorkspaces(), store.loadSettings()])
   if (store.workspaceId) {
     await store.selectWorkspace(store.workspaceId, { openExplorer: false })
   }

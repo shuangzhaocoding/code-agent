@@ -181,6 +181,34 @@ class Settings:
             cur = cur[part]
         return cur
 
+    def set_dotted(self, dotted: str, value: Any) -> None:
+        parts = [p for p in dotted.split(".") if p]
+        if not parts:
+            return
+        cur: dict[str, Any] = self._cfg
+        for part in parts[:-1]:
+            nxt = cur.get(part)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cur[part] = nxt
+            cur = nxt
+        cur[parts[-1]] = value
+
+    def unset_dotted(self, dotted: str) -> None:
+        parts = [p for p in dotted.split(".") if p]
+        if not parts:
+            return
+        cur: Any = self._cfg
+        stack: list[tuple[dict[str, Any], str]] = []
+        for part in parts[:-1]:
+            if not isinstance(cur, dict) or part not in cur:
+                return
+            stack.append((cur, part))
+            cur = cur[part]
+        if not isinstance(cur, dict):
+            return
+        cur.pop(parts[-1], None)
+
     def raw(self) -> dict[str, Any]:
         return deepcopy(self._cfg)
 
@@ -277,6 +305,19 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "enum": ["ask", "agent", "plan"],
             "default": "agent",
         },
+        "agent.rules_max_chars": {
+            "type": "integer",
+            "title": "工作区规则注入上限（字符）",
+            "minimum": 1000,
+            "maximum": 80000,
+            "default": 12000,
+        },
+        "agent.memory.enabled": {
+            "type": "boolean",
+            "title": "注入工作区记忆",
+            "default": True,
+            "description": "关闭后不再把工作区记忆写入系统提示，也不再自动抽取。规则不受影响。",
+        },
         "policy.auto_run": {
             "type": "string",
             "title": "自动运行级别",
@@ -309,6 +350,11 @@ SETTINGS_SCHEMA: dict[str, Any] = {
         "ui.send_on_enter": {
             "type": "boolean",
             "title": "Enter 发送",
+            "default": True,
+        },
+        "ui.format_on_save": {
+            "type": "boolean",
+            "title": "保存时格式化",
             "default": True,
         },
         "uploads.dir": {

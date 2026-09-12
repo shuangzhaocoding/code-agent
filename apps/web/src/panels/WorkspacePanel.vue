@@ -523,6 +523,23 @@ async function onDelete(wsId: string, id: string, e: MouseEvent) {
   convMap[wsId] = (convMap[wsId] || []).filter((c) => c.id !== id)
 }
 
+async function onArchive(wsId: string, conv: Conversation, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const next = !conv.archived
+  if (wsId === store.workspaceId) {
+    await store.archiveConversation(conv.id, next)
+  } else {
+    await api(`/api/conversations/${conv.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ archived: next }),
+    })
+  }
+  if (next) {
+    convMap[wsId] = (convMap[wsId] || []).filter((c) => c.id !== conv.id)
+  }
+}
+
 function startRename(item: Conversation, e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
@@ -805,6 +822,14 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
                     @click="onTogglePin(ws.id, conv.id, $event)"
                   >
                     <AppIcon name="pin" :size="13" :stroke-width="1.75" />
+                  </button>
+                  <button
+                    type="button"
+                    class="conv-action"
+                    :title="conv.archived ? t('workspace.panel.unarchive') : t('workspace.panel.archive')"
+                    @click="onArchive(ws.id, conv, $event)"
+                  >
+                    <AppIcon name="inbox" :size="13" :stroke-width="1.75" />
                   </button>
                   <button type="button" class="conv-action danger" :title="t('workspace.panel.deleteSession')" @click="onDelete(ws.id, conv.id, $event)">
                     <AppIcon name="trash" :size="13" :stroke-width="1.75" />
@@ -1542,16 +1567,22 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 .conv-meta {
   display: flex;
   align-items: center;
+  align-self: center;
   gap: 8px;
   flex-shrink: 0;
   font-size: 11px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  line-height: 22px;
+  height: 22px;
 }
 
 .conv-turns {
   flex-shrink: 0;
+  align-self: center;
   min-width: 2.5rem;
+  height: 22px;
+  line-height: 22px;
   text-align: right;
   font-size: 11px;
   color: var(--text-muted);
@@ -1564,10 +1595,13 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .conv-actions {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  align-self: center;
   gap: 1px;
   flex-shrink: 0;
+  height: 22px;
   opacity: 0;
   pointer-events: none;
   width: 0;
@@ -1584,15 +1618,26 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 }
 
 .conv-action {
+  box-sizing: border-box;
   width: 22px;
   height: 22px;
+  min-width: 22px;
+  padding: 0;
+  margin: 0;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--text-muted);
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  flex-shrink: 0;
   cursor: pointer;
+}
+
+.conv-action :deep(.app-icon) {
+  display: block;
 }
 
 .conv-action:hover,

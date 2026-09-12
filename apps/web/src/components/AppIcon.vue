@@ -70,6 +70,7 @@ export type AppIconName =
   | 'folder-plus'
   | 'file-edit'
   | 'alert'
+  | 'ban'
   | 'think'
   | 'gear'
   | 'spark'
@@ -368,6 +369,7 @@ const paths: Record<string, string[]> = {
     'M16.5 11.5a2.1 2.1 0 0 1 3 3L10 22l-4 1 1-4 9.5-7.5Z',
   ],
   alert: ['M10.3 3.8 1.8 18.5A2 2 0 0 0 3.5 21.5h16.9a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z', 'M12 9v4', 'M12 17h.01'],
+  ban: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M4.9 4.9l14.2 14.2'],
   think: [
     'M12 3a5 5 0 0 0-3.2 8.9c.5.4.9 1 .9 1.6h5c0-.6.4-1.2.9-1.6A5 5 0 0 0 12 3Z',
     'M10 16h4',

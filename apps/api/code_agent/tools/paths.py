@@ -62,16 +62,22 @@ def is_ignored(rel: str, extra: list[str] | None = None) -> bool:
     return matches_ignore(rel, DEFAULT_IGNORES + (extra or []))
 
 
+def parse_ignore_lines(text: str) -> list[str]:
+    extra: list[str] = []
+    for line in text.replace("\r\n", "\n").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            extra.append(line.rstrip("/"))
+    return extra
+
+
 def load_ignore_file(root: str) -> list[str]:
     extra: list[str] = []
     base = workspace_root(root)
     for name in (".gitignore", ".codeagentignore"):
         path = base / name
         if path.is_file():
-            for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    extra.append(line.rstrip("/"))
+            extra.extend(parse_ignore_lines(path.read_text(encoding="utf-8", errors="ignore")))
     return extra
 
 
@@ -102,6 +108,7 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
     if not path.is_dir():
         raise HTTPException(status_code=400, detail={"code": "path.not_dir", "message": "Not a directory"})
     ignores = TREE_IGNORES + (extra_ignores or [])
+    git_ignores = load_ignore_file(root)
     max_children = int(settings.get("workspace.tree_max_children") or 400)
     items = []
     try:
@@ -127,6 +134,7 @@ def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -
                 "is_dir": is_dir,
                 "size": None if is_dir else int(st.st_size),
                 "mtime": int(st.st_mtime),
+                "ignored": bool(git_ignores) and matches_ignore(rel_child, git_ignores),
             }
         )
         if len(items) >= max_children:

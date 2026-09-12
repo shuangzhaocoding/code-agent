@@ -8,6 +8,10 @@ function blockPlainText(block: Block): string {
     const t = (block.text || '').trim()
     return t ? `[thinking]\n${t}` : ''
   }
+  if (block.type === 'todo') {
+    const t = (block.text || '').trim()
+    return t ? `[todo]\n${t}` : '[todo]'
+  }
   if (block.type === 'tool' || block.type.startsWith('tool.')) {
     const name = String(block.meta?.tool || block.meta?.name || 'tool')
     const summary = String(block.meta?.summary || block.text || '').trim()

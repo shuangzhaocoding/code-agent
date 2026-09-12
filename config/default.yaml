@@ -37,6 +37,8 @@ agent:
   system_prompt_extra: ""
   sliding_window_size: 12
   compress_threshold_tokens: 90000
+  # Max characters of AGENTS.md + .code-agent/rules injected into the system prompt.
+  rules_max_chars: 12000
   use_legacy_react: false
   checkpoint_cleanup:
     enabled: true
@@ -144,6 +146,7 @@ ui:
   theme: dark
   font_size: 13
   send_on_enter: true
+  format_on_save: true
 
 # Phase 2 — multi-process runtime (split = default)
 runtime:

@@ -30,10 +30,9 @@ ServiceRole = Literal["api", "terminal", "preview", "monolith"]
 
 async def _load_stored_settings() -> None:
     for row in await Setting.all():
-        parts = row.key.split(".", 1)
-        if len(parts) != 2:
+        if not row.key or "." not in row.key:
             continue
-        settings._cfg.setdefault(parts[0], {})[parts[1]] = row.value_json
+        settings.set_dotted(row.key, row.value_json)
     settings.refresh_uploads_dir()
 
 
@@ -143,6 +142,7 @@ def _mount_api_routers(app: FastAPI) -> None:
         conversations,
         git,
         llm,
+        mcp,
         memories,
         runs,
         settings as settings_router,
@@ -164,6 +164,7 @@ def _mount_api_routers(app: FastAPI) -> None:
     )
     app.include_router(workspaces.router)
     app.include_router(memories.router)
+    app.include_router(mcp.router)
     app.include_router(git.router)
     app.include_router(conversations.router)
     app.include_router(runs.router)

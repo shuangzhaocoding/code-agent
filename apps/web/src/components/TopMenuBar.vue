@@ -284,8 +284,7 @@ const menus = computed(() => {
       shortcut: saveShortcut,
       disabled: !canSave.value,
       run: async () => {
-        await store.saveOpenFile()
-        toast.success(t('common.saved'))
+        window.dispatchEvent(new CustomEvent('ca-editor-save', { detail: { notify: true } }))
       },
     },
     { id: 'sep-file', label: '', separator: true },

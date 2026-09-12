@@ -153,6 +153,16 @@ class MkdirIn(BaseModel):
     name: str
 
 
+class InlineEditIn(BaseModel):
+    path: str = ""
+    instruction: str
+    selection: str
+    prefix: str = ""
+    suffix: str = ""
+    language: str = ""
+    model_id: str | None = None
+
+
 @router.get("")
 async def list_workspaces():
     rows = await Workspace.all().order_by("-last_opened_at", "-created_at")
@@ -571,6 +581,94 @@ async def find_files(workspace_id: str, q: str = "", limit: int = 50):
     else:
         files.sort(key=lambda item: item["path"])
     return {"query": q, "files": files[:cap]}
+
+
+@router.get("/{workspace_id}/goto")
+async def goto_symbol(
+    workspace_id: str,
+    symbol: str = "",
+    from_path: str = "",
+    limit: int = 20,
+):
+    """Heuristic go-to-definition (content search + declaration patterns, not LSP)."""
+    from code_agent.editor.symbols import rank_symbol_hits
+
+    ws = await _get_ws(workspace_id)
+    name = (symbol or "").strip()
+    if not name:
+        return {"symbol": name, "hits": []}
+    cap = max(1, min(int(limit or 20), 40))
+    backend = await get_workspace_backend(ws)
+    raw = await backend.search(name, case_sensitive=True, max_hits=120)
+    hits = rank_symbol_hits(name, raw, from_path=(from_path or "").strip(), limit=cap)
+    if hits:
+        return {"symbol": name, "hits": hits}
+
+    walked = await backend.walk_files(extra_ignores=ws.ignore_globs, limit=4000)
+    needle = name.lower()
+    files: list[dict] = []
+    for rel, _abs in walked:
+        stem = posixpath.splitext(posixpath.basename(rel))[0]
+        if stem.lower() == needle:
+            files.append({"path": rel, "line": 1, "text": rel, "score": 40, "kind": "reference"})
+    files.sort(key=lambda item: (0 if from_path and item["path"] == from_path else 1, item["path"]))
+    return {"symbol": name, "hits": files[:cap]}
+
+
+@router.post("/{workspace_id}/inline-edit")
+async def inline_edit(workspace_id: str, body: InlineEditIn):
+    """Rewrite a selected snippet with the chat model (no tools)."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    from code_agent.editor.inline_edit import (
+        INLINE_SYSTEM,
+        build_inline_prompt,
+        message_text,
+        strip_code_fences,
+    )
+    from code_agent.llm.hub import get_chat_model
+
+    await _get_ws(workspace_id)
+    instruction = (body.instruction or "").strip()
+    selection = body.selection or ""
+    if not instruction:
+        raise HTTPException(status_code=400, detail={"code": "inline.empty", "message": "instruction required"})
+    if not selection.strip():
+        raise HTTPException(status_code=400, detail={"code": "inline.empty", "message": "selection required"})
+    if len(selection) > 16000:
+        raise HTTPException(status_code=400, detail={"code": "inline.too_large", "message": "selection too large"})
+
+    chat, _row = await get_chat_model(body.model_id)
+    if not chat:
+        raise HTTPException(status_code=400, detail={"code": "llm.no_model", "message": "No chat model configured"})
+
+    prompt = build_inline_prompt(
+        path=body.path or "",
+        language=body.language or "",
+        instruction=instruction,
+        selection=selection,
+        prefix=(body.prefix or "")[-4000:],
+        suffix=(body.suffix or "")[:4000],
+    )
+    try:
+        response = await chat.ainvoke(
+            [SystemMessage(content=INLINE_SYSTEM), HumanMessage(content=prompt)]
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "inline.llm_failed", "message": str(exc)[:240]},
+        ) from exc
+
+    replacement = strip_code_fences(message_text(response))
+    if not replacement:
+        replacement = selection.rstrip("\n")
+    return {
+        "path": body.path,
+        "original": selection,
+        "replacement": replacement,
+        "unchanged": replacement == selection.rstrip("\n") or replacement == selection,
+    }
 
 
 @router.post("/{workspace_id}/replace")

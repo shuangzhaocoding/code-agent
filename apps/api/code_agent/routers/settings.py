@@ -24,12 +24,7 @@ _CLEAR_ON_EMPTY = frozenset(
 
 
 def _clear_live_setting(key: str) -> None:
-    parts = key.split(".")
-    if len(parts) != 2:
-        return
-    bucket = settings._cfg.get(parts[0])
-    if isinstance(bucket, dict):
-        bucket.pop(parts[1], None)
+    settings.unset_dotted(key)
 
 
 @router.get("/settings")
@@ -83,11 +78,8 @@ async def patch_settings(body: dict[str, Any]):
             await row.save()
         else:
             await Setting.create(key=key, value_json=value)
-        # overlay live config for known prefixes
+        settings.set_dotted(key, value)
         parts = key.split(".")
-        if len(parts) == 2:
-            bucket = settings._cfg.setdefault(parts[0], {})
-            bucket[parts[1]] = value
         if key in STORAGE_SETTING_KEYS and len(parts) == 2:
             storage_patch[parts[1]] = value
         if key in UPLOADS_SETTING_KEYS and len(parts) == 2:

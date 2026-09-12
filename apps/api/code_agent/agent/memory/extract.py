@@ -69,9 +69,15 @@ async def _upsert_memory(
     }
     source = {"conversation_id": conversation_id, "run_id": run_id}
     if existing:
+        prev = existing.source if isinstance(existing.source, dict) else {}
         existing.content = content
         existing.tags = item.get("tags") or existing.tags
-        existing.source = source
+        existing.source = {
+            **prev,
+            **source,
+            "pinned": bool(prev.get("pinned")),
+            "enabled": prev.get("enabled", True) is not False,
+        }
         await existing.save(update_fields=["content", "tags", "source", "updated_at"])
         return existing
     return await WorkspaceMemory.create(

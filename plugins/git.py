@@ -1,7 +1,7 @@
 PLUGIN_TITLE = "Git"
-PLUGIN_DESCRIPTION = "Workspace Git tools: status, diff, log, branch, add, commit, push, pull, checkout, reset."
+PLUGIN_DESCRIPTION = "Workspace Git tools: status, diff, log, branch, add, commit, push, pull, checkout, stash, init, reset."
 PLUGIN_KIND = "tools"
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.2.0"
 PLUGIN_AUTHOR = "Code Agent"
 PLUGIN_HOMEPAGE = "https://git-scm.com/"
 PLUGIN_REPOSITORY = "https://github.com/git/git"
@@ -60,6 +60,12 @@ def register(registry) -> None:
         if not data.get("ok"):
             return f"ERROR: {data.get('error') or 'not a git repository'}"
         lines = [f"branch {data['branch']} ahead={data['ahead']} behind={data['behind']}"]
+        if data.get("merging"):
+            lines.append("state merging")
+        if data.get("rebasing"):
+            lines.append("state rebasing")
+        if data.get("conflicts"):
+            lines.append(f"conflicts {data['conflicts']}")
         for item in data["files"]:
             mark = item["code"].ljust(2)
             lines.append(f"{mark} {item['path']}")
@@ -128,6 +134,32 @@ def register(registry) -> None:
         return await _run(["checkout", ref])
 
     @tool
+    async def git_stash(action: str = "push", message: str = "") -> str:
+        """Stash working tree changes. action is push|pop|apply|drop. Requires user confirmation."""
+        act = (action or "push").strip().lower()
+        if act not in {"push", "pop", "apply", "drop"}:
+            return "ERROR: action must be push, pop, apply, or drop"
+        args = ["stash", act]
+        if act == "push":
+            args = ["stash", "push", "-u"]
+            if message.strip():
+                args.extend(["-m", message.strip()])
+        summary = f"git stash {act}"
+        if not await request_approval("git_stash", summary, {"action": act, "message": message}, kind="git"):
+            return "ERROR: user denied this operation"
+        return await _run(args)
+
+    @tool
+    async def git_init() -> str:
+        """Initialize a git repository in the workspace root. Requires user confirmation."""
+        if not await request_approval("git_init", "git init -b main", {}, kind="git"):
+            return "ERROR: user denied this operation"
+        out = await _run(["init", "-b", "main"])
+        if isinstance(out, str) and out.startswith("ERROR:"):
+            return await _run(["init"])
+        return out
+
+    @tool
     async def git_reset(mode: str = "mixed", ref: str = "HEAD") -> str:
         """Reset HEAD. mode is soft|mixed|hard. Requires user confirmation."""
         flag = {"soft": "--soft", "mixed": "--mixed", "hard": "--hard"}.get(mode, "--mixed")
@@ -150,6 +182,8 @@ def register(registry) -> None:
         (git_push, ("agent",)),
         (git_pull, ("agent",)),
         (git_checkout, ("agent",)),
+        (git_stash, ("agent",)),
+        (git_init, ("agent",)),
         (git_reset, ("agent",)),
     ]:
         registry.register_tool(t, source="plugin:git", modes=modes)

@@ -12,7 +12,7 @@ from fastapi import HTTPException
 
 from code_agent.config import settings
 from code_agent.db.models import Workspace
-from code_agent.tools.paths import TREE_IGNORES, is_ignored, matches_ignore
+from code_agent.tools.paths import TREE_IGNORES, is_ignored, matches_ignore, parse_ignore_lines
 from code_agent.workspace.ssh_pool import SshAuth, ssh_pool
 
 
@@ -100,6 +100,15 @@ class SshWorkspaceBackend:
                 return expanded
         return path
 
+    async def _git_ignore_patterns(self) -> list[str]:
+        extra: list[str] = []
+        for name in (".gitignore", ".codeagentignore"):
+            try:
+                extra.extend(parse_ignore_lines(await self.read_text(name)))
+            except Exception:
+                continue
+        return extra
+
     async def list_dir(self, rel: str = "", extra_ignores: list[str] | None = None) -> list[dict]:
         sftp = await self._sftp()
         target = await self._abs(rel)
@@ -109,6 +118,7 @@ class SshWorkspaceBackend:
             raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": str(exc)}) from exc
 
         ignores = TREE_IGNORES + list(getattr(self._ws, "ignore_globs", None) or []) + (extra_ignores or [])
+        git_ignores = await self._git_ignore_patterns()
         max_children = int(settings.get("workspace.tree_max_children") or 400)
         items: list[dict] = []
         for entry in sorted(
@@ -142,7 +152,14 @@ class SshWorkspaceBackend:
                     mtime_raw = None
             mtime = int(mtime_raw) if mtime_raw is not None else None
             items.append(
-                {"name": name_s, "path": rel_child, "is_dir": is_dir, "size": size, "mtime": mtime}
+                {
+                    "name": name_s,
+                    "path": rel_child,
+                    "is_dir": is_dir,
+                    "size": size,
+                    "mtime": mtime,
+                    "ignored": bool(git_ignores) and matches_ignore(rel_child, git_ignores),
+                }
             )
             if len(items) >= max_children:
                 break

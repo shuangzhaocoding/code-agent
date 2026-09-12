@@ -31,6 +31,7 @@ html[data-theme='light'] {
   --shadow-md: none;
   --scrollbar-thumb: rgba(0, 0, 0, 0.18);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.32);
+  --scrollbar-size: 6px;
   --radius-md: 10px;
   --radius-sm: 6px;
   --radius: var(--radius-md);
@@ -116,6 +117,7 @@ html[data-theme='dark'] {
   --shadow-md: none;
   --scrollbar-thumb: rgba(255, 255, 255, 0.16);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --scrollbar-size: 6px;
   --tr-color-primary: var(--primary);
   --tr-sender-bg-color: var(--code-bg);
   --tr-sender-text-color: var(--text-h);
@@ -222,8 +224,14 @@ html {
 }
 
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+
+*::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 *::-webkit-scrollbar-track {
@@ -233,18 +241,78 @@ html {
 *::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
   border-radius: 99px;
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover);
-  border: 2px solid transparent;
+  border: 1px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* xterm: keep the real scrollbar, match explorer / chat pill */
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+  overflow-y: scroll;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar {
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
+}
+.xterm .xterm-viewport::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  border-radius: 99px;
+  border: 1px solid transparent;
+  background-clip: padding-box;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+.xterm .xterm-viewport::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical {
+  width: var(--scrollbar-size) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.horizontal {
+  height: var(--scrollbar-size) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  background: var(--scrollbar-thumb) !important;
+  border-radius: 99px !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  width: var(--scrollbar-size) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.horizontal > .slider {
+  height: var(--scrollbar-size) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar > .slider:hover {
+  background: var(--scrollbar-thumb-hover) !important;
+}
+/* When the overlay bar exists, hide the native one so they don't stack */
+.xterm:has(.xterm-scrollable-element > .scrollbar.visible) .xterm-viewport {
+  scrollbar-width: none;
+}
+.xterm:has(.xterm-scrollable-element > .scrollbar.visible) .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 body {

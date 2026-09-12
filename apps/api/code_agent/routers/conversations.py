@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Literal
+
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from code_agent.context_usage import compute_context_usage
+from code_agent.conversation_search import search_conversations, snippets_for_conversations
 from code_agent.db.models import Conversation, Message, Run, RunEvent, Workspace
 from code_agent.streaming.run_manager import start_run
 
@@ -89,20 +92,43 @@ async def _active_run_meta(run_ids: list[str]) -> tuple[dict[str, str], set[str]
 
 
 @router.get("/workspaces/{workspace_id}/conversations")
-async def list_conversations(workspace_id: str):
-    rows = await Conversation.filter(workspace_id=workspace_id, archived=False).order_by("-updated_at")
+async def list_conversations(
+    workspace_id: str,
+    q: str = Query("", max_length=200),
+    archived: Literal["exclude", "include", "only"] = Query("exclude"),
+    limit: int = Query(200, ge=1, le=500),
+):
+    query = q.strip()
+    rows = await search_conversations(workspace_id, query=query, archived=archived, limit=limit)
     counts = await _user_turn_counts([r.id for r in rows])
     run_ids = [str(r.active_run_id) for r in rows if r.active_run_id]
     statuses, awaiting = await _active_run_meta(run_ids)
-    return [
-        _conv(
-            r,
-            turn_count=counts.get(str(r.id), 0),
-            run_status=statuses.get(str(r.active_run_id)) if r.active_run_id else None,
-            awaiting_approval=bool(r.active_run_id and str(r.active_run_id) in awaiting),
+    snippets = await snippets_for_conversations([str(r.id) for r in rows], query) if query else {}
+    out = []
+    for r in rows:
+        title_hit = bool(query) and query.lower() in (r.title or "").lower()
+        snippet = snippets.get(str(r.id))
+        match = None
+        if query:
+            if title_hit and snippet:
+                match = "both"
+            elif title_hit:
+                match = "title"
+            elif snippet:
+                match = "content"
+            else:
+                match = "content"
+        out.append(
+            _conv(
+                r,
+                turn_count=counts.get(str(r.id), 0),
+                run_status=statuses.get(str(r.active_run_id)) if r.active_run_id else None,
+                awaiting_approval=bool(r.active_run_id and str(r.active_run_id) in awaiting),
+                snippet=snippet,
+                match=match,
+            )
         )
-        for r in rows
-    ]
+    return out
 
 
 @router.post("/conversations")
@@ -226,6 +252,8 @@ def _conv(
     turn_count: int = 0,
     run_status: str | None = None,
     awaiting_approval: bool = False,
+    snippet: str | None = None,
+    match: str | None = None,
 ) -> dict:
     return {
         "id": str(row.id),
@@ -236,7 +264,10 @@ def _conv(
         "active_run_id": row.active_run_id,
         "run_status": run_status,
         "awaiting_approval": awaiting_approval,
+        "archived": bool(row.archived),
         "turn_count": turn_count,
+        "snippet": snippet,
+        "match": match,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }

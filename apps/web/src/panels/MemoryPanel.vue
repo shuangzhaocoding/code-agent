@@ -12,7 +12,17 @@ type MemoryRow = {
   subject: string
   content: Record<string, unknown>
   tags: string[]
+  pinned?: boolean
+  enabled?: boolean
   updated_at?: string | null
+}
+
+type RuleRow = {
+  path: string
+  title: string
+  root?: boolean
+  pinned: boolean
+  enabled: boolean
 }
 
 const KIND_META: Record<string, { accent: string; icon: string }> = {
@@ -34,6 +44,7 @@ const KIND_META: Record<string, { accent: string; icon: string }> = {
 const { t } = useI18n()
 const store = useAppStore()
 const rows = ref<MemoryRow[]>([])
+const rules = ref<RuleRow[]>([])
 const loading = ref(false)
 const error = ref('')
 const query = ref('')
@@ -92,12 +103,42 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    const data = await api<{ memories: MemoryRow[] }>(`/api/workspaces/${workspaceId.value}/memories`)
-    rows.value = data.memories || []
+    const [mem, ruleData] = await Promise.all([
+      api<{ memories: MemoryRow[] }>(`/api/workspaces/${workspaceId.value}/memories`),
+      api<{ rules: RuleRow[] }>(`/api/workspaces/${workspaceId.value}/rules`).catch(() => ({ rules: [] })),
+    ])
+    rows.value = mem.memories || []
+    rules.value = ruleData.rules || []
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
     loading.value = false
+  }
+}
+
+async function patchMemory(row: MemoryRow, body: { pinned?: boolean; enabled?: boolean }) {
+  if (!workspaceId.value) return
+  try {
+    const updated = await api<MemoryRow>(`/api/workspaces/${workspaceId.value}/memories/${row.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    })
+    rows.value = rows.value.map((item) => (item.id === row.id ? { ...item, ...updated } : item))
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
+  }
+}
+
+async function patchRule(row: RuleRow, body: { pinned?: boolean; enabled?: boolean }) {
+  if (!workspaceId.value) return
+  try {
+    const updated = await api<RuleRow>(`/api/workspaces/${workspaceId.value}/rules`, {
+      method: 'PATCH',
+      body: JSON.stringify({ path: row.path, ...body }),
+    })
+    rules.value = rules.value.map((item) => (item.path === row.path ? { ...item, ...updated } : item))
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : String(err)
   }
 }
 
@@ -135,9 +176,46 @@ onMounted(() => void load())
       <section class="tip-card">
         <span class="tip-icon"><AppIcon name="memory" :size="16" /></span>
         <div class="tip-copy">
-          <strong>{{ t('memory.tipTitle') }}</strong>
-          <p>{{ t('memory.tipBody') }}</p>
+          <strong>{{ t('memory.priorityTitle') }}</strong>
+          <ol class="priority-list">
+            <li>{{ t('memory.priorityUser') }}</li>
+            <li>{{ t('memory.priorityRules') }}</li>
+            <li>{{ t('memory.priorityPinned') }}</li>
+            <li>{{ t('memory.prioritySoft') }}</li>
+          </ol>
+          <p>{{ t('memory.priorityWhy') }}</p>
         </div>
+      </section>
+
+      <section v-if="rules.length" class="rules-block">
+        <h2>{{ t('memory.rulesTitle') }}</h2>
+        <p class="rules-lead">{{ t('memory.rulesLead') }}</p>
+        <article v-for="rule in rules" :key="rule.path" class="rule-row" :class="{ off: !rule.enabled }">
+          <div>
+            <strong>{{ rule.title }}</strong>
+            <code>{{ rule.path }}</code>
+          </div>
+          <div class="rule-actions">
+            <button
+              type="button"
+              class="ghost-icon-btn"
+              :class="{ active: rule.pinned }"
+              :title="rule.pinned ? t('memory.unpin') : t('memory.pin')"
+              @click="patchRule(rule, { pinned: !rule.pinned })"
+            >
+              <AppIcon name="pin" :size="15" />
+            </button>
+            <button
+              type="button"
+              class="ghost-icon-btn"
+              :class="{ active: !rule.enabled }"
+              :title="rule.enabled ? t('memory.disable') : t('memory.enable')"
+              @click="patchRule(rule, { enabled: !rule.enabled })"
+            >
+              <AppIcon name="ban" :size="15" />
+            </button>
+          </div>
+        </article>
       </section>
 
       <div class="toolbar">
@@ -179,6 +257,7 @@ onMounted(() => void load())
           v-for="row in filtered"
           :key="row.id"
           class="memory-card"
+          :class="{ off: row.enabled === false, pinned: row.pinned }"
           :style="{ '--accent': kindMeta(row.kind).accent }"
         >
           <div class="card-top">
@@ -189,18 +268,40 @@ onMounted(() => void load())
               <div class="card-title-row">
                 <strong>{{ row.subject }}</strong>
                 <span class="kind-pill">{{ kindLabel(row.kind) }}</span>
+                <span v-if="row.pinned" class="kind-pill pin">{{ t('memory.pinned') }}</span>
+                <span v-if="row.enabled === false" class="kind-pill off">{{ t('memory.disabled') }}</span>
               </div>
               <p class="statement">{{ statement(row) }}</p>
             </div>
-            <button
-              type="button"
-              class="card-delete-btn ghost-icon-btn danger"
-              :title="t('common.delete')"
-              :disabled="deletingId === row.id"
-              @click="remove(row)"
-            >
-              <AppIcon name="trash" :size="16" :stroke-width="1.75" />
-            </button>
+            <div class="card-btns">
+              <button
+                type="button"
+                class="card-delete-btn ghost-icon-btn"
+                :class="{ active: row.pinned }"
+                :title="row.pinned ? t('memory.unpin') : t('memory.pin')"
+                @click="patchMemory(row, { pinned: !row.pinned })"
+              >
+                <AppIcon name="pin" :size="16" :stroke-width="1.75" />
+              </button>
+              <button
+                type="button"
+                class="card-delete-btn ghost-icon-btn"
+                :class="{ active: row.enabled === false }"
+                :title="row.enabled === false ? t('memory.enable') : t('memory.disable')"
+                @click="patchMemory(row, { enabled: row.enabled === false })"
+              >
+                <AppIcon name="ban" :size="16" :stroke-width="1.75" />
+              </button>
+              <button
+                type="button"
+                class="card-delete-btn ghost-icon-btn danger"
+                :title="t('common.delete')"
+                :disabled="deletingId === row.id"
+                @click="remove(row)"
+              >
+                <AppIcon name="trash" :size="16" :stroke-width="1.75" />
+              </button>
+            </div>
           </div>
 
           <div class="card-foot">
@@ -278,6 +379,40 @@ onMounted(() => void load())
   color: var(--text-secondary);
   line-height: 1.55;
 }
+.priority-list {
+  margin: 6px 0 8px;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--text-h);
+  line-height: 1.55;
+}
+.rules-block {
+  margin-bottom: 18px;
+}
+.rules-block h2 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--text-h);
+}
+.rules-lead {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.rule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+.rule-row.off { opacity: 0.55; }
+.rule-row strong { display: block; font-size: 13px; color: var(--text-h); }
+.rule-row code { font-size: 11px; color: var(--text-muted); }
+.rule-actions { display: flex; gap: 4px; }
 
 .toolbar {
   display: flex;
@@ -392,6 +527,10 @@ onMounted(() => void load())
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   box-shadow: 0 1px 0 color-mix(in srgb, var(--accent) 8%, transparent);
 }
+.memory-card.off { opacity: 0.62; }
+.kind-pill.pin { color: #d97706; }
+.kind-pill.off { color: var(--text-muted); }
+.card-btns { display: flex; gap: 2px; flex-shrink: 0; }
 
 .card-top {
   display: flex;
@@ -445,7 +584,8 @@ onMounted(() => void load())
   transition: opacity 0.15s ease;
 }
 .memory-card:hover .card-delete-btn,
-.card-delete-btn:focus-visible {
+.card-delete-btn:focus-visible,
+.card-delete-btn.active {
   opacity: 1;
 }
 .card-delete-btn:disabled {

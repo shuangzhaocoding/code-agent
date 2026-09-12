@@ -19,16 +19,28 @@ const workExpanded = ref(false)
 
 const finished = computed(() => !props.streaming)
 
+const lastTodoId = computed(() => {
+  const last = [...props.msg.blocks].reverse().find((b) => b.type === 'todo')
+  return last?.id || ''
+})
+
 const workBlocks = computed(() =>
   props.msg.blocks.filter((b) => {
     if (b.type === 'error') return false
-    // Approvals belong in work process after the run (and never in the final answer).
     if (b.type === 'approval') return finished.value
+    if (b.type === 'todo') return finished.value && b.id !== lastTodoId.value
     return !isConversationBlock(b.type)
   }),
 )
 
 const answerBlocks = computed(() => {
+  const lastTodo = lastTodoId.value
+  const isAnswer = (b: Block) =>
+    (b.type === 'assistant.markdown' && isAnswerMarkdown(b)) ||
+    b.type === 'error' ||
+    b.type === 'user.text' ||
+    (b.type === 'todo' && b.id === lastTodo)
+
   const candidates = props.msg.blocks.filter(
     (b) => (b.type === 'assistant.markdown' && isAnswerMarkdown(b as Block)) || b.type === 'error',
   )
@@ -38,15 +50,14 @@ const answerBlocks = computed(() => {
     )
   }
   if (candidates.length <= 1) {
-    return props.msg.blocks.filter(
-      (b) => b.type !== 'approval' && (isConversationBlock(b.type) || b.type === 'error'),
-    )
+    return props.msg.blocks.filter((b) => b.type !== 'approval' && isAnswer(b as Block))
   }
   const lastMd = candidates[candidates.length - 1]
   return props.msg.blocks.filter(
     (b) =>
       b.type === 'error' ||
       b.type === 'user.text' ||
+      (b.type === 'todo' && b.id === lastTodo) ||
       (b.type === 'assistant.markdown' && b === lastMd),
   )
 })
@@ -100,10 +111,15 @@ function summaryLabel(): string {
   let tools = 0
   let files = 0
   let approvals = 0
+  let todos = 0
   let other = 0
   for (const b of blocks) {
     if (b.type === 'approval') {
       approvals += 1
+      continue
+    }
+    if (b.type === 'todo') {
+      todos += 1
       continue
     }
     const kind = classifyBlock(b)
@@ -116,6 +132,7 @@ function summaryLabel(): string {
   if (think) parts.push(`${think} 次思考`)
   if (tools) parts.push(`${tools} 次工具`)
   if (files) parts.push(`${files} 处变更`)
+  if (todos) parts.push(`${todos} 份待办`)
   if (approvals) parts.push(`${approvals} 次确认`)
   if (!parts.length) parts.push(`${blocks.length || other} 步`)
   return parts.join(' · ')

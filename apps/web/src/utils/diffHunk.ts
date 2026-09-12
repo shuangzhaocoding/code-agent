@@ -49,5 +49,8 @@ export function rejectHunkFromAfter(before: string, after: string, change: LineC
 }
 
 export function textsEqual(a: string, b: string): boolean {
-  return a === b
+  const left = a.replace(/\r\n/g, '\n')
+  const right = b.replace(/\r\n/g, '\n')
+  if (left === right) return true
+  return left.replace(/\n$/, '') === right.replace(/\n$/, '')
 }

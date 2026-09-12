@@ -1,46 +1,78 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import GitCommitTreeNode from '@/panels/GitCommitTreeNode.vue'
+import GitHoverActions from '@/components/GitHoverActions.vue'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
-import type { GitTreeItem } from '@/utils/gitFileTree'
+import { collectGitFilePaths, type GitTreeItem } from '@/utils/gitFileTree'
 
 defineOptions({ name: 'GitCommitTreeNode' })
 
-defineProps<{
+const props = defineProps<{
   node: GitTreeItem
   depth: number
   expanded: Set<string>
   activePath: string
   selectable?: boolean
   selected?: Set<string>
+  stagedOnly?: Set<string>
+  deletedPaths?: Set<string>
+  busy?: boolean
 }>()
 
 const emit = defineEmits<{
   toggle: [path: string]
   select: [path: string]
   open: [path: string]
-  check: [path: string]
+  check: [path: string, kind: 'file' | 'dir']
   context: [event: MouseEvent, path: string, kind: 'file' | 'dir']
+  action: [id: string, path: string, kind: 'file' | 'dir']
 }>()
+
+const childFiles = computed(() => collectGitFilePaths(props.node))
+const dirChecked = computed(
+  () => childFiles.value.length > 0 && childFiles.value.every((path) => props.selected?.has(path)),
+)
+const dirPartial = computed(
+  () => !dirChecked.value && childFiles.value.some((path) => props.selected?.has(path)),
+)
+const dirStagedOnly = computed(
+  () => childFiles.value.length > 0 && childFiles.value.every((path) => props.stagedOnly?.has(path)),
+)
 </script>
 
 <template>
   <div class="node">
-    <button
+    <div
       v-if="node.kind === 'dir'"
-      type="button"
       class="row dir"
       :style="{ paddingLeft: 8 + depth * 14 + 'px' }"
       @click="emit('toggle', node.path)"
       @contextmenu.prevent.stop="emit('context', $event, node.path, 'dir')"
     >
       <span class="twist" :class="{ on: expanded.has(node.path) }" />
+      <input
+        v-if="selectable"
+        type="checkbox"
+        class="check"
+        :checked="dirChecked"
+        :indeterminate="dirPartial"
+        @click.stop
+        @change="emit('check', node.path, 'dir')"
+      />
       <FileTreeIcon kind="dir" :path="node.path" :expanded="expanded.has(node.path)" :size="16" />
       <span class="label">{{ node.name }}</span>
       <span class="stats">
         <em v-if="node.additions" class="add">+{{ node.additions }}</em>
         <em v-if="node.deletions" class="del">-{{ node.deletions }}</em>
       </span>
-    </button>
+      <GitHoverActions
+        v-if="selectable"
+        kind="dir"
+        :staged-only="dirStagedOnly"
+        :disabled="busy"
+        @action="(id) => emit('action', id, node.path, 'dir')"
+      />
+    </div>
     <div
       v-else
       class="row file"
@@ -55,7 +87,7 @@ const emit = defineEmits<{
         class="check"
         :checked="selected?.has(node.path)"
         @click.stop
-        @change="emit('check', node.path)"
+        @change="emit('check', node.path, 'file')"
       />
       <button
         type="button"
@@ -72,6 +104,14 @@ const emit = defineEmits<{
           <em v-if="node.deletions" class="del">-{{ node.deletions }}</em>
         </span>
       </button>
+      <GitHoverActions
+        v-if="selectable"
+        kind="file"
+        :deleted="deletedPaths?.has(node.path)"
+        :staged-only="stagedOnly?.has(node.path)"
+        :disabled="busy"
+        @action="(id) => emit('action', id, node.path, 'file')"
+      />
     </div>
     <template v-if="node.kind === 'dir' && expanded.has(node.path)">
       <GitCommitTreeNode
@@ -83,11 +123,15 @@ const emit = defineEmits<{
         :active-path="activePath"
         :selectable="selectable"
         :selected="selected"
+        :staged-only="stagedOnly"
+        :deleted-paths="deletedPaths"
+        :busy="busy"
         @toggle="(p) => emit('toggle', p)"
         @select="(p) => emit('select', p)"
         @open="(p) => emit('open', p)"
-        @check="(p) => emit('check', p)"
+        @check="(p, k) => emit('check', p, k)"
         @context="(e, p, k) => emit('context', e, p, k)"
+        @action="(id, p, k) => emit('action', id, p, k)"
       />
     </template>
   </div>
@@ -95,21 +139,28 @@ const emit = defineEmits<{
 
 <style scoped>
 .row {
+  --git-row-bg: var(--panel-bg);
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
   width: 100%;
   height: 26px;
   border: 0;
-  background: transparent;
+  background: var(--git-row-bg);
   color: var(--text);
   cursor: pointer;
   text-align: left;
   padding-right: 8px;
   font-size: 12px;
 }
-.row:hover { background: var(--bg-muted); }
-.row.on { background: var(--primary-soft); }
+.row:hover { --git-row-bg: var(--bg-muted); }
+.row.on { --git-row-bg: var(--primary-soft); }
+.row:hover :deep(.git-hover-actions),
+.row:focus-within :deep(.git-hover-actions) {
+  opacity: 1;
+  pointer-events: auto;
+}
 .row-main {
   display: flex;
   align-items: center;

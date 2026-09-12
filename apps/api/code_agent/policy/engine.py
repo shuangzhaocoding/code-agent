@@ -65,13 +65,19 @@ async def tool_needs_approval(tool: str, *, kind: str, details: dict | None = No
     details = details or {}
     level = await get_auto_run_level()
 
+    if tool == "todo_write":
+        return False
+
     if tool == "run_command":
         return command_needs_approval(str(details.get("command") or ""), level)
 
-    if tool in {"write_file", "search_replace"}:
-        path = str(details.get("path") or "")
-        if is_protected(path):
+    if tool in {"write_file", "search_replace", "apply_patch"}:
+        paths = details.get("paths") if isinstance(details.get("paths"), list) else None
+        check_paths = [str(p) for p in paths] if paths else [str(details.get("path") or "")]
+        if any(is_protected(p) for p in check_paths if p):
             return True
+        if tool == "apply_patch" and details.get("has_delete"):
+            return level in {"manual", "sandbox"}
         return level == "manual"
 
     if tool == "delete_file":
@@ -85,7 +91,7 @@ async def tool_needs_approval(tool: str, *, kind: str, details: dict | None = No
             return True
         if level == "full":
             return tool in {"git_push", "git_reset"}
-        return tool in {"git_commit", "git_push", "git_pull", "git_checkout", "git_reset"}
+        return tool in {"git_commit", "git_push", "git_pull", "git_checkout", "git_reset", "git_stash", "git_init"}
 
     return level == "manual"
 

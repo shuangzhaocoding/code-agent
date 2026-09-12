@@ -217,6 +217,122 @@ async def delete_file(path: str) -> str:
 
 
 @tool
+async def apply_patch(patch: str, path: str = "") -> str:
+    """Apply a structured patch to one or more files. Prefer this over write_file for existing files.
+
+    Use this format (one or more files):
+
+    *** Begin Patch
+    *** Update File: relative/path.py
+    @@
+     context line
+    -old line
+    +new line
+    *** Add File: relative/new.py
+    +print("hello")
+    *** Delete File: relative/obsolete.py
+    *** End Patch
+
+    Unified diffs (--- / +++ / @@) are also accepted. Keep context lines accurate.
+    """
+    from code_agent.tools.patch import PatchError, apply_file_patch, parse_patch
+
+    try:
+        ops = parse_patch(patch, default_path=path.strip())
+    except PatchError as exc:
+        return f"ERROR: {exc}"
+    if not ops:
+        return "ERROR: empty patch"
+    fs = await _backend()
+    paths = [op.path for op in ops]
+    protected = [p for p in paths if is_protected(p)]
+    if protected:
+        return f"ERROR: protected file, cannot patch: {', '.join(protected)}"
+    has_delete = any(op.kind == "delete" for op in ops)
+    label = f"应用补丁：{', '.join(paths[:6])}" + ("…" if len(paths) > 6 else "")
+    if not await request_approval(
+        "apply_patch",
+        label,
+        {"path": paths[0], "paths": paths, "has_delete": has_delete},
+        kind="delete" if has_delete else "write",
+    ):
+        return "ERROR: user denied this operation"
+
+    plan: list[tuple[str, str, str, str]] = []
+    for op in ops:
+        old = ""
+        existed = await fs.is_file(op.path)
+        if existed:
+            try:
+                old = await fs.read_text(op.path)
+            except Exception as exc:
+                return f"ERROR: {op.path}: {exc}"
+        elif op.kind == "update":
+            return f"ERROR: file not found: {op.path}"
+        elif op.kind == "add" and existed:
+            return f"ERROR: file already exists: {op.path} (use Update File)"
+        try:
+            new = apply_file_patch(old if existed else None, op)
+        except PatchError as exc:
+            return f"ERROR: {op.path}: {exc}"
+        action = "delete" if new is None else ("create" if not existed else "edit")
+        plan.append((op.path, action, old, new if new is not None else ""))
+
+    import difflib
+
+    written: list[str] = []
+    for rel, action, old, new in plan:
+        if action == "delete":
+            await fs.delete(rel)
+            await _emit("file.delete", {"path": rel, "action": "delete", "before": old, "after": ""})
+            written.append(f"deleted {rel}")
+            continue
+        await fs.write_text(rel, new)
+        diff = "".join(
+            difflib.unified_diff(
+                old.splitlines(True),
+                new.splitlines(True),
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            )
+        )
+        await _emit(
+            "file.diff",
+            {
+                "path": rel,
+                "action": action,
+                "added": new.count("\n"),
+                "removed": old.count("\n"),
+                "before": old,
+                "after": new,
+            },
+            diff,
+        )
+        written.append(f"{action} {rel}")
+    return "Patched " + "; ".join(written)
+
+
+@tool
+async def todo_write(todos: list | str) -> str:
+    """Replace the current task checklist. Call this for multi-step work and keep it updated.
+
+    `todos` is an array of objects: [{"id":"1","content":"Inspect auth flow","status":"in_progress"}].
+    status: pending | in_progress | completed | cancelled. At most one item may be in_progress.
+    Always send the full list (not a delta).
+    """
+    from code_agent.tools.todos import normalize_todos, render_todo_text, todo_summary
+
+    try:
+        items = normalize_todos(todos)
+    except ValueError as exc:
+        return f"ERROR: {exc}"
+    text = render_todo_text(items)
+    summary = todo_summary(items)
+    await _emit("todo", {"items": items, **summary}, text)
+    return text
+
+
+@tool
 async def run_command(command: str, cwd: str = ".") -> str:
     """Run a shell command. cwd may be workspace-relative or absolute (incl. ~)."""
     if is_command_blocked(command):
@@ -284,7 +400,9 @@ async def load_skill(name: str) -> str:
 
 
 def register_builtin_tools() -> None:
+    from code_agent.mcp.bridge import register_mcp_plugin
     from code_agent.plugins.base import PluginInfo
+    from code_agent.tools.explore import explore_codebase
 
     registry.loading_plugin_id = "builtin.tools"
     for t, modes in [
@@ -292,10 +410,13 @@ def register_builtin_tools() -> None:
         (list_dir, ("ask", "agent", "plan")),
         (glob_search, ("ask", "agent", "plan")),
         (grep_search, ("ask", "agent", "plan")),
+        (explore_codebase, ("ask", "agent", "plan")),
         (list_skills, ("ask", "agent", "plan")),
         (load_skill, ("ask", "agent", "plan")),
+        (todo_write, ("ask", "agent", "plan")),
         (write_file, ("agent",)),
         (search_replace, ("agent",)),
+        (apply_patch, ("agent",)),
         (delete_file, ("agent",)),
         (run_command, ("agent",)),
     ]:
@@ -312,7 +433,8 @@ def register_builtin_tools() -> None:
             author="Code Agent",
             icon="wrench",
             accent="#4f6bff",
-            keywords=("files", "terminal", "search", "skills"),
+            keywords=("files", "terminal", "search", "skills", "patch", "todo", "explore"),
         )
     )
     registry.loading_plugin_id = ""
+    register_mcp_plugin()

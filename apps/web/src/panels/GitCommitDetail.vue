@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { api } from '@/api/http'
+import { t } from '@/i18n'
+import { useAppStore } from '@/stores/app'
+import { useGitDiffTarget } from '@/composables/useGitDiffTarget'
+import type { GitDiffTarget } from '@/utils/gitPrefs'
 import AppIcon from '@/components/AppIcon.vue'
 import GitDiffView from '@/panels/GitDiffView.vue'
 import GitCommitTreeNode from '@/panels/GitCommitTreeNode.vue'
@@ -29,12 +33,16 @@ const emit = defineEmits<{
   openFile: [path: string]
 }>()
 
+const store = useAppStore()
+const { diffTarget, setDiffTarget } = useGitDiffTarget()
 const loading = ref(false)
 const error = ref('')
 const commit = ref<GitCommit | null>(props.preview || null)
 const files = ref<CommitFile[]>([])
 const activePath = ref('')
+const showPanelDiff = ref(false)
 const viewMode = ref<'list' | 'tree'>((localStorage.getItem('ca.git.commit.view') as 'list' | 'tree') || 'list')
+const diffLayout = ref<'down' | 'right'>((localStorage.getItem('ca.git.commit.layout') as 'down' | 'right') || 'down')
 const treeExpanded = ref<Set<string>>(new Set())
 
 const activeFile = computed(() => files.value.find((file) => file.path === activePath.value) || null)
@@ -44,6 +52,9 @@ const treeRoots = computed(() => buildGitFileTree(files.value))
 watch(viewMode, (mode) => {
   localStorage.setItem('ca.git.commit.view', mode)
   if (mode === 'tree') expandAllDirs()
+})
+watch(diffLayout, (mode) => {
+  localStorage.setItem('ca.git.commit.layout', mode)
 })
 
 watch(treeRoots, () => {
@@ -59,6 +70,39 @@ function toggleTreeDir(path: string) {
   if (next.has(path)) next.delete(path)
   else next.add(path)
   treeExpanded.value = next
+}
+
+function closeDiff() {
+  showPanelDiff.value = false
+  activePath.value = ''
+}
+
+function selectFile(path: string, force?: GitDiffTarget) {
+  activePath.value = path
+  const mode = force || diffTarget.value
+  if (mode === 'editor') {
+    showPanelDiff.value = false
+    void openDiffInEditor(path)
+    return
+  }
+  showPanelDiff.value = true
+}
+
+function chooseDiffTarget(mode: GitDiffTarget) {
+  setDiffTarget(mode)
+  if (mode === 'editor') {
+    showPanelDiff.value = false
+    if (activePath.value) void openDiffInEditor(activePath.value)
+    return
+  }
+  if (!activePath.value && files.value[0]) activePath.value = files.value[0].path
+  showPanelDiff.value = Boolean(activePath.value)
+}
+
+async function openDiffInEditor(path?: string) {
+  const target = path || activePath.value
+  if (!target) return
+  await store.openWorkingDiff(target)
 }
 
 function statusLabel(code: string) {
@@ -77,7 +121,14 @@ async function load() {
     )
     commit.value = data.commit
     files.value = data.files || []
-    activePath.value = files.value[0]?.path || ''
+    const first = files.value[0]?.path || ''
+    if (diffTarget.value === 'panel') {
+      activePath.value = first
+      showPanelDiff.value = Boolean(first)
+    } else {
+      activePath.value = ''
+      showPanelDiff.value = false
+    }
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -125,6 +176,24 @@ async function copyHash() {
       >
         <AppIcon name="tree" :size="16" :stroke-width="1.75" />
       </button>
+      <button
+        type="button"
+        class="ghost-icon-btn"
+        :class="{ active: diffTarget === 'panel' }"
+        :title="t('git.diffTargetPanelTip')"
+        @click="chooseDiffTarget('panel')"
+      >
+        <AppIcon name="git" :size="16" :stroke-width="1.75" />
+      </button>
+      <button
+        type="button"
+        class="ghost-icon-btn"
+        :class="{ active: diffTarget === 'editor' }"
+        :title="t('git.diffTargetEditorTip')"
+        @click="chooseDiffTarget('editor')"
+      >
+        <AppIcon name="file" :size="16" :stroke-width="1.75" />
+      </button>
     </div>
     <div v-if="header" class="header">
       <strong class="subject">{{ header.subject || '(无说明)' }}</strong>
@@ -134,6 +203,10 @@ async function copyHash() {
     <p v-else-if="loading" class="empty">加载 diff…</p>
     <p v-else-if="!files.length" class="empty">该提交没有文件变更</p>
     <template v-else>
+      <div
+        class="split"
+        :class="{ 'has-diff': showPanelDiff && !!activeFile, 'diff-right': diffLayout === 'right', 'diff-down': diffLayout === 'down' }"
+      >
       <div class="files">
         <template v-if="viewMode === 'list'">
           <button
@@ -142,7 +215,7 @@ async function copyHash() {
             type="button"
             class="file"
             :class="{ on: file.path === activePath }"
-            @click="activePath = file.path"
+            @click="selectFile(file.path)"
             @dblclick="emit('openFile', file.path)"
           >
             <span class="code">{{ file.status }}</span>
@@ -165,17 +238,44 @@ async function copyHash() {
             :expanded="treeExpanded"
             :active-path="activePath"
             @toggle="toggleTreeDir"
-            @select="(path) => activePath = path"
+            @select="selectFile"
             @open="(path) => emit('openFile', path)"
           />
         </template>
       </div>
-      <div v-if="activeFile" class="diff-pane">
+      <div v-if="showPanelDiff && activeFile" class="diff-pane">
         <div class="diff-head">
-          <span>{{ statusLabel(activeFile.status) }} · {{ activeFile.path }}</span>
-          <span v-if="activeFile.truncated" class="warn">已截断</span>
+          <span class="diff-title">{{ statusLabel(activeFile.status) }} · {{ activeFile.path }}</span>
+          <span class="diff-head-actions">
+            <span v-if="activeFile.truncated" class="warn">{{ t('git.truncated') }}</span>
+            <button
+              type="button"
+              class="ghost-icon-btn"
+              :class="{ active: diffLayout === 'down' }"
+              :title="t('git.layoutDown')"
+              @click="diffLayout = 'down'"
+            >
+              <AppIcon name="panel-bottom" :size="14" :stroke-width="1.75" />
+            </button>
+            <button
+              type="button"
+              class="ghost-icon-btn"
+              :class="{ active: diffLayout === 'right' }"
+              :title="t('git.layoutRight')"
+              @click="diffLayout = 'right'"
+            >
+              <AppIcon name="panel-right" :size="14" :stroke-width="1.75" />
+            </button>
+            <button type="button" class="ghost-icon-btn" :title="t('git.openInEditor')" @click="openDiffInEditor()">
+              <AppIcon name="file" :size="14" :stroke-width="1.75" />
+            </button>
+            <button type="button" class="ghost-icon-btn" :title="t('git.closeDiff')" @click="closeDiff">
+              <AppIcon name="close" :size="14" :stroke-width="1.75" />
+            </button>
+          </span>
         </div>
         <GitDiffView :patch="activeFile.patch" :binary="activeFile.binary" />
+      </div>
       </div>
     </template>
   </div>
@@ -245,12 +345,34 @@ async function copyHash() {
   color: var(--text-muted);
   font-size: 13px;
 }
+.split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.split.has-diff.diff-right {
+  flex-direction: row;
+}
 .files {
-  flex: 0 0 auto;
-  max-height: 36%;
+  flex: 1;
+  min-height: 0;
   overflow: auto;
   border-top: var(--border-width) solid var(--border);
+}
+.split.has-diff.diff-down .files {
+  flex: 0 0 auto;
+  max-height: 36%;
   border-bottom: var(--border-width) solid var(--border);
+}
+.split.has-diff.diff-right .files {
+  flex: 0 0 36%;
+  max-height: none;
+  min-width: 148px;
+  max-width: 52%;
+  border-right: var(--border-width) solid var(--border);
+  border-bottom: 0;
 }
 .file {
   width: 100%;
@@ -305,9 +427,21 @@ async function copyHash() {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 4px 8px 4px 12px;
   font-size: 11px;
   color: var(--text-muted);
+  flex-shrink: 0;
+}
+.diff-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   flex-shrink: 0;
 }
 .warn { color: var(--primary); }

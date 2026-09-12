@@ -71,6 +71,11 @@ export function buildGitFileTree(files: GitTreeFile[]): GitTreeItem[] {
   return root
 }
 
+export function collectGitFilePaths(node: GitTreeItem): string[] {
+  if (node.kind === 'file') return [node.path]
+  return (node.children || []).flatMap(collectGitFilePaths)
+}
+
 export function collectGitDirPaths(nodes: GitTreeItem[], out: string[] = []) {
   for (const node of nodes) {
     if (node.kind === 'dir') {

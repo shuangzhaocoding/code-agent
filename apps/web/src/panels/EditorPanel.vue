@@ -6,14 +6,22 @@ import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
+import InlineEditWidget from '@/components/InlineEditWidget.vue'
+import InlineEditChip from '@/components/InlineEditChip.vue'
+import GotoPeek, { type GotoHit } from '@/components/GotoPeek.vue'
 import FilePreviewHost from '@/preview/FilePreviewHost.vue'
 import { isPreviewKind } from '@/preview/classify'
 import { langOf } from '@/utils/editorLang'
 import { canFormatPath, formatDocumentText } from '@/utils/formatDocument'
+import { expandInlineRange, findLocalDefinitions, identifierAt } from '@/utils/gotoSymbol'
+import { api } from '@/api/http'
+import { useToast } from '@/composables/useToast'
 import { t } from '@/i18n'
 
 const store = useAppStore()
+const toast = useToast()
 const host = ref<HTMLDivElement | null>(null)
+const wrapEl = ref<HTMLDivElement | null>(null)
 const tabsEl = ref<HTMLElement | null>(null)
 const diffHost = ref<HTMLDivElement | null>(null)
 const mdPreview = ref(false)
@@ -36,11 +44,53 @@ let diffEditor: import('monaco-editor').editor.IStandaloneDiffEditor | null = nu
 let monacoMod: typeof import('monaco-editor') | null = null
 let reviewNavDisposables: import('monaco-editor').IDisposable[] = []
 let diffRevealDisposable: import('monaco-editor').IDisposable | null = null
+let hunkDiffDisposable: import('monaco-editor').IDisposable | null = null
+let hunkZoneIdsMod: string[] = []
+let hunkZoneIdsOrig: string[] = []
+let hunkWidgets: import('monaco-editor').editor.IContentWidget[] = []
 const models = new Map<string, import('monaco-editor').editor.ITextModel>()
 const origModels = new Map<string, import('monaco-editor').editor.ITextModel>()
 let searchDecorations: string[] = []
 let lastSearchHighlight: { path: string; line: number; query: string; caseSensitive?: boolean } | null = null
+let editorInputDisposables: import('monaco-editor').IDisposable[] = []
+let inlineDecorations: string[] = []
+let inlinePreviewApplied = false
+let inlineGen = 0
+const inlineOpen = ref(false)
+const inlinePhase = ref<'prompt' | 'loading' | 'diff'>('prompt')
+const inlineInstruction = ref('')
+const inlineOriginal = ref('')
+const inlineReplacement = ref('')
+const inlineError = ref('')
+const inlineLeft = ref(16)
+const inlineTop = ref(16)
+const inlineLineLabel = ref('')
+const gotoOpen = ref(false)
+const gotoHits = ref<GotoHit[]>([])
+const gotoActive = ref(0)
+const gotoLeft = ref(16)
+const gotoTop = ref(16)
+const gotoSymbolName = ref('')
+const chipOpen = ref(false)
+const chipLeft = ref(16)
+const chipTop = ref(16)
+let skipSelectionChip = false
+let chipTimer = 0
+let chipEditor: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
+let gotoModHeld = false
+let gotoHoverEd: import('monaco-editor').editor.IStandaloneCodeEditor | null = null
+let gotoHoverDecorations: string[] = []
+let lastGotoMouse: {
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor
+  position: { lineNumber: number; column: number }
+} | null = null
 const review = computed(() => store.pendingReview(store.activePath))
+const gitDiff = computed(() => {
+  const path = store.activePath
+  if (!path || review.value) return null
+  return store.gitEditorDiff[path] || null
+})
+const showingDiff = computed(() => Boolean(review.value || gitDiff.value))
 const pendingCount = computed(() => store.pendingReviews.length)
 const fileReviewCount = computed(() => store.pendingReviewCount(store.activePath))
 const fileReviewIndex = computed(() => store.activeReviewIndexFor(store.activePath) + 1)
@@ -51,11 +101,16 @@ const filePathIndex = computed(() => {
 })
 const canCycleDiff = computed(() => fileReviewCount.value > 1)
 const canCycleFile = computed(() => filePendingPathCount.value > 1)
+const canCycleChange = computed(() => canCycleDiff.value || canCycleFile.value)
 
 function cycleDiff(delta: number) {
   const path = store.activePath
-  if (!path || !canCycleDiff.value) return
-  store.cycleFileReview(path, delta)
+  if (!path) return
+  if (canCycleDiff.value) {
+    store.cycleFileReview(path, delta)
+    return
+  }
+  if (canCycleFile.value) void cycleFile(delta)
 }
 
 async function cycleFile(delta: number) {
@@ -64,7 +119,7 @@ async function cycleFile(delta: number) {
 }
 
 const isHtmlFile = computed(() => store.openFile?.kind === 'html')
-const canHtmlPreview = computed(() => Boolean(isHtmlFile.value && !review.value))
+const canHtmlPreview = computed(() => Boolean(isHtmlFile.value && !review.value && !gitDiff.value))
 const showHtmlPreview = computed(() => htmlPreview.value && canHtmlPreview.value)
 
 const activeIsBinaryPreview = computed(() => {
@@ -124,7 +179,7 @@ const primaryFile = computed(() => {
     splitMode.value === 'none' ? store.activePath : primaryPath.value || store.activePath
   return path ? store.openFiles.find((f) => f.path === path) ?? null : null
 })
-const primaryCanHtmlPreview = computed(() => Boolean(primaryFile.value?.kind === 'html' && !review.value))
+const primaryCanHtmlPreview = computed(() => Boolean(primaryFile.value?.kind === 'html' && !review.value && !gitDiff.value))
 const primaryShowHtmlPreview = computed(() => htmlPreview.value && primaryCanHtmlPreview.value)
 const primaryShowFilePreview = computed(() => {
   const f = primaryFile.value
@@ -135,7 +190,7 @@ const primaryShowFilePreview = computed(() => {
 const primaryShowMarkdownPreview = computed(() => {
   const f = primaryFile.value
   return Boolean(
-    mdPreview.value && f && f.kind === 'text' && isMarkdownFile(f.path) && !review.value,
+    mdPreview.value && f && f.kind === 'text' && isMarkdownFile(f.path) && !review.value && !gitDiff.value,
   )
 })
 
@@ -183,8 +238,9 @@ const editorOptions = {
   fontSize: 13,
   scrollBeyondLastLine: false,
   padding: { top: 12 },
-  scrollbar: { verticalScrollbarSize: 8, horizontalScrollbarSize: 8 },
+  scrollbar: { verticalScrollbarSize: 6, horizontalScrollbarSize: 6 },
   contextmenu: false,
+  multiCursorModifier: 'alt' as const,
 }
 
 function detachModelExcept(
@@ -204,7 +260,7 @@ function showPathOn(
 ) {
   if (!monacoMod || !ed) return
   if (opts?.allowReview && review.value && path) {
-    showDiff(path, review.value.before, review.value.after)
+    showDiff(path, review.value.before, review.value.after, { readOnly: true })
     return
   }
   const file = path ? store.openFiles.find((f) => f.path === path) : null
@@ -229,7 +285,15 @@ function showPathOn(
 function showPath(path: string | null) {
   if (!monacoMod) return
   if (review.value && path) {
-    showDiff(path, review.value.before, review.value.after)
+    showDiff(path, review.value.before, review.value.after, { readOnly: true })
+    return
+  }
+  const file = path ? store.openFiles.find((f) => f.path === path) : null
+  const gd = path ? store.gitEditorDiff[path] : null
+  if (gd && path && file && !(isPreviewKind(file.kind) && file.kind !== 'html')) {
+    showDiff(path, gd.original, file.content ?? '', {
+      readOnly: Boolean(gd.modifiedReadonly || file.readonly),
+    })
     return
   }
   diffEditor?.setModel(null)
@@ -287,15 +351,7 @@ async function ensureSecondaryEditor() {
     ...editorOptions,
   })
   bindEditorContextMenu(secondaryEditor)
-  secondaryEditor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
-    void onEditorSave()
-  })
-  secondaryEditor.addCommand(
-    monacoMod.KeyMod.Shift | monacoMod.KeyMod.Alt | monacoMod.KeyCode.KeyF,
-    () => {
-      void formatActiveDocument()
-    },
-  )
+  bindEditorCommands(secondaryEditor)
   secondaryEditor.onDidFocusEditorText(() => {
     focusedPane.value = 'secondary'
     if (secondaryPath.value) store.activateFile(secondaryPath.value)
@@ -313,7 +369,7 @@ function disposeSecondaryEditor() {
 }
 
 async function splitEditor(mode: 'right' | 'down', seedPath?: string) {
-  if (review.value) return
+  if (review.value || gitDiff.value) return
   const current = store.activePath
   primaryPath.value = current
   const seed =
@@ -445,6 +501,7 @@ function applySearchReveal(path: string) {
   )
 
   if (reveal?.path === path) {
+    skipSelectionChip = true
     if (current) {
       editor.setSelection(current.range)
       editor.revealRangeInCenter(current.range)
@@ -465,21 +522,23 @@ function clearReviewNavigation() {
 function bindReviewNavigation() {
   clearReviewNavigation()
   if (!monacoMod || !diffEditor) return
-  const path = store.activePath
-  const canDiff = store.pendingReviewCount(path) > 1
-  const canFile = store.pendingReviewPaths.length > 1
-  if (!canDiff && !canFile) return
   const bind = (ed: import('monaco-editor').editor.IStandaloneCodeEditor) => {
     reviewNavDisposables.push(
       ed.onKeyDown((e) => {
-        if (canDiff && e.keyCode === monacoMod!.KeyCode.UpArrow) {
+        const path = store.activePath
+        const canDiff = store.pendingReviewCount(path) > 1
+        const canFile = store.pendingReviewPaths.length > 1
+        if (!canDiff && !canFile) return
+        if (e.keyCode === monacoMod!.KeyCode.UpArrow) {
           e.preventDefault()
           e.stopPropagation()
-          store.cycleFileReview(path!, -1)
-        } else if (canDiff && e.keyCode === monacoMod!.KeyCode.DownArrow) {
+          if (canDiff && path) store.cycleFileReview(path, -1)
+          else void store.cycleReviewPath(-1)
+        } else if (e.keyCode === monacoMod!.KeyCode.DownArrow) {
           e.preventDefault()
           e.stopPropagation()
-          store.cycleFileReview(path!, 1)
+          if (canDiff && path) store.cycleFileReview(path, 1)
+          else void store.cycleReviewPath(1)
         } else if (canFile && e.keyCode === monacoMod!.KeyCode.LeftArrow) {
           e.preventDefault()
           e.stopPropagation()
@@ -509,6 +568,170 @@ function currentLineChange() {
   return changes.find((c) => (c.modifiedStartLineNumber || 1) >= line) || changes[0]
 }
 
+function clearHunkWidgets() {
+  if (diffEditor) {
+    const mod = diffEditor.getModifiedEditor()
+    const orig = diffEditor.getOriginalEditor()
+    for (const widget of hunkWidgets) mod.removeContentWidget(widget)
+    if (hunkZoneIdsMod.length) {
+      mod.changeViewZones((accessor) => {
+        for (const id of hunkZoneIdsMod) accessor.removeZone(id)
+      })
+    }
+    if (hunkZoneIdsOrig.length) {
+      orig.changeViewZones((accessor) => {
+        for (const id of hunkZoneIdsOrig) accessor.removeZone(id)
+      })
+    }
+  }
+  hunkWidgets = []
+  hunkZoneIdsMod = []
+  hunkZoneIdsOrig = []
+}
+
+function bindHunkPointer(el: HTMLElement, onClick: () => void) {
+  const stop = (e: Event) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+  el.addEventListener('pointerdown', stop, true)
+  el.addEventListener('mousedown', stop, true)
+  el.addEventListener('pointerup', (e) => {
+    stop(e)
+    onClick()
+  }, true)
+}
+
+function makeHunkButton(label: string, kind: 'accept' | 'reject', onClick: () => void) {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = `ca-hunk-btn is-${kind}`
+  btn.textContent = label
+  bindHunkPointer(btn, onClick)
+  return btn
+}
+
+function makeHunkNavButton(dir: 'up' | 'down', title: string, disabled: boolean, onClick: () => void) {
+  const btn = document.createElement('button')
+  btn.type = 'button'
+  btn.className = 'ca-hunk-btn is-nav'
+  btn.title = title
+  btn.disabled = disabled
+  const path = dir === 'up' ? 'M18 15l-6-6-6 6' : 'M6 9l6 6 6-6'
+  btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="${path}"/></svg>`
+  if (!disabled) bindHunkPointer(btn, onClick)
+  return btn
+}
+
+function revealHunkAt(index: number) {
+  const changes = diffEditor?.getLineChanges()
+  if (!changes?.length || !diffEditor) return
+  const i = ((index % changes.length) + changes.length) % changes.length
+  const change = changes[i]
+  const modLine = Math.max(1, change.modifiedStartLineNumber)
+  const origLine = Math.max(1, change.originalStartLineNumber)
+  const mod = diffEditor.getModifiedEditor()
+  const orig = diffEditor.getOriginalEditor()
+  mod.revealLineInCenter(modLine)
+  orig.revealLineInCenter(origLine)
+  mod.setPosition({ lineNumber: modLine, column: 1 })
+  mod.focus()
+}
+
+function syncHunkWidgets() {
+  clearHunkWidgets()
+  if (!monacoMod || !diffEditor || !review.value) return
+  const changes = diffEditor.getLineChanges()
+  if (!changes?.length) return
+  const path = review.value.path
+  const blockId = review.value.blockId
+  const mod = diffEditor.getModifiedEditor()
+  const orig = diffEditor.getOriginalEditor()
+  const Above = monacoMod.editor.ContentWidgetPositionPreference.ABOVE
+  const total = changes.length
+  mod.changeViewZones((modAcc) => {
+    orig.changeViewZones((origAcc) => {
+      changes.forEach((change, index) => {
+        const snap = {
+          originalStartLineNumber: change.originalStartLineNumber,
+          originalEndLineNumber: change.originalEndLineNumber,
+          modifiedStartLineNumber: change.modifiedStartLineNumber,
+          modifiedEndLineNumber: change.modifiedEndLineNumber,
+        }
+        const modStart = snap.modifiedStartLineNumber > 0 ? snap.modifiedStartLineNumber : 1
+        const origStart = snap.originalStartLineNumber > 0 ? snap.originalStartLineNumber : 1
+        hunkZoneIdsMod.push(
+          modAcc.addZone({
+            afterLineNumber: Math.max(0, modStart - 1),
+            heightInPx: 36,
+            domNode: document.createElement('div'),
+          }),
+        )
+        hunkZoneIdsOrig.push(
+          origAcc.addZone({
+            afterLineNumber: Math.max(0, origStart - 1),
+            heightInPx: 36,
+            domNode: document.createElement('div'),
+          }),
+        )
+        const node = document.createElement('div')
+        node.className = 'ca-hunk-actions'
+        const nav = document.createElement('span')
+        nav.className = 'ca-hunk-nav'
+        const indexEl = document.createElement('span')
+        indexEl.className = 'ca-hunk-index'
+        indexEl.textContent = `${index + 1}/${total}`
+        const canSwitch = total > 1
+        nav.append(
+          makeHunkNavButton('up', t('editor.prevDiff'), !canSwitch, () => revealHunkAt(index - 1)),
+          indexEl,
+          makeHunkNavButton('down', t('editor.nextDiff'), !canSwitch, () => revealHunkAt(index + 1)),
+        )
+        node.append(
+          nav,
+          makeHunkButton(t('editor.reject'), 'reject', () => {
+            void store.rejectReviewHunk(path, snap, blockId)
+          }),
+          makeHunkButton(t('editor.accept'), 'accept', () => {
+            void store.acceptReviewHunk(path, snap, blockId)
+          }),
+        )
+        const widget: import('monaco-editor').editor.IContentWidget = {
+          getId: () => `ca-hunk-actions-${index}`,
+          getDomNode: () => node,
+          allowEditorOverflow: true,
+          getPosition: () => ({
+            position: { lineNumber: Math.max(1, modStart), column: 1 },
+            preference: [Above],
+          }),
+        }
+        mod.addContentWidget(widget)
+        hunkWidgets.push(widget)
+        mod.layoutContentWidget(widget)
+      })
+    })
+  })
+}
+
+function bindHunkWidgets() {
+  hunkDiffDisposable?.dispose()
+  if (!diffEditor) return
+  hunkDiffDisposable = diffEditor.onDidUpdateDiff(() => {
+    const current = review.value
+    if (!current) {
+      clearHunkWidgets()
+      return
+    }
+    const changes = diffEditor?.getLineChanges()
+    if (changes && changes.length === 0) {
+      clearHunkWidgets()
+      void store.acceptReview(current.path, current.blockId)
+      return
+    }
+    syncHunkWidgets()
+  })
+}
+
 function clearDiffReveal() {
   diffRevealDisposable?.dispose()
   diffRevealDisposable = null
@@ -533,23 +756,31 @@ function revealDiffPosition() {
   })
 }
 
-function showDiff(path: string, before: string, after: string) {
+function showDiff(path: string, before: string, after: string, opts?: { readOnly?: boolean }) {
   if (!monacoMod || !diffHost.value) return
+  const readOnly = opts?.readOnly !== false
   if (!diffEditor) {
     diffEditor = monacoMod.editor.createDiffEditor(diffHost.value, {
       ...editorOptions,
       theme: 'ca-editor',
-      readOnly: true,
+      readOnly,
       originalEditable: false,
       renderSideBySide: true,
       ignoreTrimWhitespace: false,
     })
     bindEditorContextMenu(diffEditor.getModifiedEditor())
+    bindEditorCommands(diffEditor.getModifiedEditor())
+    bindHunkWidgets()
+  } else {
+    diffEditor.updateOptions({ readOnly })
   }
   const original = ensureOrigModel(path, before)
   const modified = ensureModel(path, after)
   if (original && modified) diffEditor.setModel({ original, modified })
-  bindReviewNavigation()
+  if (readOnly) bindReviewNavigation()
+  else clearReviewNavigation()
+  if (review.value) syncHunkWidgets()
+  else clearHunkWidgets()
   revealDiffPosition()
   requestAnimationFrame(() => {
     diffEditor?.layout()
@@ -562,11 +793,540 @@ async function onEditorSave() {
   const path = store.activePath
   const file = store.openFile
   if (!path || !file || file.readonly) return
+  if (!store.settings) await store.loadSettings()
+  const formatOnSave = store.settings?.values?.['ui.format_on_save'] !== false
+  if (formatOnSave) await formatActiveDocument()
   const ed = activeEditor()
   const model = ed?.getModel()
   if (model) store.updateOpenContent(path, model.getValue())
   await store.saveOpenFile()
 }
+
+function onEditorSaveEvent(e: Event) {
+  const notify = Boolean((e as CustomEvent<{ notify?: boolean }>).detail?.notify)
+  void onEditorSave()
+    .then(() => {
+      if (notify) toast.success(t('common.saved'))
+    })
+    .catch((err) => {
+      toast.error(err instanceof Error ? err.message : t('common.saveFailed'))
+    })
+}
+
+function onInlineEditEvent() {
+  openInlineEdit()
+}
+
+function onGotoEvent() {
+  void gotoDefinition()
+}
+
+function bindEditorCommands(ed: import('monaco-editor').editor.IStandaloneCodeEditor) {
+  if (!monacoMod) return
+  ed.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
+    void onEditorSave()
+  })
+  ed.addCommand(monacoMod.KeyMod.Shift | monacoMod.KeyMod.Alt | monacoMod.KeyCode.KeyF, () => {
+    void formatActiveDocument()
+  })
+  ed.addCommand(monacoMod.KeyCode.F12, () => {
+    void gotoDefinition()
+  })
+  editorInputDisposables.push(
+    ed.onKeyDown((e) => {
+      if (
+        e.keyCode === monacoMod!.KeyCode.KeyK &&
+        (e.ctrlKey || e.metaKey) &&
+        !e.altKey &&
+        !e.shiftKey
+      ) {
+        e.preventDefault()
+        e.stopPropagation()
+        openInlineEdit()
+      }
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onMouseDown((e) => {
+      if (!(e.event.ctrlKey || e.event.metaKey) || e.event.altKey || e.event.shiftKey) return
+      if (!monacoMod) return
+      if (e.target.type !== monacoMod.editor.MouseTargetType.CONTENT_TEXT) return
+      const pos = e.target.position
+      if (!pos) return
+      e.event.preventDefault()
+      void gotoDefinitionAt(pos)
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onDidChangeCursorSelection(() => {
+      scheduleInlineChip(ed)
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onDidScrollChange(() => {
+      if (chipOpen.value && chipEditor === ed) placeInlineChip(ed)
+      if (gotoModHeld && lastGotoMouse?.ed === ed) applyGotoHover(ed, lastGotoMouse.position)
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onMouseMove((e) => {
+      const pos = e.target.position
+      if (!pos || !monacoMod) {
+        if (gotoModHeld) clearGotoHover()
+        return
+      }
+      lastGotoMouse = { ed, position: pos }
+      if (!gotoModHeld) return
+      if (e.target.type !== monacoMod.editor.MouseTargetType.CONTENT_TEXT) {
+        clearGotoHover()
+        return
+      }
+      applyGotoHover(ed, pos)
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onMouseLeave(() => {
+      if (lastGotoMouse?.ed === ed) lastGotoMouse = null
+      if (gotoHoverEd === ed) clearGotoHover()
+    }),
+  )
+}
+
+function hideInlineChip() {
+  if (chipTimer) {
+    window.clearTimeout(chipTimer)
+    chipTimer = 0
+  }
+  chipOpen.value = false
+  chipEditor = null
+}
+
+function placeInlineChip(ed: import('monaco-editor').editor.IStandaloneCodeEditor) {
+  const sel = ed.getSelection()
+  if (!sel || sel.isEmpty()) {
+    hideInlineChip()
+    return
+  }
+  const pos = overlayAt(
+    ed,
+    { lineNumber: sel.startLineNumber, column: sel.startColumn },
+    { above: true },
+  )
+  chipLeft.value = pos.left
+  chipTop.value = pos.top
+  chipEditor = ed
+  chipOpen.value = true
+}
+
+function scheduleInlineChip(ed: import('monaco-editor').editor.IStandaloneCodeEditor) {
+  if (skipSelectionChip) {
+    skipSelectionChip = false
+    hideInlineChip()
+    return
+  }
+  if (chipTimer) {
+    window.clearTimeout(chipTimer)
+    chipTimer = 0
+  }
+  if (inlineOpen.value || review.value || editorReadOnly() || gotoOpen.value) {
+    hideInlineChip()
+    return
+  }
+  const sel = ed.getSelection()
+  const model = ed.getModel()
+  if (!sel || sel.isEmpty() || !model) {
+    hideInlineChip()
+    return
+  }
+  const text = model.getValueInRange(sel)
+  if (!text.trim()) {
+    hideInlineChip()
+    return
+  }
+  chipTimer = window.setTimeout(() => {
+    chipTimer = 0
+    if (inlineOpen.value || review.value || editorReadOnly()) return
+    placeInlineChip(ed)
+  }, 160)
+}
+
+function clearGotoHover() {
+  if (gotoHoverEd && gotoHoverDecorations.length) {
+    gotoHoverDecorations = gotoHoverEd.deltaDecorations(gotoHoverDecorations, [])
+    gotoHoverEd.updateOptions({ mouseStyle: 'text' })
+  }
+  gotoHoverDecorations = []
+  gotoHoverEd = null
+}
+
+function applyGotoHover(
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor,
+  position: { lineNumber: number; column: number },
+) {
+  if (!monacoMod || review.value) {
+    clearGotoHover()
+    return
+  }
+  const model = ed.getModel()
+  if (!model) {
+    clearGotoHover()
+    return
+  }
+  const ident = identifierAt(model, position)
+  if (!ident) {
+    clearGotoHover()
+    return
+  }
+  const range = {
+    startLineNumber: position.lineNumber,
+    startColumn: ident.startColumn,
+    endLineNumber: position.lineNumber,
+    endColumn: ident.endColumn,
+  }
+  if (gotoHoverEd && gotoHoverEd !== ed) clearGotoHover()
+  gotoHoverEd = ed
+  gotoHoverDecorations = ed.deltaDecorations(gotoHoverDecorations, [
+    {
+      range,
+      options: {
+        inlineClassName: 'ca-goto-hover',
+        stickiness: monacoMod.editor.TrackedRangeStickiness.NeverGrowsWhenTypingAtEdges,
+      },
+    },
+  ])
+  ed.updateOptions({ mouseStyle: 'default' })
+}
+
+function onWindowBlur() {
+  gotoModHeld = false
+  lastGotoMouse = null
+  clearGotoHover()
+}
+
+function onGotoModifierKey(e: KeyboardEvent) {
+  if (e.key === 'Escape' && chipOpen.value && !inlineOpen.value) {
+    hideInlineChip()
+  }
+  if (e.altKey || e.shiftKey) {
+    if (gotoModHeld) {
+      gotoModHeld = false
+      clearGotoHover()
+    }
+    return
+  }
+  const isModKey = e.key === 'Control' || e.key === 'Meta'
+  if (e.type === 'keydown' && (isModKey || e.ctrlKey || e.metaKey)) {
+    gotoModHeld = e.ctrlKey || e.metaKey
+    if (gotoModHeld && lastGotoMouse) applyGotoHover(lastGotoMouse.ed, lastGotoMouse.position)
+    return
+  }
+  if (e.type === 'keyup' && isModKey) {
+    gotoModHeld = e.ctrlKey || e.metaKey
+    if (!gotoModHeld) clearGotoHover()
+  }
+}
+
+function overlayAt(
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor,
+  pos: { lineNumber: number; column: number },
+  opts?: { above?: boolean },
+) {
+  const vis = ed.getScrolledVisiblePosition(pos)
+  const wrap = wrapEl.value
+  const dom = ed.getDomNode()
+  if (!vis || !wrap || !dom) return { left: 16, top: 48 }
+  const edRect = dom.getBoundingClientRect()
+  const wrapRect = wrap.getBoundingClientRect()
+  let left = edRect.left - wrapRect.left + vis.left
+  let top = edRect.top - wrapRect.top + vis.top + vis.height + 8
+  if (opts?.above) {
+    top = edRect.top - wrapRect.top + vis.top - 36
+    if (top < 8) top = edRect.top - wrapRect.top + vis.top + vis.height + 6
+  }
+  const maxL = Math.max(8, wrap.clientWidth - 28)
+  const maxT = Math.max(8, wrap.clientHeight - 28)
+  left = Math.min(Math.max(8, left), maxL)
+  if (!opts?.above && top > wrap.clientHeight - 160) {
+    top = Math.max(8, edRect.top - wrapRect.top + vis.top - 12)
+  }
+  top = Math.min(Math.max(8, top), maxT)
+  return { left, top }
+}
+
+function rangeAfterReplace(
+  start: { startLineNumber: number; startColumn: number },
+  text: string,
+) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n')
+  const endLineNumber = start.startLineNumber + lines.length - 1
+  const endColumn = lines.length === 1 ? start.startColumn + lines[0].length : lines[lines.length - 1].length + 1
+  return {
+    startLineNumber: start.startLineNumber,
+    startColumn: start.startColumn,
+    endLineNumber,
+    endColumn,
+  }
+}
+
+function markInlineRange(
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor,
+  range: { startLineNumber: number; startColumn: number; endLineNumber: number; endColumn: number },
+) {
+  if (!monacoMod) return
+  inlineDecorations = ed.deltaDecorations(inlineDecorations, [
+    {
+      range,
+      options: {
+        className: 'ca-inline-edit',
+        stickiness: monacoMod.editor.TrackedRangeStickiness.AlwaysGrowsWhenTypingAtEdges,
+      },
+    },
+  ])
+}
+
+function clearInlineDecorations(ed?: import('monaco-editor').editor.IStandaloneCodeEditor | null) {
+  const target = ed || activeEditor()
+  if (target && inlineDecorations.length) inlineDecorations = target.deltaDecorations(inlineDecorations, [])
+  inlineDecorations = []
+}
+
+function closeInlineEdit(restore: boolean) {
+  inlineGen += 1
+  const ed = activeEditor()
+  if (restore && inlinePreviewApplied && ed) {
+    const model = ed.getModel()
+    const range = inlineDecorations[0] && model ? model.getDecorationRange(inlineDecorations[0]) : null
+    if (range) {
+      ed.pushUndoStop()
+      ed.executeEdits('inline-edit-reject', [{ range, text: inlineOriginal.value, forceMoveMarkers: true }])
+      ed.pushUndoStop()
+    }
+  }
+  clearInlineDecorations(ed)
+  inlinePreviewApplied = false
+  inlineOpen.value = false
+  inlinePhase.value = 'prompt'
+  inlineError.value = ''
+  inlineReplacement.value = ''
+}
+
+function openInlineEdit() {
+  if (review.value || editorReadOnly()) return
+  const ed = activeEditor()
+  const model = ed?.getModel()
+  const path = store.activePath
+  if (!ed || !model || !path) return
+  gotoOpen.value = false
+  hideInlineChip()
+  if (inlineOpen.value && inlinePhase.value === 'prompt') {
+    return
+  }
+  if (inlineOpen.value && inlinePhase.value === 'diff') closeInlineEdit(true)
+  let sel = ed.getSelection()
+  if (!sel || sel.isEmpty()) {
+    const pos = ed.getPosition()
+    if (!pos) return
+    const expanded = expandInlineRange(model, pos)
+    skipSelectionChip = true
+    ed.setSelection({
+      selectionStartLineNumber: expanded.startLineNumber,
+      selectionStartColumn: expanded.startColumn,
+      positionLineNumber: expanded.endLineNumber,
+      positionColumn: expanded.endColumn,
+    })
+    sel = ed.getSelection()
+    if (!sel) return
+  }
+  const original = model.getValueInRange(sel)
+  if (!original.trim()) {
+    toast.info(t('editor.inlineEditEmpty'))
+    return
+  }
+  inlineOriginal.value = original
+  inlineReplacement.value = original
+  inlineInstruction.value = ''
+  inlineError.value = ''
+  inlinePhase.value = 'prompt'
+  inlinePreviewApplied = false
+  inlineLineLabel.value =
+    sel.startLineNumber === sel.endLineNumber
+      ? `L${sel.startLineNumber}`
+      : `L${sel.startLineNumber}–${sel.endLineNumber}`
+  const pos = overlayAt(ed, { lineNumber: sel.startLineNumber, column: sel.startColumn })
+  inlineLeft.value = pos.left
+  inlineTop.value = pos.top
+  markInlineRange(ed, sel)
+  inlineOpen.value = true
+  ed.focus()
+}
+
+async function submitInlineEdit() {
+  const ed = activeEditor()
+  const model = ed?.getModel()
+  const path = store.activePath
+  const instruction = inlineInstruction.value.trim()
+  if (!ed || !model || !path || !instruction) return
+  if (!store.hasConfiguredModel) {
+    toast.warning(t('chat.needModel'))
+    window.dispatchEvent(new Event('ca-open-models'))
+    return
+  }
+  const range = inlineDecorations[0] ? model.getDecorationRange(inlineDecorations[0]) : ed.getSelection()
+  if (!range) return
+  const selection = model.getValueInRange(range)
+  inlineOriginal.value = selection
+  const prefixStart = Math.max(1, range.startLineNumber - 40)
+  const suffixEnd = Math.min(model.getLineCount(), range.endLineNumber + 40)
+  const prefix = model.getValueInRange({
+    startLineNumber: prefixStart,
+    startColumn: 1,
+    endLineNumber: range.startLineNumber,
+    endColumn: range.startColumn,
+  })
+  const suffix = model.getValueInRange({
+    startLineNumber: range.endLineNumber,
+    startColumn: range.endColumn,
+    endLineNumber: suffixEnd,
+    endColumn: model.getLineMaxColumn(suffixEnd),
+  })
+  inlinePhase.value = 'loading'
+  inlineError.value = ''
+  const gen = ++inlineGen
+  try {
+    const data = await api<{ replacement: string; unchanged?: boolean }>(
+      `/api/workspaces/${store.workspaceId}/inline-edit`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          path,
+          instruction,
+          selection,
+          prefix,
+          suffix,
+          language: langOf(path),
+          model_id: store.modelId || undefined,
+        }),
+      },
+    )
+    const replacement = data.replacement ?? selection
+    if (gen !== inlineGen || !inlineOpen.value) return
+    if (data.unchanged || replacement === selection) {
+      inlinePhase.value = 'prompt'
+      toast.info(t('editor.inlineEditNoChange'))
+      return
+    }
+    ed.pushUndoStop()
+    ed.executeEdits('inline-edit', [{ range, text: replacement, forceMoveMarkers: true }])
+    ed.pushUndoStop()
+    inlinePreviewApplied = true
+    inlineReplacement.value = replacement
+    markInlineRange(ed, rangeAfterReplace(range, replacement))
+    inlinePhase.value = 'diff'
+  } catch (err) {
+    if (gen !== inlineGen || !inlineOpen.value) return
+    const raw = err instanceof Error ? err.message : String(err)
+    if (raw.includes('llm.no_model')) {
+      toast.warning(t('chat.needModel'))
+      window.dispatchEvent(new Event('ca-open-models'))
+    }
+    inlineError.value = raw
+    inlinePhase.value = 'prompt'
+  }
+}
+
+function acceptInlineEdit() {
+  inlinePreviewApplied = false
+  closeInlineEdit(false)
+  activeEditor()?.focus()
+}
+
+function rejectInlineEdit() {
+  closeInlineEdit(true)
+  activeEditor()?.focus()
+}
+
+async function jumpToHit(hit: GotoHit) {
+  gotoOpen.value = false
+  await store.openChatFilePath(hit.path, hit.line)
+}
+
+function showGotoPeek(
+  ed: import('monaco-editor').editor.IStandaloneCodeEditor,
+  pos: { lineNumber: number; column: number },
+  symbol: string,
+  hits: GotoHit[],
+) {
+  const place = overlayAt(ed, pos)
+  gotoSymbolName.value = symbol
+  gotoHits.value = hits
+  gotoActive.value = 0
+  gotoLeft.value = place.left
+  gotoTop.value = place.top
+  gotoOpen.value = true
+}
+
+async function gotoDefinition() {
+  const ed = activeEditor()
+  const pos = ed?.getPosition()
+  if (!pos) return
+  await gotoDefinitionAt(pos)
+}
+
+async function gotoDefinitionAt(position: { lineNumber: number; column: number }) {
+  if (review.value) return
+  const ed = activeEditor()
+  const model = ed?.getModel()
+  const path = store.activePath
+  if (!ed || !model || !path) return
+  if (inlineOpen.value) closeInlineEdit(inlinePreviewApplied)
+  hideInlineChip()
+  const ident = identifierAt(model, position)
+  if (!ident) {
+    toast.info(t('editor.gotoNoSymbol'))
+    return
+  }
+  const local: GotoHit[] = findLocalDefinitions(model, ident.word)
+    .filter((h) => h.line !== position.lineNumber)
+    .map((h) => ({ path, line: h.line, text: h.text, kind: 'definition' }))
+  let remote: GotoHit[] = []
+  if (store.workspaceId) {
+    try {
+      const data = await api<{ hits: GotoHit[] }>(
+        `/api/workspaces/${store.workspaceId}/goto?symbol=${encodeURIComponent(ident.word)}&from_path=${encodeURIComponent(path)}`,
+      )
+      remote = data.hits || []
+    } catch {
+      /* search may be unavailable */
+    }
+  }
+  const seen = new Set(local.map((h) => `${h.path}:${h.line}`))
+  const merged = [...local]
+  for (const hit of remote) {
+    const key = `${hit.path}:${hit.line}`
+    if (hit.path === path && hit.line === position.lineNumber) continue
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(hit)
+  }
+  if (!merged.length) {
+    toast.info(t('editor.gotoNotFound', { symbol: ident.word }))
+    return
+  }
+  if (merged.length === 1) {
+    await jumpToHit(merged[0])
+    return
+  }
+  showGotoPeek(ed, position, ident.word, merged)
+}
+
+watch(
+  () => store.activePath,
+  () => {
+    if (inlineOpen.value) closeInlineEdit(inlinePreviewApplied)
+    hideInlineChip()
+    gotoOpen.value = false
+  },
+)
 
 onMounted(async () => {
   monacoMod = await import('monaco-editor')
@@ -583,25 +1343,23 @@ onMounted(async () => {
     ...editorOptions,
   })
   bindEditorContextMenu(editor)
+  bindEditorCommands(editor)
   editor.onDidFocusEditorText(() => {
     focusedPane.value = 'primary'
     if (primaryPath.value) store.activateFile(primaryPath.value)
   })
-  editor.addCommand(monacoMod.KeyMod.CtrlCmd | monacoMod.KeyCode.KeyS, () => {
-    void onEditorSave()
-  })
-  editor.addCommand(
-    monacoMod.KeyMod.Shift | monacoMod.KeyMod.Alt | monacoMod.KeyCode.KeyF,
-    () => {
-      void formatActiveDocument()
-    },
-  )
   host.value.addEventListener('copy', onEditorCopy)
   primaryPath.value = store.activePath
   showPath(store.activePath)
   window.addEventListener('ca-theme', onTheme as EventListener)
   window.addEventListener('ca-file-reload', onReload as EventListener)
   window.addEventListener('ca-focus-editor', onFocusEditor as EventListener)
+  window.addEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
+  window.addEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
+  window.addEventListener('ca-goto-definition', onGotoEvent as EventListener)
+  window.addEventListener('keydown', onGotoModifierKey, true)
+  window.addEventListener('keyup', onGotoModifierKey, true)
+  window.addEventListener('blur', onWindowBlur)
   window.addEventListener('keydown', onReviewKey)
 })
 
@@ -633,12 +1391,12 @@ function isEditableTarget(target: EventTarget | null) {
 function onReviewKey(e: KeyboardEvent) {
   if (!review.value) return
   if (isEditableTarget(e.target)) return
-  if (e.key === 'ArrowUp' && canCycleDiff.value) {
+  if (e.key === 'ArrowUp' && canCycleChange.value) {
     e.preventDefault()
     cycleDiff(-1)
     return
   }
-  if (e.key === 'ArrowDown' && canCycleDiff.value) {
+  if (e.key === 'ArrowDown' && canCycleChange.value) {
     e.preventDefault()
     cycleDiff(1)
     return
@@ -665,7 +1423,10 @@ function onReload(e: Event) {
   if (model && model.getValue() !== detail.content) model.setValue(detail.content)
   const current = store.pendingReview(detail.path)
   if (current && store.activePath === detail.path) {
-    showDiff(detail.path, current.before, current.after)
+    showDiff(detail.path, current.before, current.after, { readOnly: true })
+  } else if (store.gitEditorDiff[detail.path] && store.activePath === detail.path) {
+    const gd = store.gitEditorDiff[detail.path]
+    showDiff(detail.path, gd.original, detail.content, { readOnly: Boolean(gd.modifiedReadonly) })
   }
 }
 
@@ -703,6 +1464,7 @@ watch(
       review.value?.after,
       store.activeReviewIndexFor(store.activePath),
       htmlPreview.value,
+      gitDiff.value?.original,
     ] as const,
   async () => {
     await nextTick()
@@ -737,6 +1499,9 @@ watch(
     if (id && splitMode.value !== 'none') closeSplit('primary')
   },
 )
+watch(gitDiff, (gd) => {
+  if (gd && splitMode.value !== 'none') closeSplit('primary')
+})
 
 watch(
   () => store.openFiles.map((f) => f.path).join('\0'),
@@ -771,15 +1536,33 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('ca-file-reload', onReload as EventListener)
   window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
+  window.removeEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
+  window.removeEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
+  window.removeEventListener('ca-goto-definition', onGotoEvent as EventListener)
+  window.removeEventListener('keydown', onGotoModifierKey, true)
+  window.removeEventListener('keyup', onGotoModifierKey, true)
+  window.removeEventListener('blur', onWindowBlur)
   window.removeEventListener('keydown', onReviewKey)
   editorCtxDisposable?.dispose()
   editorCtxDisposable = null
+  for (const d of editorInputDisposables) d.dispose()
+  editorInputDisposables = []
+  closeInlineEdit(true)
+  hideInlineChip()
+  clearGotoHover()
+  gotoOpen.value = false
   disposeSecondaryEditor()
   for (const model of models.values()) model.dispose()
   for (const model of origModels.values()) model.dispose()
   models.clear()
   origModels.clear()
   diffEditor?.dispose()
+  diffEditor = null
+  hunkDiffDisposable?.dispose()
+  hunkDiffDisposable = null
+  hunkWidgets = []
+  hunkZoneIdsMod = []
+  hunkZoneIdsOrig = []
   clearReviewNavigation()
   clearDiffReveal()
   editor?.dispose()
@@ -827,7 +1610,7 @@ async function copyText(text: string) {
 }
 
 function activeEditor() {
-  if (review.value) return diffEditor?.getModifiedEditor() || null
+  if (review.value || gitDiff.value) return diffEditor?.getModifiedEditor() || null
   if (splitMode.value !== 'none' && focusedPane.value === 'secondary') return secondaryEditor
   return editor
 }
@@ -870,13 +1653,13 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
       id: 'split-right',
       label: t('editor.splitRight'),
       icon: 'panel-right',
-      disabled: Boolean(review.value),
+      disabled: Boolean(showingDiff.value),
     },
     {
       id: 'split-down',
       label: t('editor.splitDown'),
       icon: 'panel-bottom',
-      disabled: Boolean(review.value),
+      disabled: Boolean(showingDiff.value),
     },
     {
       id: 'close-split',
@@ -899,7 +1682,7 @@ const tabMenuItems = computed((): ContextMenuItem[] => {
 const tabMenuActions: Record<string, (path: string) => void | Promise<void>> = {
   save: async (path) => {
     store.activateFile(path)
-    await store.saveOpenFile()
+    await onEditorSave()
   },
   reload: async (path) => {
     await store.reloadOpenFile(path)
@@ -967,6 +1750,8 @@ const editorMenuItems = computed((): ContextMenuItem[] => {
         icon: 'sparkles',
         disabled: readOnly || !canFormatPath(path),
       },
+      { id: 'inline-edit', label: t('editor.inlineEdit'), icon: 'file-edit', disabled: readOnly },
+      { id: 'goto-definition', label: t('editor.gotoDefinition'), icon: 'search' },
       { id: 'sep-format', separator: true },
     )
   } else {
@@ -1068,6 +1853,14 @@ async function onEditorMenuSelect(id: string) {
     await formatActiveDocument()
     return
   }
+  if (id === 'inline-edit') {
+    openInlineEdit()
+    return
+  }
+  if (id === 'goto-definition') {
+    void gotoDefinition()
+    return
+  }
   if (id === 'add-selection') {
     const text = editorSelectionText()
     if (!text || !ed) return
@@ -1109,7 +1902,7 @@ async function onEditorMenuSelect(id: string) {
     return
   }
   if (id === 'save') {
-    await store.saveOpenFile()
+    await onEditorSave()
     return
   }
   if (id === 'reload') {
@@ -1128,6 +1921,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
     const ev = e.event
     ev.preventDefault()
     ev.stopPropagation()
+    hideInlineChip()
     tabMenu.value = null
     editorMenu.value = { x: ev.posx, y: ev.posy }
   })
@@ -1181,7 +1975,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           type="button"
           class="ghost-icon-btn"
           :title="t('editor.splitRight')"
-          :disabled="!!review || store.openFiles.length === 0"
+          :disabled="showingDiff || store.openFiles.length === 0"
           @click="splitEditor('right')"
         >
           <AppIcon name="panel-right" :size="15" :stroke-width="1.75" />
@@ -1190,7 +1984,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           type="button"
           class="ghost-icon-btn"
           :title="t('editor.splitDown')"
-          :disabled="!!review || store.openFiles.length === 0"
+          :disabled="showingDiff || store.openFiles.length === 0"
           @click="splitEditor('down')"
         >
           <AppIcon name="panel-bottom" :size="15" :stroke-width="1.75" />
@@ -1224,6 +2018,17 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
       <span class="review-path" :title="store.activePath || ''">
         {{ store.activePath || t('editor.openFromSidebar') }}
       </span>
+      <div v-if="gitDiff && !review" class="git-diff-bar">
+        <span>{{ t('git.diffVsHead') }}</span>
+        <button
+          type="button"
+          class="ghost-icon-btn"
+          :title="t('git.closeEditorDiff')"
+          @click="store.clearGitEditorDiff(store.activePath)"
+        >
+          <AppIcon name="close" :size="14" :stroke-width="1.75" />
+        </button>
+      </div>
       <div v-if="pendingCount" class="review-bar-controls">
         <div class="review-nav" role="navigation" :aria-label="t('editor.reviewNav')">
         <div class="review-nav-group">
@@ -1231,8 +2036,8 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           <button
             type="button"
             class="nav-btn"
-            :disabled="!canCycleDiff"
-            :title="t('editor.prevDiff')"
+            :disabled="!canCycleChange"
+            :title="canCycleDiff ? t('editor.prevDiff') : t('editor.prevFile')"
             @click="cycleDiff(-1)"
           >
             <AppIcon name="chevron-up" :size="14" :stroke-width="1.75" />
@@ -1241,8 +2046,8 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           <button
             type="button"
             class="nav-btn"
-            :disabled="!canCycleDiff"
-            :title="t('editor.nextDiff')"
+            :disabled="!canCycleChange"
+            :title="canCycleDiff ? t('editor.nextDiff') : t('editor.nextFile')"
             @click="cycleDiff(1)"
           >
             <AppIcon name="chevron-down" :size="14" :stroke-width="1.75" />
@@ -1272,47 +2077,10 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           </button>
         </div>
       </div>
-      <div v-if="review" class="review-actions" role="group" :aria-label="t('editor.reviewActionsCurrent')">
-        <button
-          type="button"
-          class="action-btn is-reject"
-          :title="t('editor.rejectHunk')"
-          @click="onEditorMenuSelect('reject-hunk')"
-        >
-          <AppIcon name="close" :size="14" :stroke-width="1.75" />
-          <span>{{ t('editor.rejectHunk') }}</span>
-        </button>
-        <button
-          type="button"
-          class="action-btn is-accept"
-          :title="t('editor.acceptHunk')"
-          @click="onEditorMenuSelect('accept-hunk')"
-        >
-          <AppIcon name="check" :size="14" :stroke-width="1.75" />
-          <span>{{ t('editor.acceptHunk') }}</span>
-        </button>
-        <button
-          type="button"
-          class="action-btn is-reject"
-          :title="t('editor.reject')"
-          @click="store.rejectReview(review.path, review.blockId)"
-        >
-          <AppIcon name="close" :size="14" :stroke-width="1.75" />
-          <span>{{ t('editor.reject') }}</span>
-        </button>
-        <button
-          type="button"
-          class="action-btn is-accept"
-          :title="t('editor.accept')"
-          @click="store.acceptReview(review.path, review.blockId)"
-        >
-          <AppIcon name="check" :size="14" :stroke-width="1.75" />
-          <span>{{ t('editor.accept') }}</span>
-        </button>
-      </div>
       </div>
     </div>
     <div
+      ref="wrapEl"
       class="host-wrap"
       :class="{
         'split-right': splitMode === 'right',
@@ -1325,7 +2093,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
         @mousedown="focusPane('primary')"
       >
         <FilePreviewHost
-          v-if="primaryShowFilePreview && primaryFile && !review"
+          v-if="primaryShowFilePreview && primaryFile && !showingDiff"
           :file="primaryFile"
           class="host"
         />
@@ -1339,11 +2107,11 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           ref="host"
           class="host"
           :class="{
-            hidden: !!review || primaryShowMarkdownPreview || primaryShowFilePreview,
+            hidden: showingDiff || primaryShowMarkdownPreview || primaryShowFilePreview,
           }"
         />
-        <div ref="diffHost" class="host" :class="{ hidden: !review || splitMode !== 'none' }" />
-        <div v-if="!panePath('primary') && !review" class="empty">
+        <div ref="diffHost" class="host" :class="{ hidden: !showingDiff || splitMode !== 'none' }" />
+        <div v-if="!panePath('primary') && !showingDiff" class="empty">
           <AppIcon name="file" :size="28" />
           <p>{{ t('editor.openFromSidebar') }}</p>
         </div>
@@ -1360,6 +2128,39 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           <p>{{ t('editor.splitEmpty') }}</p>
         </div>
       </div>
+      <InlineEditChip
+        v-if="chipOpen && !inlineOpen"
+        :left="chipLeft"
+        :top="chipTop"
+        @open="openInlineEdit"
+      />
+      <InlineEditWidget
+        v-if="inlineOpen"
+        :instruction="inlineInstruction"
+        :phase="inlinePhase"
+        :original="inlineOriginal"
+        :replacement="inlineReplacement"
+        :error="inlineError"
+        :left="inlineLeft"
+        :top="inlineTop"
+        :line-label="inlineLineLabel"
+        @update:instruction="inlineInstruction = $event"
+        @submit="submitInlineEdit"
+        @accept="acceptInlineEdit"
+        @reject="rejectInlineEdit"
+        @close="closeInlineEdit(inlinePreviewApplied)"
+      />
+      <GotoPeek
+        v-if="gotoOpen"
+        :hits="gotoHits"
+        :active="gotoActive"
+        :left="gotoLeft"
+        :top="gotoTop"
+        :symbol="gotoSymbolName"
+        @update:active="gotoActive = $event"
+        @pick="jumpToHit"
+        @close="gotoOpen = false"
+      />
     </div>
     <ContextMenu
       v-if="tabMenu"
@@ -1530,6 +2331,8 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   color: var(--text);
   font-size: 11px;
   overflow: hidden;
+  position: relative;
+  z-index: 80;
 }
 .review-path {
   flex: 1;
@@ -1541,6 +2344,15 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   font-size: 11px;
   color: var(--text-secondary);
   user-select: none;
+}
+.git-diff-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 .review-bar-controls {
   display: inline-flex;
@@ -1576,14 +2388,15 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   background: var(--border);
   flex-shrink: 0;
 }
-.review-bar .nav-btn,
-.review-bar .action-btn {
+.review-bar .nav-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   height: 22px;
-  padding: 0 6px;
+  width: auto;
+  min-width: 22px;
+  padding: 0 2px;
   border: 0;
   border-radius: calc(var(--radius-md) - 2px);
   background: transparent;
@@ -1596,13 +2409,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   flex-shrink: 0;
   transition: opacity 0.15s ease, background-color 0.12s ease, color 0.12s ease;
 }
-.review-bar .nav-btn {
-  width: auto;
-  min-width: 22px;
-  padding: 0 2px;
-}
-.review-bar .nav-btn:hover:not(:disabled),
-.review-bar .action-btn:hover {
+.review-bar .nav-btn:hover:not(:disabled) {
   background: color-mix(in srgb, var(--text-h) 8%, transparent);
   opacity: 1;
 }
@@ -1620,24 +2427,6 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   text-align: center;
   white-space: nowrap;
   user-select: none;
-}
-.review-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 0;
-  padding-left: 6px;
-  margin-left: 2px;
-  border-left: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.review-bar .action-btn.is-reject:hover {
-  color: var(--danger);
-}
-.review-bar .action-btn.is-accept {
-  color: var(--primary);
-}
-.review-bar .action-btn.is-accept:hover {
-  color: var(--primary);
 }
 .spacer { flex: 1; }
 .btn {
@@ -1708,5 +2497,103 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
 .ca-search-current {
   background: color-mix(in srgb, var(--primary) 42%, transparent);
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.ca-inline-edit {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.ca-goto-hover {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: pointer !important;
+}
+.ca-hunk-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--dropdown-shadow);
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: auto;
+  z-index: 40;
+}
+html[data-theme='dark'] .ca-hunk-actions {
+  box-shadow: var(--dropdown-shadow-dark);
+}
+.ca-hunk-nav,
+.ca-hunk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-height: 24px;
+  box-sizing: border-box;
+  line-height: 1;
+  border-radius: 999px;
+}
+.ca-hunk-nav {
+  gap: 0;
+  padding: 0 4px 0 2px;
+}
+.ca-hunk-index {
+  min-width: 2.2em;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 650;
+  font-family: var(--mono);
+  color: var(--text-h);
+  user-select: none;
+  white-space: nowrap;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.ca-hunk-btn {
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 41;
+}
+.ca-hunk-btn.is-nav {
+  width: 20px;
+  min-width: 20px;
+  padding: 0;
+  color: var(--text-secondary);
+}
+.ca-hunk-btn:disabled {
+  display: none;
+}
+.ca-hunk-btn.is-reject {
+  color: var(--danger);
+}
+.ca-hunk-btn.is-accept {
+  color: var(--primary);
+}
+.ca-hunk-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text-h) 7%, transparent);
+}
+.ca-hunk-btn.is-nav:hover:not(:disabled) {
+  color: var(--text-h);
+}
+.ca-hunk-btn.is-reject:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+.ca-hunk-btn.is-accept:hover {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
 }
 </style>

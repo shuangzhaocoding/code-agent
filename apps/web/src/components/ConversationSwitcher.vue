@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAppStore } from '@/stores/app'
+import { useAppStore, type Conversation } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
 import { formatRelativeTime } from '@/utils/relativeTime'
@@ -20,6 +20,12 @@ const toast = useToast()
 const open = ref(false)
 const ready = ref(false)
 const query = ref('')
+const showArchived = ref(false)
+const searchHits = ref<Conversation[] | null>(null)
+const searching = ref(false)
+const archivedRows = ref<Conversation[]>([])
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+let searchGen = 0
 const active = ref(0)
 const editingId = ref<string | null>(null)
 const editingTitle = ref('')
@@ -35,25 +41,42 @@ const current = computed(() =>
 
 const currentTitle = computed(() => current.value?.title || t('chat.newConversation'))
 
-const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  const matched = q
-    ? store.conversations.filter((c) => c.title.toLowerCase().includes(q))
-    : store.conversations
-  return pins.sortByPin(matched)
+const listSource = computed<Conversation[]>(() => {
+  if (searchHits.value) return searchHits.value
+  if (!showArchived.value) return store.conversations
+  const seen = new Set(store.conversations.map((c) => c.id))
+  return [...store.conversations, ...archivedRows.value.filter((c) => !seen.has(c.id))]
 })
 
-const pinnedItems = computed(() => filtered.value.filter((c) => pins.isPinned(c.id)))
-const recentItems = computed(() => filtered.value.filter((c) => !pins.isPinned(c.id)))
+const filtered = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  let rows = listSource.value
+  if (!searchHits.value) {
+    rows = rows.filter((c) => {
+      if (showArchived.value) return true
+      if (!c.archived) return true
+      return c.id === store.conversationId
+    })
+    if (q) rows = rows.filter((c) => c.title.toLowerCase().includes(q))
+  }
+  return pins.sortByPin(rows)
+})
+
+const pinnedItems = computed(() => filtered.value.filter((c) => pins.isPinned(c.id) && !c.archived))
+const recentItems = computed(() => filtered.value.filter((c) => !pins.isPinned(c.id) && !c.archived))
+const archivedItems = computed(() => filtered.value.filter((c) => c.archived))
 
 const sections = computed(() => {
-  const rows: { label: string; items: typeof filtered.value }[] = []
+  const rows: { label: string; items: Conversation[] }[] = []
   if (pinnedItems.value.length) rows.push({ label: t('chat.pinned'), items: pinnedItems.value })
   if (recentItems.value.length) {
     rows.push({
       label: query.value.trim() ? t('chat.matched') : t('chat.recent'),
       items: recentItems.value,
     })
+  }
+  if (archivedItems.value.length && (showArchived.value || query.value.trim() || archivedItems.value.some((c) => c.id === store.conversationId))) {
+    rows.push({ label: t('chat.archived'), items: archivedItems.value })
   }
   return rows
 })
@@ -129,6 +152,12 @@ function closeMenu() {
   open.value = false
   ready.value = false
   query.value = ''
+  searchHits.value = null
+  searching.value = false
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
   cancelRename()
   layoutCleanup?.()
 }
@@ -195,7 +224,62 @@ async function onDelete(id: string, e: MouseEvent) {
   if (editingId.value === id) cancelRename()
   if (pins.isPinned(id)) pins.toggle(id)
   await store.deleteConversation(id)
+  archivedRows.value = archivedRows.value.filter((c) => c.id !== id)
+  if (searchHits.value) searchHits.value = searchHits.value.filter((c) => c.id !== id)
   if (!store.conversations.length) closeMenu()
+}
+
+async function onArchive(item: Conversation, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const next = !item.archived
+  await store.archiveConversation(item.id, next)
+  if (next) {
+    archivedRows.value = showArchived.value
+      ? [{ ...item, archived: true }, ...archivedRows.value.filter((c) => c.id !== item.id)]
+      : archivedRows.value.filter((c) => c.id !== item.id)
+  } else {
+    archivedRows.value = archivedRows.value.filter((c) => c.id !== item.id)
+  }
+  if (searchHits.value) {
+    searchHits.value = searchHits.value.map((c) => (c.id === item.id ? { ...c, archived: next } : c))
+  }
+}
+
+async function refreshSearch() {
+  const q = query.value.trim()
+  const gen = ++searchGen
+  if (!q) {
+    searchHits.value = null
+    searching.value = false
+    if (showArchived.value && !archivedRows.value.length) {
+      archivedRows.value = await store.searchConversations('', 'only')
+    }
+    return
+  }
+  searching.value = true
+  try {
+    const rows = await store.searchConversations(q, 'include')
+    if (gen !== searchGen) return
+    searchHits.value = rows
+  } finally {
+    if (gen === searchGen) searching.value = false
+  }
+}
+
+function scheduleSearch() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    void refreshSearch()
+  }, 220)
+}
+
+async function toggleArchived() {
+  showArchived.value = !showArchived.value
+  if (showArchived.value && !query.value.trim()) {
+    archivedRows.value = await store.searchConversations('', 'only')
+  }
 }
 
 function startRename(item: (typeof filtered.value)[number], e: MouseEvent) {
@@ -309,6 +393,11 @@ function onKey(e: KeyboardEvent) {
   }
 }
 
+watch(query, () => {
+  if (!open.value) return
+  scheduleSearch()
+})
+
 watch(filtered, (list) => {
   if (active.value >= list.length) active.value = Math.max(0, list.length - 1)
 })
@@ -328,6 +417,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
   layoutCleanup?.()
   if (positionRaf) cancelAnimationFrame(positionRaf)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 </script>
 
@@ -375,8 +465,9 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="switcher-list">
-            <p v-if="!filtered.length" class="switcher-empty">
-              {{ store.conversations.length ? t('chat.noMatchSessions') : t('chat.noHistory') }}
+            <p v-if="searching && !filtered.length" class="switcher-empty">{{ t('common.loading') }}</p>
+            <p v-else-if="!filtered.length" class="switcher-empty">
+              {{ store.conversations.length || showArchived ? t('chat.noMatchSessions') : t('chat.noHistory') }}
             </p>
             <section v-for="section in sections" :key="section.label">
               <h2>{{ section.label }}</h2>
@@ -387,6 +478,7 @@ onBeforeUnmount(() => {
                 :class="{
                   active: item.id === filtered[active]?.id,
                   current: item.id === store.conversationId,
+                  archived: item.archived,
                 }"
                 role="option"
                 :aria-selected="item.id === store.conversationId"
@@ -394,7 +486,7 @@ onBeforeUnmount(() => {
                 @click="onRowClick(item.id)"
               >
                 <span class="row-icon">
-                  <AppIcon name="chat" :size="16" :stroke-width="1.75" />
+                  <AppIcon :name="item.archived ? 'inbox' : 'chat'" :size="16" :stroke-width="1.75" />
                 </span>
                 <span class="row-copy">
                   <input
@@ -409,7 +501,8 @@ onBeforeUnmount(() => {
                     @blur="commitRename(item.id)"
                   />
                   <span v-else class="row-title">{{ item.title }}</span>
-                  <span v-if="!editingId && (item.updated_at || item.created_at)" class="row-time">
+                  <span v-if="item.snippet" class="row-snippet">{{ item.snippet }}</span>
+                  <span v-else-if="!editingId && (item.updated_at || item.created_at)" class="row-time">
                     {{ formatRelativeTime(item.updated_at || item.created_at) }}
                   </span>
                 </span>
@@ -421,6 +514,14 @@ onBeforeUnmount(() => {
                     @click="startRename(item, $event)"
                   >
                     <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
+                  </button>
+                  <button
+                    type="button"
+                    class="row-action"
+                    :title="item.archived ? t('chat.unarchive') : t('chat.archive')"
+                    @click="onArchive(item, $event)"
+                  >
+                    <AppIcon :name="item.archived ? 'inbox' : 'folder'" :size="16" :stroke-width="1.75" />
                   </button>
                   <button
                     type="button"
@@ -458,6 +559,10 @@ onBeforeUnmount(() => {
               </div>
             </section>
           </div>
+          <button type="button" class="switcher-archived-toggle" :class="{ on: showArchived }" @click="toggleArchived">
+            <AppIcon name="inbox" :size="14" :stroke-width="1.75" />
+            <span>{{ showArchived ? t('chat.hideArchived') : t('chat.showArchived') }}</span>
+          </button>
         </div>
       </Teleport>
     </div>
@@ -576,6 +681,38 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
+}
+.row-snippet {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-row.archived .row-title {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+.switcher-archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px 4px;
+  padding: 6px 8px;
+  border: 0;
+  border-top: var(--border-width) solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.switcher-archived-toggle:hover,
+.switcher-archived-toggle.on {
+  color: var(--text-h);
 }
 .row-turns {
   flex-shrink: 0;

@@ -34,7 +34,7 @@ def _estimate_tools_tokens(mode: str) -> int:
     for spec in registry.tools.values():
         if not spec.enabled or mode not in spec.modes:
             continue
-        if mode == "ask" and spec.name in {"write_file", "search_replace", "run_command", "delete_file"}:
+        if mode == "ask" and spec.name in {"write_file", "search_replace", "apply_patch", "run_command", "delete_file"}:
             continue
         tools.append({"name": spec.name, "description": spec.description or ""})
     return estimate_tokens(json.dumps(tools, ensure_ascii=False))
@@ -103,12 +103,15 @@ async def compute_context_usage(
 
     system_text = ""
     if workspace:
+        from code_agent.agent.rules import load_workspace_rules
+
         system_text = build_system_prompt(
             workspace,
             mode,
             level,
             memory_facts=memory_facts,
             conversation_summary=summary_text,
+            workspace_rules=await load_workspace_rules(workspace),
         )
     else:
         system_text = "You are Code Agent."
