@@ -366,7 +366,8 @@ function toggle() {
   place-items: center;
   flex-shrink: 0;
   border-radius: 4px;
-  border: 1px solid var(--border);
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 45%, var(--border-strong));
+  background-color: var(--panel-bg);
   color: var(--text-muted);
 }
 .todo-item.completed .todo-mark {

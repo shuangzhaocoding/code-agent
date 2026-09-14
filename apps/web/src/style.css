@@ -329,28 +329,114 @@ html.has-custom-titlebar .launch-header.is-titlebar {
   box-sizing: border-box;
   height: var(--desktop-titlebar-height, 38px);
   min-height: var(--desktop-titlebar-height, 38px);
-  padding-left: max(10px, env(titlebar-area-x, 0px));
-  padding-right: max(
-    10px,
-    calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
-  );
+  padding-left: 10px;
+  padding-right: 10px;
 }
 html.has-custom-titlebar[data-desktop-platform='darwin'] .desktop-titlebar,
 html.has-custom-titlebar[data-desktop-platform='darwin'] .app-menu-bar.is-titlebar,
 html.has-custom-titlebar[data-desktop-platform='darwin'] .launch-header.is-titlebar {
   /* Fallback when env() is unset: clear traffic lights (hiddenInset). */
   padding-left: max(78px, env(titlebar-area-x, 78px));
+  padding-right: 10px;
 }
 html.has-custom-titlebar[data-desktop-platform='win32'] .desktop-titlebar,
 html.has-custom-titlebar[data-desktop-platform='win32'] .app-menu-bar.is-titlebar,
 html.has-custom-titlebar[data-desktop-platform='win32'] .launch-header.is-titlebar {
+  padding-left: max(10px, env(titlebar-area-x, 0px));
   padding-right: max(
     138px,
     calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
   );
 }
+/* Linux frameless: custom min/max/close sit in the bar — keep flush right. */
+html.has-custom-titlebar[data-desktop-platform='linux'] .desktop-titlebar,
+html.has-custom-titlebar[data-desktop-platform='linux'] .app-menu-bar.is-titlebar,
+html.has-custom-titlebar[data-desktop-platform='linux'] .launch-header.is-titlebar {
+  padding-right: 0;
+}
 
 button, input, textarea, select { font: inherit; }
+
+/*
+ * Native checkboxes/radios follow the OS widget theme (often dark on Linux),
+ * which looks like solid black squares on a light page. Paint our own.
+ */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  vertical-align: middle;
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, var(--border-strong));
+  background-color: var(--panel-bg);
+  background-image: none;
+  color: var(--primary);
+  accent-color: var(--primary);
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+input[type='checkbox'] {
+  border-radius: 3px;
+}
+input[type='radio'] {
+  border-radius: 999px;
+}
+input[type='checkbox']::before,
+input[type='radio']::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  transform: scale(0);
+  transition: transform 0.1s ease;
+  box-shadow: inset 1em 1em var(--panel-bg);
+}
+input[type='checkbox']::before {
+  width: 3px;
+  height: 6px;
+  margin-top: -1px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  box-shadow: none;
+  background: transparent;
+  transform: scale(0) rotate(45deg);
+  transform-origin: center;
+}
+input[type='radio']::before {
+  border-radius: 999px;
+  box-shadow: inset 1em 1em #fff;
+}
+input[type='checkbox']:hover,
+input[type='radio']:hover {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border-strong));
+}
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+input[type='checkbox']:checked::before {
+  transform: scale(1) rotate(45deg);
+}
+input[type='radio']:checked::before {
+  transform: scale(1);
+}
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+input[type='checkbox']:focus-visible,
+input[type='radio']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--primary) 70%, transparent);
+  outline-offset: 2px;
+}
 
 button:focus-visible,
 a:focus-visible,

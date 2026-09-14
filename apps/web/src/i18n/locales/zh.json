@@ -7,6 +7,13 @@
     "ko": "한국어",
     "de": "Deutsch"
   },
+  "desktop": {
+    "windowControls": "窗口控制",
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "restore": "还原",
+    "close": "关闭"
+  },
   "common": {
     "open": "打开",
     "close": "关闭",

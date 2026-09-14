@@ -431,7 +431,7 @@ Block 类型：`assistant.markdown` · `assistant.thinking` · `tool.call` · `t
 - `block.delta` — rAF 合并，每帧最多一次 Vue 更新
 - `MarkdownBlock` / `ThinkingBlock` — 流式渲染 ~80ms 节流
 - `TrajectoryPanel` — `useThrottledTrajectory` 280ms 节流
-- ≥40 条消息 — `useVirtualList` 虚拟滚动
+- 对话时间线全量渲染消息 DOM，吸底跟随由 `AgentPanel` 管理
 
 刷新续流：加载 DB 已有 `Message`，再以 `last_event_id` 续订 SSE。
 

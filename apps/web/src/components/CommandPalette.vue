@@ -20,6 +20,13 @@ type PaletteItem = {
 const open = defineModel<boolean>('open', { default: false })
 const mode = defineModel<'commands' | 'files'>('mode', { default: 'commands' })
 
+const props = withDefaults(
+  defineProps<{
+    seedQuery?: string
+  }>(),
+  { seedQuery: '' },
+)
+
 const emit = defineEmits<{
   openPanel: [id: string, component: string, title: string]
   toggleTheme: []
@@ -193,12 +200,16 @@ function scheduleFileSearch() {
 }
 
 watch(open, async (value) => {
-  query.value = ''
+  query.value = value ? props.seedQuery.trim() : ''
   active.value = 0
   if (value) {
-    if (mode.value === 'files') void searchFiles('')
+    if (mode.value === 'files') void searchFiles(query.value)
     await nextTick()
     inputEl.value?.focus()
+    if (query.value) {
+      const len = query.value.length
+      inputEl.value?.setSelectionRange(len, len)
+    }
   } else {
     mode.value = 'commands'
     fileHits.value = []
@@ -355,7 +366,7 @@ onUnmounted(() => {
 .palette-backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in srgb, var(--page-bg) 55%, transparent);
+  background: color-mix(in srgb, #000 52%, transparent);
 }
 .palette {
   position: relative;

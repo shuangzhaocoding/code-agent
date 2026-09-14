@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandMark from '@/components/BrandMark.vue'
+import DesktopWindowControls from '@/components/DesktopWindowControls.vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, type Theme } from '@/theme'
 import { formatWindowTitle, WINDOW_TITLE_APP_NAME } from '@/utils/windowTitle'
@@ -63,6 +64,7 @@ const resolvedTheme = computed(() => props.theme || currentTheme())
         />
       </button>
     </div>
+    <DesktopWindowControls />
   </header>
 </template>
 
@@ -73,7 +75,7 @@ const resolvedTheme = computed(() => props.theme || currentTheme())
   align-items: center;
   gap: 8px;
   height: var(--desktop-titlebar-height, 38px);
-  padding: 0 10px;
+  padding: 0 0 0 10px;
   background: var(--sidebar-bg);
   border-bottom: var(--border-width) solid var(--border);
   user-select: none;

@@ -188,7 +188,10 @@ def _mount_static_ui(app: FastAPI) -> None:
     @app.get("/", include_in_schema=False)
     async def ui_index():
         if index_file.is_file():
-            return FileResponse(index_file)
+            return FileResponse(
+                index_file,
+                headers={"Cache-Control": "no-cache"},
+            )
         raise HTTPException(status_code=404, detail="UI not built")
 
     @app.get("/{full_path:path}", include_in_schema=False)
@@ -199,7 +202,10 @@ def _mount_static_ui(app: FastAPI) -> None:
         if full_path and target.is_file():
             return FileResponse(target)
         if index_file.is_file():
-            return FileResponse(index_file)
+            return FileResponse(
+                index_file,
+                headers={"Cache-Control": "no-cache"},
+            )
         raise HTTPException(status_code=404, detail="UI not built")
 
 

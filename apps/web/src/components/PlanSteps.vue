@@ -238,10 +238,11 @@ async function confirmExecute() {
   padding: 0;
   flex-shrink: 0;
   align-self: center;
-  border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, var(--border));
+  border: 1.5px solid color-mix(in srgb, var(--text-muted) 55%, var(--border-strong));
   border-radius: 3px;
-  background: var(--panel-bg);
-  color: inherit;
+  background-color: var(--panel-bg);
+  background-image: none;
+  color: var(--text-h);
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
@@ -257,6 +258,7 @@ async function confirmExecute() {
   isolation: isolate;
   overflow: hidden;
   transform: translateZ(0);
+  box-shadow: none;
 }
 .plan-box:disabled {
   cursor: default;
@@ -267,10 +269,12 @@ async function confirmExecute() {
   border-color: var(--primary);
 }
 .plan-box.on {
-  background: var(--primary);
+  background-color: var(--primary);
+  background-image: none;
 }
 .plan-box.partial {
-  background: color-mix(in srgb, var(--primary) 12%, var(--panel-bg));
+  background-color: color-mix(in srgb, var(--primary) 12%, var(--panel-bg));
+  background-image: none;
 }
 .plan-box-mark {
   display: none;

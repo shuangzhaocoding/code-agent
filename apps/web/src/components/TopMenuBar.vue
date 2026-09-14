@@ -12,7 +12,8 @@ import {
   type MenuBarPosition,
 } from '@/utils/layoutPrefs'
 import { isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
-import { isDesktopApp, openDesktopWindow } from '@/utils/desktop'
+import { isDesktopApp, openDesktopWindow, needsDesktopWindowControls } from '@/utils/desktop'
+import DesktopWindowControls from '@/components/DesktopWindowControls.vue'
 
 type MenuId = 'file' | 'edit' | 'panel' | 'help'
 
@@ -41,7 +42,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   openPanel: [id: string, component: string, title: string]
   toggleTheme: []
-  openCommandPalette: []
+  openCommandPalette: [query?: string]
   openFilePalette: []
 }>()
 
@@ -54,6 +55,8 @@ const shortcutsOpen = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 const dropdownEl = ref<HTMLElement | null>(null)
 const importInput = ref<HTMLInputElement | null>(null)
+const menuSearchQuery = ref('')
+const menuSearchInput = ref<HTMLInputElement | null>(null)
 const dropdownStyle = ref<Record<string, string>>({})
 const MENU_ORDER: MenuId[] = ['file', 'edit', 'panel', 'help']
 
@@ -72,6 +75,32 @@ const canSave = computed(() => {
 })
 
 const isSideRail = computed(() => props.position === 'left' || props.position === 'right')
+const showCenterSearch = computed(() => !props.hideActions && !isSideRail.value)
+const showWindowControls = computed(
+  () => Boolean(props.asTitleBar) || (needsDesktopWindowControls() && props.position === 'top'),
+)
+const menuSearchPlaceholder = computed(
+  () => `${t('common.search')} (${commandShortcut})`,
+)
+
+function openMenuSearch(seed?: string) {
+  const q = (seed ?? menuSearchQuery.value).trim()
+  emit('openCommandPalette', q || undefined)
+}
+
+function onMenuSearchFocus() {
+  openMenuSearch()
+}
+
+function onMenuSearchKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    openMenuSearch()
+  } else if (e.key === 'Escape') {
+    menuSearchQuery.value = ''
+    menuSearchInput.value?.blur()
+  }
+}
 
 const PANEL_ICONS: Record<string, AppIconName> = {
   agent: 'atom',
@@ -375,7 +404,7 @@ const menus = computed(() => {
       label: t('menu.items.about'),
       icon: 'help',
       run: () => {
-        toast.info(t('menu.aboutBody', { name: 'Code Agent', version: '1.0.2' }))
+        toast.info(t('menu.aboutBody', { name: 'Code Agent', version: '1.0.8' }))
       },
     },
   ]
@@ -519,8 +548,35 @@ onUnmounted(() => {
       </div>
     </nav>
 
+    <div v-if="showCenterSearch" class="menu-search-center">
+      <label class="menu-search-field" :title="t('menu.items.commandPalette')">
+        <button
+          type="button"
+          class="menu-search-icon-btn"
+          tabindex="-1"
+          :aria-label="t('menu.items.commandPalette')"
+          @click="openMenuSearch()"
+        >
+          <AppIcon name="search" :size="14" :stroke-width="1.75" />
+        </button>
+        <input
+          ref="menuSearchInput"
+          v-model="menuSearchQuery"
+          type="search"
+          class="menu-search-input"
+          :placeholder="menuSearchPlaceholder"
+          autocomplete="off"
+          spellcheck="false"
+          @focus="onMenuSearchFocus"
+          @mousedown.prevent="onMenuSearchFocus"
+          @keydown="onMenuSearchKeydown"
+        />
+      </label>
+    </div>
+
     <div v-if="!hideActions" class="menu-actions">
       <button
+        v-if="isSideRail"
         type="button"
         class="ghost-icon-btn"
         :title="t('menu.items.commandPalette')"
@@ -537,6 +593,8 @@ onUnmounted(() => {
         <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="15" :stroke-width="1.75" />
       </button>
     </div>
+
+    <DesktopWindowControls v-if="showWindowControls" />
 
     <input
       ref="importInput"
@@ -603,6 +661,7 @@ onUnmounted(() => {
 }
 .app-menu-bar.pos-top,
 .app-menu-bar.pos-bottom {
+  position: relative;
   height: 38px;
   padding: 0 10px;
 }
@@ -612,9 +671,14 @@ onUnmounted(() => {
 }
 .app-menu-bar.is-titlebar .menu-trigger,
 .app-menu-bar.is-titlebar .menu-actions,
+.app-menu-bar.is-titlebar .menu-search-center,
 .app-menu-bar.is-titlebar .ghost-icon-btn,
+.app-menu-bar.is-titlebar .win-controls,
 .app-menu-bar.is-titlebar input {
   -webkit-app-region: no-drag;
+}
+.app-menu-bar.is-titlebar {
+  padding-right: 0;
 }
 .app-menu-bar.pos-top {
   border-bottom: var(--border-width) solid var(--border);
@@ -663,6 +727,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 1px;
   min-width: 0;
+  flex: 0 0 auto;
 }
 .pos-left .menu-nav,
 .pos-right .menu-nav {
@@ -672,6 +737,68 @@ onUnmounted(() => {
   gap: 2px;
   min-height: 0;
   overflow: auto;
+}
+.menu-search-center {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  width: min(420px, max(200px, 34vw));
+  pointer-events: none;
+}
+.menu-search-field {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px 0 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text-secondary);
+  cursor: text;
+}
+.menu-search-field:focus-within {
+  border-color: color-mix(in srgb, var(--accent, #3b82f6) 55%, var(--border));
+  color: var(--text-h);
+}
+.menu-search-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.menu-search-icon-btn:hover {
+  background: color-mix(in srgb, var(--text-h) 8%, transparent);
+  color: var(--text-h);
+}
+.menu-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text-h);
+  font-size: 12px;
+  line-height: 1;
+}
+.menu-search-input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+.menu-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
 }
 .menu-item {
   position: relative;

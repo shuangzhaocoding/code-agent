@@ -4,6 +4,8 @@ export type CodeAgentDesktop = {
   isDesktop?: boolean
   platform?: DesktopPlatform
   customTitleBar?: boolean
+  /** Linux frameless: draw min/max/close in renderer (Windows uses titleBarOverlay). */
+  needsWindowControls?: boolean
   titleBarHeight?: number
   pickDirectory?: () => Promise<string | null>
   setTheme?: (theme: 'light' | 'dark') => void | Promise<string>
@@ -11,6 +13,10 @@ export type CodeAgentDesktop = {
   newWindow?: () => Promise<boolean>
   setTitle?: (title: string) => void | Promise<void>
   openExternal?: (url: string) => Promise<boolean>
+  windowMinimize?: () => Promise<void>
+  windowMaximizeToggle?: () => Promise<boolean>
+  windowClose?: () => Promise<void>
+  isMaximized?: () => Promise<boolean>
 }
 
 export const DESKTOP_TITLEBAR_HEIGHT = 38
@@ -23,12 +29,19 @@ export function isDesktopApp(): boolean {
   return Boolean(getDesktopBridge()?.isDesktop)
 }
 
-/** Win/mac custom title bar; Linux keeps native frame. */
+/** Custom title bar on all desktop platforms (Win overlay / mac traffic lights / Linux custom buttons). */
 export function hasCustomTitleBar(): boolean {
   const desktop = getDesktopBridge()
   if (!desktop?.isDesktop) return false
   if (typeof desktop.customTitleBar === 'boolean') return desktop.customTitleBar
-  return desktop.platform === 'win32' || desktop.platform === 'darwin'
+  return desktop.platform === 'win32' || desktop.platform === 'darwin' || desktop.platform === 'linux'
+}
+
+export function needsDesktopWindowControls(): boolean {
+  const desktop = getDesktopBridge()
+  if (!desktop?.isDesktop) return false
+  if (typeof desktop.needsWindowControls === 'boolean') return desktop.needsWindowControls
+  return desktop.platform === 'linux'
 }
 
 export function desktopPlatform(): DesktopPlatform | null {

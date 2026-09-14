@@ -20,7 +20,6 @@ import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
 import TodoBlock from '@/renderers/TodoBlock.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
-import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
@@ -64,12 +63,6 @@ const { t } = useI18n()
 const store = useAppStore()
 const commandShortcut = paletteShortcutLabel()
 const scroller = ref<HTMLElement | null>(null)
-const virtualList = useVirtualList(toRef(store, 'messages'), scroller, { threshold: 40 })
-const messageRows = computed(() =>
-  virtualList.enabled.value
-    ? virtualList.visibleItems.value
-    : store.messages.map((item, index) => ({ item, index })),
-)
 
 /* ---- message actions ---- */
 const copyToast = ref(false)
@@ -214,13 +207,6 @@ let historyObs: IntersectionObserver | null = null
 function scrollToMessage(msgId: string) {
   pauseFollow()
   activeHistoryId.value = msgId
-  const idx = store.messages.findIndex((m) => m.id === msgId)
-  if (idx >= 0 && virtualList.enabled.value) {
-    nextTick(() => {
-      virtualList.scrollToIndex(idx, 'smooth')
-    })
-    return
-  }
   nextTick(() => {
     const container = scroller.value
     const el = document.getElementById(`msg-${msgId}`)
@@ -858,6 +844,8 @@ const uploadError = ref('')
 let locking = false
 let followGen = 0
 let pinRaf = 0
+/** Ignore auto-stick briefly after the user scrolls away (prevents bounce-back). */
+let userDetachUntil = 0
 let resizeObs: ResizeObserver | null = null
 
 const {
@@ -986,6 +974,7 @@ function distanceToBottom(el: HTMLElement) {
 function pauseFollow() {
   stick.value = false
   followGen += 1
+  userDetachUntil = performance.now() + 500
   if (pinRaf) {
     cancelAnimationFrame(pinRaf)
     pinRaf = 0
@@ -996,22 +985,18 @@ function applyScrollTop(el: HTMLElement, behavior: ScrollBehavior) {
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
   if (behavior === 'auto') el.scrollTop = top
   else el.scrollTo({ top, behavior })
-  virtualList.onScroll()
 }
 
 /** Programmatic stick scroll; keeps locking so onScroll does not pause follow. */
 function stickScrollNow(behavior: ScrollBehavior = 'auto') {
   if (!stick.value && !forcePinning.value) return
+  if (!forcePinning.value && performance.now() < userDetachUntil) return
   const el = scroller.value
   if (!el) return
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
-  if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) {
-    virtualList.onScroll()
-    return
-  }
+  if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) return
   locking = true
-  if (virtualList.enabled.value) virtualList.scrollToEnd(behavior)
-  else applyScrollTop(el, behavior)
+  applyScrollTop(el, behavior)
   requestAnimationFrame(() => {
     // Do not drop the pin lock while forcePinning owns the session.
     if (!forcePinning.value) locking = false
@@ -1029,16 +1014,18 @@ function scrollToEnd() {
 }
 
 function resumeStickScroll() {
+  userDetachUntil = 0
   void pinToBottom()
 }
 
 function onScroll() {
-  virtualList.onScroll()
   if (locking || forcePinning.value) return
   const el = scroller.value
   if (!el) return
-  if (distanceToBottom(el) > 16) pauseFollow()
-  else stick.value = true
+  const dist = distanceToBottom(el)
+  // Hysteresis: leave bottom sooner than we re-attach, avoids flicker at the edge.
+  if (dist > 24) pauseFollow()
+  else if (dist <= 8 && performance.now() >= userDetachUntil) stick.value = true
 }
 
 function onWheel(e: WheelEvent) {
@@ -1056,11 +1043,13 @@ function onPointerDown(e: PointerEvent) {
 function scheduleStickScroll() {
   if (locking) return
   if (!stick.value && !forcePinning.value) return
+  if (!forcePinning.value && performance.now() < userDetachUntil) return
   if (pinRaf) return
   pinRaf = requestAnimationFrame(() => {
     pinRaf = 0
     if (locking) return
     if (!stick.value && !forcePinning.value) return
+    if (!forcePinning.value && performance.now() < userDetachUntil) return
     stickScrollNow('auto')
   })
 }
@@ -1081,20 +1070,11 @@ async function waitForScrollerReady(maxMs = 4000) {
     }
     if (!store.messages.length) return true
 
-    if (virtualList.enabled.value) {
-      // Move the virtual window to the estimated end (not top-of-last-item).
-      virtualList.prepareEndWindow()
-      await nextTick()
-      virtualList.scrollToEnd('auto')
-      await raf()
-    }
-
     const lastId = store.messages.at(-1)?.id
     const lastInDom = lastId ? Boolean(document.getElementById(`msg-${lastId}`)) : false
     const scrollable = el.scrollHeight > el.clientHeight + 1
-    if (scrollable && (lastInDom || !virtualList.enabled.value)) return true
-    // Short conversations may not overflow; still ready once layout exists.
-    if (!scrollable && (lastInDom || !virtualList.enabled.value)) return true
+    if (lastInDom) return true
+    if (!scrollable && el.clientHeight > 0) return true
     await raf()
   }
   return Boolean(scroller.value?.clientHeight)
@@ -1104,8 +1084,7 @@ function scrollMessagesToEnd(behavior: ScrollBehavior = 'auto') {
   if (!stick.value && !forcePinning.value) return
   const el = scroller.value
   if (!el) return
-  if (virtualList.enabled.value) virtualList.scrollToEnd(behavior)
-  else applyScrollTop(el, behavior)
+  applyScrollTop(el, behavior)
 }
 
 /** Force pin to bottom (conversation switch / initial load / jump button). */
@@ -1113,6 +1092,7 @@ async function pinToBottom() {
   stick.value = true
   followGen += 1
   const token = followGen
+  userDetachUntil = 0
   forcePinning.value = true
   locking = true
 
@@ -1217,22 +1197,6 @@ watch(
     nextTick(() => setupHistoryObserver())
   },
   { immediate: true },
-)
-
-watch(
-  () => virtualList.enabled.value,
-  (enabled, wasEnabled) => {
-    if (enabled && wasEnabled === false && stick.value && store.messages.length) {
-      void pinToBottom()
-    }
-  },
-)
-
-watch(
-  () => virtualList.totalHeight.value,
-  () => {
-    if (stick.value && store.messages.length) scheduleStickScroll()
-  },
 )
 
 watch(
@@ -1446,55 +1410,52 @@ function openContextUsageDialog() {
             </button>
           </div>
         </div>
-        <div v-if="virtualList.enabled.value" class="virtual-spacer" :style="{ height: `${virtualList.paddingTop.value}px` }" />
         <article
-          v-for="row in messageRows"
-          :key="row.item.id"
-          :id="'msg-' + row.item.id"
-          :ref="virtualList.enabled.value ? (el) => virtualList.setItemEl(row.item.id, el as Element | null) : undefined"
-          :class="['msg-wrap', row.item.role]"
+          v-for="msg in store.messages"
+          :key="msg.id"
+          :id="'msg-' + msg.id"
+          :class="['msg-wrap', msg.role]"
         >
-          <template v-if="row.item.role === 'user'">
-            <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(row.item.id) && isLongMsg(row.item) }">
-              <section v-for="block in row.item.blocks" :key="block.id" class="block">
+          <template v-if="msg.role === 'user'">
+            <div class="msg-bubble" :class="{ collapsed: !expandedMsgs.has(msg.id) && isLongMsg(msg) }">
+              <section v-for="block in msg.blocks" :key="block.id" class="block">
                 <component :is="rendererFor(block.type)" :block="block as Block" />
               </section>
             </div>
             <button
-              v-if="isLongMsg(row.item)"
+              v-if="isLongMsg(msg)"
               type="button"
               class="msg-expand-btn"
-              @click="toggleExpand(row.item.id)"
-            >{{ expandedMsgs.has(row.item.id) ? t('chat.collapse') : t('chat.expandAll') }}</button>
+              @click="toggleExpand(msg.id)"
+            >{{ expandedMsgs.has(msg.id) ? t('chat.collapse') : t('chat.expandAll') }}</button>
           </template>
           <template v-else>
             <AssistantMessageBody
-              :msg="row.item"
-              :streaming="isAssistantStreaming(row.item)"
+              :msg="msg"
+              :streaming="isAssistantStreaming(msg)"
               @toggle="onWorkToggle"
             />
             <RunReviewActions
-              v-if="!isAssistantStreaming(row.item)"
-              :message="row.item"
+              v-if="!isAssistantStreaming(msg)"
+              :message="msg"
             />
           </template>
-          <div v-if="row.item.role === 'user' || !isAssistantStreaming(row.item)" class="msg-bar" :class="row.item.role">
+          <div v-if="msg.role === 'user' || !isAssistantStreaming(msg)" class="msg-bar" :class="msg.role">
             <span class="msg-time">
-              <template v-if="row.item.created_at">{{ fmtTime(row.item.created_at) }}</template>
-              <template v-if="row.item.role === 'assistant' && row.item.ended_at"> · {{ fmtTime(row.item.ended_at) }} · {{ t('time.duration', { value: fmtDuration(row.item) }) }}</template>
+              <template v-if="msg.created_at">{{ fmtTime(msg.created_at) }}</template>
+              <template v-if="msg.role === 'assistant' && msg.ended_at"> · {{ fmtTime(msg.ended_at) }} · {{ t('time.duration', { value: fmtDuration(msg) }) }}</template>
             </span>
             <div class="msg-actions">
-              <MessageRollbackControl v-if="row.item.role === 'user'" :message="row.item" />
-              <button v-if="row.item.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(row.item)">
+              <MessageRollbackControl v-if="msg.role === 'user'" :message="msg" />
+              <button v-if="msg.role === 'user'" type="button" class="msg-icon-btn" :title="t('common.edit')" @click="startEdit(msg)">
                 <AppIcon name="pencil" :size="16" :stroke-width="1.75" />
               </button>
-              <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(row.item)">
+              <button type="button" class="msg-icon-btn" :title="t('common.copy')" @click="copyMsg(msg)">
                 <AppIcon name="copy" :size="16" :stroke-width="1.75" />
               </button>
             </div>
           </div>
         </article>
-        <div v-if="virtualList.enabled.value" class="virtual-spacer" :style="{ height: `${virtualList.paddingBottom.value}px` }" />
         <ConnectionStatusBar />
         <div v-if="running()" class="typing" aria-hidden="true">
           <span class="dots"><i /><i /><i /></span>
@@ -1780,10 +1741,6 @@ function openContextUsageDialog() {
   align-items: stretch;
   width: 100%;
   min-height: min-content;
-}
-.virtual-spacer {
-  flex: none;
-  width: 100%;
 }
 .switch-loading {
   align-self: center;

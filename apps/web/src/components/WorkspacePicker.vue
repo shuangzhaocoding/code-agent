@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import LanguageSelect from '@/components/LanguageSelect.vue'
 import BrandMark from '@/components/BrandMark.vue'
+import DesktopWindowControls from '@/components/DesktopWindowControls.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
 
 import { formatWorkspaceOpenedAt } from '@/utils/relativeTime'
@@ -103,6 +104,7 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
           <AppIcon :name="theme === 'dark' ? 'sun' : 'moon'" :size="16" />
         </button>
       </div>
+      <DesktopWindowControls />
     </header>
 
     <main class="launch-body">
@@ -258,7 +260,12 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
 }
 .launch-header.is-titlebar {
   height: var(--desktop-titlebar-height, 38px);
+  padding-right: 0;
   -webkit-app-region: drag;
+}
+.launch-header.is-titlebar .launch-actions,
+.launch-header.is-titlebar .win-controls {
+  -webkit-app-region: no-drag;
 }
 .launch-header-drag {
   flex: 1;

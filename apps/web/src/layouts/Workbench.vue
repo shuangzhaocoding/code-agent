@@ -50,9 +50,10 @@ const theme = ref<Theme>(currentTheme())
 const menuPosition = ref<MenuBarPosition>(getMenuBarPosition())
 const paletteOpen = ref(false)
 const paletteMode = ref<'commands' | 'files'>('commands')
-const customTitleBar = hasCustomTitleBar()
-const menuAsTitleBar = computed(() => customTitleBar && menuPosition.value === 'top')
-const showDesktopStrip = computed(() => customTitleBar && menuPosition.value !== 'top')
+const paletteSeedQuery = ref('')
+const customTitleBar = computed(() => hasCustomTitleBar())
+const menuAsTitleBar = computed(() => customTitleBar.value && menuPosition.value === 'top')
+const showDesktopStrip = computed(() => customTitleBar.value && menuPosition.value !== 'top')
 
 const components = {
   workspace: WorkspacePanel,
@@ -302,6 +303,7 @@ function onWorkbenchKey(e: KeyboardEvent) {
     e.preventDefault()
     e.stopPropagation()
     paletteMode.value = 'files'
+    paletteSeedQuery.value = ''
     paletteOpen.value = true
   }
 }
@@ -525,13 +527,15 @@ function onToggleTheme() {
   theme.value = toggleTheme()
 }
 
-function openCommandPalette() {
+function openCommandPalette(seedQuery = '') {
   paletteMode.value = 'commands'
+  paletteSeedQuery.value = seedQuery
   paletteOpen.value = true
 }
 
 function openFilePalette() {
   paletteMode.value = 'files'
+  paletteSeedQuery.value = ''
   paletteOpen.value = true
 }
 
@@ -588,6 +592,7 @@ const dockThemeClass = computed(() =>
     <CommandPalette
       v-model:open="paletteOpen"
       v-model:mode="paletteMode"
+      :seed-query="paletteSeedQuery"
       @open-panel="openPanel"
       @toggle-theme="onToggleTheme"
     />

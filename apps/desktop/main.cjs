@@ -225,7 +225,30 @@ function windowChromeOptions() {
       },
     }
   }
+  // Linux: frameless so UI can match Windows (logo + menus + custom window buttons).
+  if (process.platform === 'linux') {
+    return {
+      frame: false,
+      autoHideMenuBar: true,
+    }
+  }
   return {}
+}
+
+function emitWindowState(win) {
+  if (!win || win.isDestroyed()) return
+  try {
+    win.webContents.send('desktop:window-state', { maximized: win.isMaximized() })
+  } catch {
+    // ignore
+  }
+}
+
+function bindWindowChromeEvents(win) {
+  if (process.platform !== 'linux') return
+  const sync = () => emitWindowState(win)
+  win.on('maximize', sync)
+  win.on('unmaximize', sync)
 }
 
 function toggleDevTools(win) {
@@ -273,6 +296,8 @@ function createWindow(opts = {}) {
     minHeight: 700,
     title: 'Code Agent',
     backgroundColor: colors.background,
+    // Linux frameless must win over any platform default frame.
+    frame: process.platform !== 'linux',
     autoHideMenuBar: true,
     show: false,
     ...windowChromeOptions(),
@@ -286,6 +311,7 @@ function createWindow(opts = {}) {
 
   windows.add(win)
   bindDevToolsShortcuts(win)
+  bindWindowChromeEvents(win)
 
   win.once('ready-to-show', () => {
     if (!win.isDestroyed()) win.show()
@@ -702,6 +728,29 @@ if (!gotLock) {
   ipcMain.handle('desktop:open-external', async (_event, url) => {
     if (typeof url !== 'string') return false
     return openExternalUrl(url)
+  })
+  ipcMain.handle('desktop:window-minimize', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return
+    win.minimize()
+  })
+  ipcMain.handle('desktop:window-maximize-toggle', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return false
+    if (win.isMaximized()) win.unmaximize()
+    else win.maximize()
+    emitWindowState(win)
+    return win.isMaximized()
+  })
+  ipcMain.handle('desktop:window-close', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return
+    win.close()
+  })
+  ipcMain.handle('desktop:window-is-maximized', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender)
+    if (!win || win.isDestroyed()) return false
+    return win.isMaximized()
   })
   app.whenReady().then(() => {
     // Hide File / Edit / View etc. native menu bar (packaged desktop UX).

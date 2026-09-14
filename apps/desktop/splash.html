@@ -49,12 +49,7 @@
       display: none;
       height: var(--titlebar-h);
       align-items: center;
-      padding: 0 12px;
-      padding-left: max(12px, env(titlebar-area-x, 12px));
-      padding-right: max(
-        12px,
-        calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px))
-      );
+      padding: 0 0 0 12px;
       background: var(--bg);
       border-bottom: 1px solid var(--titlebar-border);
       -webkit-app-region: drag;
@@ -64,6 +59,34 @@
       color: var(--fg);
     }
     body.custom-titlebar .titlebar { display: flex; }
+    body.needs-window-controls .titlebar {
+      padding-right: 0;
+    }
+    .titlebar-label {
+      flex: 1;
+      min-width: 0;
+    }
+    .win-controls {
+      display: none;
+      align-items: stretch;
+      height: 100%;
+      margin-left: auto;
+      -webkit-app-region: no-drag;
+    }
+    body.needs-window-controls .win-controls { display: flex; }
+    .win-btn {
+      width: 46px;
+      height: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--fg);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      padding: 0;
+    }
+    .win-btn:hover { background: color-mix(in srgb, var(--fg) 10%, transparent); }
+    .win-btn-close:hover { background: #e81123; color: #fff; }
     .wrap {
       min-height: 100%;
       display: grid;
@@ -98,30 +121,24 @@
     h1 {
       margin: 0;
       font-size: 20px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-    }
-    #status {
-      margin: 0;
-      color: var(--muted);
-      min-height: 1.45em;
+      font-weight: 650;
+      letter-spacing: -0.03em;
     }
     .spinner {
       width: 28px;
       height: 28px;
-      border: 2.5px solid var(--accent-soft);
-      border-top-color: var(--accent);
       border-radius: 50%;
-      animation: spin 0.75s linear infinite;
+      border: 2px solid var(--accent-soft);
+      border-top-color: var(--accent);
+      animation: spin 0.8s linear infinite;
     }
     .spinner.is-error {
-      border-color: rgba(255, 107, 107, 0.35);
-      border-top-color: #ff6b6b;
       animation: none;
+      border-color: #e11d48;
+      border-top-color: #e11d48;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #status { margin: 0; color: var(--muted); }
     #detail {
       margin: 0;
       color: var(--detail);
@@ -137,7 +154,20 @@
   </style>
 </head>
 <body>
-  <div class="titlebar">Code Agent</div>
+  <div class="titlebar">
+    <span class="titlebar-label">Code Agent</span>
+    <div class="win-controls" aria-hidden="false">
+      <button type="button" class="win-btn" id="btn-min" title="Minimize">
+        <svg viewBox="0 0 12 12" width="12" height="12"><path d="M2 6h8" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <button type="button" class="win-btn" id="btn-max" title="Maximize">
+        <svg viewBox="0 0 12 12" width="12" height="12"><rect x="2.25" y="2.25" width="7.5" height="7.5" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+      <button type="button" class="win-btn win-btn-close" id="btn-close" title="Close">
+        <svg viewBox="0 0 12 12" width="12" height="12"><path d="M3 3l6 6M9 3L3 9" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+      </button>
+    </div>
+  </div>
   <div class="wrap">
     <div class="card">
       <div class="mark" aria-hidden="true">
@@ -164,8 +194,18 @@
     } catch {
       applySplashTheme('dark')
     }
-    if (window.codeAgentDesktop && window.codeAgentDesktop.customTitleBar) {
+    var desktop = window.codeAgentDesktop
+    if (desktop && desktop.customTitleBar) {
       document.body.classList.add('custom-titlebar')
+    }
+    if (desktop && desktop.needsWindowControls) {
+      document.body.classList.add('needs-window-controls')
+      var min = document.getElementById('btn-min')
+      var max = document.getElementById('btn-max')
+      var closeBtn = document.getElementById('btn-close')
+      if (min) min.onclick = function () { desktop.windowMinimize && desktop.windowMinimize() }
+      if (max) max.onclick = function () { desktop.windowMaximizeToggle && desktop.windowMaximizeToggle() }
+      if (closeBtn) closeBtn.onclick = function () { desktop.windowClose && desktop.windowClose() }
     }
     window.setSplashStatus = function (text, opts) {
       const status = document.getElementById('status')

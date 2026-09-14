@@ -1,11 +1,13 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
-const customTitleBar = process.platform === 'win32' || process.platform === 'darwin'
+const customTitleBar = true
+const needsWindowControls = process.platform === 'linux'
 
 contextBridge.exposeInMainWorld('codeAgentDesktop', {
   isDesktop: true,
   platform: process.platform,
   customTitleBar,
+  needsWindowControls,
   titleBarHeight: 38,
   pickDirectory: () => ipcRenderer.invoke('desktop:pick-directory'),
   setTheme: (theme) => ipcRenderer.invoke('desktop:set-theme', theme),
@@ -13,4 +15,12 @@ contextBridge.exposeInMainWorld('codeAgentDesktop', {
   newWindow: () => ipcRenderer.invoke('desktop:new-window'),
   setTitle: (title) => ipcRenderer.invoke('desktop:set-title', title),
   openExternal: (url) => ipcRenderer.invoke('desktop:open-external', url),
+  windowMinimize: () => ipcRenderer.invoke('desktop:window-minimize'),
+  windowMaximizeToggle: () => ipcRenderer.invoke('desktop:window-maximize-toggle'),
+  windowClose: () => ipcRenderer.invoke('desktop:window-close'),
+  isMaximized: () => ipcRenderer.invoke('desktop:window-is-maximized'),
+})
+
+ipcRenderer.on('desktop:window-state', (_event, payload) => {
+  window.dispatchEvent(new CustomEvent('ca-desktop-window-state', { detail: payload || {} }))
 })

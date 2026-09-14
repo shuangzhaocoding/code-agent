@@ -7,6 +7,13 @@
     "ko": "한국어",
     "de": "Deutsch"
   },
+  "desktop": {
+    "windowControls": "Fenstersteuerung",
+    "minimize": "Minimieren",
+    "maximize": "Maximieren",
+    "restore": "Wiederherstellen",
+    "close": "Schließen"
+  },
   "common": {
     "open": "Öffnen",
     "close": "Schließen",
