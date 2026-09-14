@@ -68,7 +68,7 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
       },
     ]
   }
-  if (event.type === 'block.delta' || event.type === 'block.completed') {
+  if (event.type === 'block.delta' || event.type === 'block.completed' || event.type === 'block.updated') {
     const idx = findAssistantIndex(messages, event.run_id)
     if (idx < 0) return messages
     const target = messages[idx]
@@ -82,6 +82,12 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
         if (b.status && b.status !== 'streaming') return b
         copy.text += String(payload.text || '')
         if (payload.meta) Object.assign(copy.meta, payload.meta)
+      } else if (event.type === 'block.updated') {
+        // In-place checklist / content replace (same block id).
+        if (payload.text != null) copy.text = String(payload.text)
+        if (payload.meta) copy.meta = { ...copy.meta, ...(payload.meta as Record<string, unknown>) }
+        if (payload.status != null) copy.status = String(payload.status)
+        copy.ended_at = Date.now()
       } else {
         copy.status = String(payload.status || 'ok')
         copy.ended_at = Date.now()

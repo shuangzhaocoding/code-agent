@@ -11,6 +11,7 @@ export const renderers: Record<string, Component> = {
   'file.delete': defineAsyncComponent(() => import('./FileDiffBlock.vue')),
   'file.read': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
   terminal: defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
+  'terminal.launch': defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
   'skill.activated': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
   explore: defineAsyncComponent(() => import('./ExploreBlock.vue')),
   todo: defineAsyncComponent(() => import('./TodoBlock.vue')),

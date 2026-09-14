@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type IDisposable } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
@@ -14,6 +15,9 @@ import {
   TERMINAL_MENTION_PATH,
   terminalSelectionRange,
 } from '@/utils/terminalMention'
+import { attachTerminalPathLinks, handleTerminalUrlClick, terminalUrlLinkHoverOptions } from '@/utils/terminalLinks'
+import { toWorkspaceRelative } from '@/utils/chatFileLinks'
+import { formatRelativeTime } from '@/utils/relativeTime'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -21,9 +25,13 @@ const store = useAppStore()
 interface TermEntry {
   id: string
   title: string
+  cwd: string
+  createdAt: string | null
   alive: boolean
   term: Terminal | null
   fit: FitAddon | null
+  webLinks: WebLinksAddon | null
+  pathLinks: IDisposable | null
   ws: WebSocket | null
   observer: ResizeObserver | null
   el: HTMLDivElement | null
@@ -31,11 +39,73 @@ interface TermEntry {
 
 const tabs = reactive<TermEntry[]>([])
 const activeId = ref<string | null>(null)
-const sideWidth = ref(180)
+const sideWidth = ref(132)
 const ctxMenu = ref<{ x: number; y: number } | null>(null)
 const renamingId = ref<string | null>(null)
 const renameVal = ref('')
 const hostsEl = ref<HTMLDivElement | null>(null)
+
+const hoverTip = ref<{
+  id: string
+  x: number
+  y: number
+} | null>(null)
+let hoverTimer: ReturnType<typeof setTimeout> | null = null
+
+const hoverTab = computed(() => {
+  if (!hoverTip.value) return null
+  return tabs.find((row) => row.id === hoverTip.value!.id) || null
+})
+
+function displayCwd(cwd: string | null | undefined): string {
+  const raw = (cwd || '').trim()
+  if (!raw) return t('terminal.cwdUnknown')
+  const root = store.workspace?.root_path || ''
+  const rel = root ? toWorkspaceRelative(raw, root) : null
+  if (rel != null) return rel ? `./${rel}` : '.'
+  return raw
+}
+
+function clearHoverTip() {
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+  hoverTip.value = null
+}
+
+function onSideItemEnter(tab: TermEntry, e: MouseEvent) {
+  if (renamingId.value === tab.id) return
+  if (hoverTimer) clearTimeout(hoverTimer)
+  const el = e.currentTarget as HTMLElement
+  hoverTimer = setTimeout(() => {
+    const rect = el.getBoundingClientRect()
+    hoverTip.value = {
+      id: tab.id,
+      x: Math.max(8, rect.left - 8),
+      y: rect.top,
+    }
+  }, 280)
+}
+
+function onSideItemLeave() {
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+  // Delay hide so cursor can move onto the tip briefly without flicker.
+  hoverTimer = setTimeout(() => {
+    hoverTip.value = null
+    hoverTimer = null
+  }, 120)
+}
+
+function keepHoverTip() {
+  if (hoverTimer) {
+    clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+}
 
 function startRename(tab: TermEntry) {
   renamingId.value = tab.id
@@ -193,6 +263,27 @@ function createAndMount(entry: TermEntry) {
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
+
+  const webLinks = new WebLinksAddon(
+    (event, uri) => {
+      handleTerminalUrlClick(event, uri)
+    },
+    terminalUrlLinkHoverOptions(term),
+  )
+  term.loadAddon(webLinks)
+
+  const pathLinks = attachTerminalPathLinks(term, {
+    workspaceRoot: () => store.workspace?.root_path || '',
+    loadTree: (path) => store.loadTree(path),
+    childrenOf: (path) => store.childrenOf(path),
+    openFile: (path, line) => store.openChatFilePath(path, line),
+    openDirectory: async (path) => {
+      window.dispatchEvent(new Event('ca-open-explorer'))
+      await store.revealInTree(path)
+      await store.expandDir(path)
+    },
+  })
+
   term.open(div)
   fit.fit()
 
@@ -235,6 +326,8 @@ function createAndMount(entry: TermEntry) {
 
   entry.term = term
   entry.fit = fit
+  entry.webLinks = webLinks
+  entry.pathLinks = pathLinks
   entry.observer = observer
 }
 
@@ -303,7 +396,7 @@ function liveEntry(): TermEntry | null {
 async function runQueuedCommand() {
   const queued = takeTerminalRun()
   if (!queued?.command) return
-  let entry = liveEntry()
+  let entry = queued.newTab ? null : liveEntry()
   if (!entry) {
     try {
       await addTerminal(queued.cwd)
@@ -317,6 +410,8 @@ async function runQueuedCommand() {
     } catch {
       return
     }
+  } else if (queued.cwd) {
+    // Active tab may already be elsewhere; still send the command as-is (caller should cd).
   }
   activateTab(entry.id)
   sendTerminalInput(entry, `${queued.command}\r`)
@@ -343,15 +438,23 @@ async function addTerminal(cwd?: string) {
     title: cwd ? undefined : t('terminal.untitled', { n: tabs.length + 1 }),
   }
   if (cwd) body.cwd = cwd
-  const row = await api<{ id: string; title: string }>('/api/terminals', {
+  const row = await api<{ id: string; title: string; cwd?: string; created_at?: string | null }>('/api/terminals', {
     method: 'POST',
     body: JSON.stringify(body),
   })
   const entry: TermEntry = {
     id: row.id,
     title: row.title || t('terminal.untitled', { n: tabs.length + 1 }),
+    cwd: row.cwd || '',
+    createdAt: row.created_at || new Date().toISOString(),
     alive: true,
-    term: null, fit: null, ws: null, observer: null, el: null,
+    term: null,
+    fit: null,
+    webLinks: null,
+    pathLinks: null,
+    ws: null,
+    observer: null,
+    el: null,
   }
   tabs.push(entry)
   await nextTick()
@@ -376,6 +479,8 @@ async function removeTerminal(id: string) {
   const entry = tabs[idx]
   entry.ws?.close()
   entry.observer?.disconnect()
+  entry.pathLinks?.dispose()
+  entry.webLinks?.dispose()
   entry.term?.dispose()
   entry.el?.remove()
   try { await api(`/api/terminals/${id}`, { method: 'DELETE' }) } catch { /* ok */ }
@@ -389,15 +494,23 @@ async function removeTerminal(id: string) {
 
 async function loadExisting() {
   if (!store.workspaceId) return
-  const list = await api<{ id: string; title: string; alive: boolean }[]>(
+  const list = await api<{ id: string; title: string; cwd?: string; alive: boolean; created_at?: string | null }[]>(
     `/api/terminals?workspace_id=${store.workspaceId}`,
   )
   for (const row of list) {
     const entry: TermEntry = {
       id: row.id,
       title: row.title || t('terminal.untitled', { n: tabs.length + 1 }),
+      cwd: row.cwd || '',
+      createdAt: row.created_at || null,
       alive: row.alive,
-      term: null, fit: null, ws: null, observer: null, el: null,
+      term: null,
+      fit: null,
+      webLinks: null,
+      pathLinks: null,
+      ws: null,
+      observer: null,
+      el: null,
     }
     tabs.push(entry)
   }
@@ -423,7 +536,7 @@ function onDragStart(e: MouseEvent) {
   const startX = e.clientX
   const startW = sideWidth.value
   function onMove(ev: MouseEvent) {
-    sideWidth.value = Math.max(100, Math.min(320, startW + (startX - ev.clientX)))
+    sideWidth.value = Math.max(88, Math.min(220, startW + (startX - ev.clientX)))
   }
   function onUp() {
     window.removeEventListener('mousemove', onMove)
@@ -450,6 +563,8 @@ watch(() => store.workspaceId, async () => {
   for (const entry of tabs) {
     entry.ws?.close()
     entry.observer?.disconnect()
+    entry.pathLinks?.dispose()
+    entry.webLinks?.dispose()
     entry.term?.dispose()
     entry.el?.remove()
   }
@@ -462,9 +577,12 @@ onBeforeUnmount(() => {
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('ca-terminal-cwd', flushQueuedTerminal)
   window.removeEventListener('ca-terminal-run', onTerminalRun)
+  clearHoverTip()
   for (const entry of tabs) {
     entry.ws?.close()
     entry.observer?.disconnect()
+    entry.pathLinks?.dispose()
+    entry.webLinks?.dispose()
     entry.term?.dispose()
     entry.el?.remove()
   }
@@ -479,7 +597,7 @@ onBeforeUnmount(() => {
       <div class="side-head">
         <span class="side-title">{{ t('terminal.title') }}</span>
         <button type="button" class="ghost-icon-btn" :title="t('terminal.new')" @click="addTerminal()">
-          <AppIcon name="plus" :size="16" :stroke-width="1.75" />
+          <AppIcon name="plus" :size="14" :stroke-width="1.75" />
         </button>
       </div>
       <div class="side-list">
@@ -487,10 +605,13 @@ onBeforeUnmount(() => {
           v-for="tab in tabs"
           :key="tab.id"
           class="side-item"
-          :class="{ active: tab.id === activeId }"
+          :class="{ active: tab.id === activeId, dead: !tab.alive }"
           @click="activateTab(tab.id)"
+          @mouseenter="onSideItemEnter(tab, $event)"
+          @mouseleave="onSideItemLeave"
         >
-          <AppIcon name="terminal" :size="16" :stroke-width="1.75" />
+          <span class="side-status" :class="tab.alive ? 'on' : 'off'" aria-hidden="true" />
+          <AppIcon name="terminal" :size="13" :stroke-width="1.75" />
           <input
             v-if="renamingId === tab.id"
             v-model="renameVal"
@@ -506,11 +627,44 @@ onBeforeUnmount(() => {
             :title="t('terminal.close')"
             @click.stop="removeTerminal(tab.id)"
           >
-            <AppIcon name="trash" :size="14" :stroke-width="1.75" />
+            <AppIcon name="trash" :size="12" :stroke-width="1.75" />
           </button>
         </div>
       </div>
     </aside>
+
+    <Teleport to="body">
+      <div
+        v-if="hoverTip && hoverTab"
+        class="term-tip"
+        :style="{ left: `${hoverTip.x}px`, top: `${hoverTip.y}px` }"
+        @mouseenter="keepHoverTip"
+        @mouseleave="clearHoverTip"
+      >
+        <div class="term-tip-head">
+          <AppIcon name="terminal" :size="14" :stroke-width="1.75" />
+          <strong>{{ hoverTab.title }}</strong>
+          <span class="term-tip-badge" :class="hoverTab.alive ? 'on' : 'off'">
+            {{ hoverTab.alive ? t('terminal.statusAlive') : t('terminal.statusExited') }}
+          </span>
+        </div>
+        <dl class="term-tip-meta">
+          <div>
+            <dt>{{ t('terminal.detailCwd') }}</dt>
+            <dd class="mono" :title="hoverTab.cwd || undefined">{{ displayCwd(hoverTab.cwd) }}</dd>
+          </div>
+          <div v-if="hoverTab.createdAt">
+            <dt>{{ t('terminal.detailCreated') }}</dt>
+            <dd>{{ formatRelativeTime(hoverTab.createdAt) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('terminal.detailId') }}</dt>
+            <dd class="mono">{{ hoverTab.id.slice(0, 8) }}</dd>
+          </div>
+        </dl>
+      </div>
+    </Teleport>
+
     <ContextMenu
       v-if="ctxMenu"
       :x="ctxMenu.x"
@@ -546,6 +700,23 @@ onBeforeUnmount(() => {
 .term-hosts :deep(.xterm-viewport) {
   background: transparent;
 }
+.term-hosts :deep(.ca-term-link-tip) {
+  position: absolute;
+  z-index: 30;
+  max-width: min(420px, calc(100% - 16px));
+  padding: 5px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--panel-bg));
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
 .term-divider {
   flex-shrink: 0;
   width: 4px;
@@ -560,8 +731,8 @@ onBeforeUnmount(() => {
 }
 .term-sidebar {
   flex-shrink: 0;
-  min-width: 100px;
-  max-width: 320px;
+  min-width: 88px;
+  max-width: 220px;
   display: flex;
   flex-direction: column;
   border-left: var(--border-width) solid var(--border);
@@ -570,13 +741,13 @@ onBeforeUnmount(() => {
 .side-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 6px 8px;
   border-bottom: var(--border-width) solid var(--border);
 }
 .side-title {
   flex: 1;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -584,20 +755,30 @@ onBeforeUnmount(() => {
 .side-list {
   flex: 1;
   overflow: auto;
-  padding: 4px 6px;
+  padding: 3px 4px;
 }
 .side-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border-radius: 6px;
+  gap: 5px;
+  padding: 4px 6px;
+  border-radius: 5px;
   cursor: pointer;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 11.5px;
+  min-height: 26px;
 }
 .side-item:hover { background: var(--code-bg); }
 .side-item.active { background: var(--primary-soft); color: var(--primary); }
+.side-item.dead { opacity: 0.62; }
+.side-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.side-status.on { background: #22c55e; }
+.side-status.off { background: var(--text-muted); }
 .side-item-name {
   flex: 1;
   min-width: 0;
@@ -608,7 +789,7 @@ onBeforeUnmount(() => {
 .rename-input {
   flex: 1;
   min-width: 0;
-  font-size: 12.5px;
+  font-size: 11.5px;
   padding: 1px 4px;
   border: 1px solid var(--primary);
   border-radius: 3px;
@@ -623,4 +804,80 @@ onBeforeUnmount(() => {
 }
 .side-item:hover .side-item-close { opacity: var(--ghost-hover-opacity); }
 .side-item-close:hover { opacity: 1 !important; }
+</style>
+
+<style>
+.term-tip {
+  position: fixed;
+  z-index: 5200;
+  transform: translate(-100%, 0);
+  width: min(280px, calc(100vw - 24px));
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated, var(--panel-bg));
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;
+}
+.term-tip-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+.term-tip-head strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-tip-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.term-tip-badge.on {
+  color: #15803d;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.28);
+}
+.term-tip-badge.off {
+  color: var(--text-muted);
+  background: var(--code-bg);
+}
+.term-tip-meta {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.term-tip-meta > div {
+  display: grid;
+  grid-template-columns: 52px 1fr;
+  gap: 8px;
+  align-items: start;
+}
+.term-tip-meta dt {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.term-tip-meta dd {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-tip-meta dd.mono {
+  font-family: var(--mono);
+  font-size: 11px;
+}
 </style>

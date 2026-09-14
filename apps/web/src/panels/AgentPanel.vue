@@ -18,6 +18,7 @@ import MessageRollbackControl from '@/components/MessageRollbackControl.vue'
 import RunReviewActions from '@/components/RunReviewActions.vue'
 import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
+import TodoBlock from '@/renderers/TodoBlock.vue'
 import { scrollToTop } from '@/utils/smoothScroll'
 import { useVirtualList } from '@/composables/useVirtualList'
 import { useChatAttachments } from '@/composables/useChatAttachments'
@@ -838,6 +839,20 @@ function onResizeHandlePointerDown(e: PointerEvent) {
 const stick = ref(true)
 const forcePinning = ref(false)
 const showScrollToBottom = computed(() => !stick.value && store.messages.length > 0)
+const activeTodoBlock = computed(() => {
+  // Only pin the checklist for the in-flight run — never reuse the previous turn's todo.
+  const runId = store.activeRunId
+  if (!runId || !store.isRunBusy()) return null
+  const msg = store.messages.find(
+    (row) => row.role === 'assistant' && (row.run_id === runId || row.id === `run-${runId}`),
+  )
+  if (!msg) return null
+  for (let j = msg.blocks.length - 1; j >= 0; j -= 1) {
+    const block = msg.blocks[j]
+    if (block.type === 'todo') return block
+  }
+  return null
+})
 const contextUsageOpen = ref(false)
 const uploadError = ref('')
 let locking = false
@@ -1633,6 +1648,9 @@ function openContextUsageDialog() {
             <AppIcon name="chevron" :size="18" />
           </button>
         </Transition>
+        <div v-if="activeTodoBlock" class="composer-todo">
+          <TodoBlock :block="activeTodoBlock" :default-collapsed="false" :live="true" />
+        </div>
         <ApprovalActionBar />
       <div class="sender-resize-handle" @pointerdown="onResizeHandlePointerDown" :title="t('chat.resize')"></div>
       <div
@@ -2056,6 +2074,22 @@ footer.agent-footer {
   border-top: 0;
   padding: 0 16px 16px;
   background: linear-gradient(to top, var(--page-bg) 72%, transparent);
+}
+
+.composer-todo {
+  margin: 0 0 8px;
+  max-height: min(42vh, 320px);
+  overflow: auto;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated, var(--surface));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+.composer-todo :deep(.todo) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .agent-sender-stack {

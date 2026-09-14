@@ -68,7 +68,7 @@ async def tool_needs_approval(tool: str, *, kind: str, details: dict | None = No
     if tool == "todo_write":
         return False
 
-    if tool == "run_command":
+    if tool in {"run_command", "run_in_terminal"}:
         return command_needs_approval(str(details.get("command") or ""), level)
 
     if tool in {"write_file", "search_replace", "apply_patch"}:

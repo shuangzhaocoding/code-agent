@@ -34,7 +34,14 @@ def _estimate_tools_tokens(mode: str) -> int:
     for spec in registry.tools.values():
         if not spec.enabled or mode not in spec.modes:
             continue
-        if mode == "ask" and spec.name in {"write_file", "search_replace", "apply_patch", "run_command", "delete_file"}:
+        if mode == "ask" and spec.name in {
+            "write_file",
+            "search_replace",
+            "apply_patch",
+            "run_command",
+            "run_in_terminal",
+            "delete_file",
+        }:
             continue
         tools.append({"name": spec.name, "description": spec.description or ""})
     return estimate_tokens(json.dumps(tools, ensure_ascii=False))

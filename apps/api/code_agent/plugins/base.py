@@ -162,6 +162,7 @@ class PluginRegistry:
                 "write_file",
                 "search_replace",
                 "run_command",
+                "run_in_terminal",
                 "delete_file",
             }:
                 continue

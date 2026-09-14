@@ -62,14 +62,14 @@ export function classifyBlock(block: Block): TrajectoryKind {
   if (block.type === 'assistant.thinking') return 'think'
   if (block.type === 'todo') return 'other'
   if (block.type === 'error') return 'error'
-  if (block.type === 'terminal') return 'terminal'
+  if (block.type === 'terminal' || block.type === 'terminal.launch') return 'terminal'
   if (block.type === 'file.diff' || block.type.startsWith('file.')) return 'diff'
   if (block.type === 'tool.call' || block.type === 'tool.result') return 'tool'
 
   const name = String(block.meta.name || block.type || '')
   if (READ_TOOLS.has(name)) return 'context'
-  if (['write_file', 'search_replace', 'apply_patch', 'delete_file', 'run_command', 'load_skill', 'skill.activated', 'todo_write'].includes(name)) {
-    if (name === 'run_command') return 'terminal'
+  if (['write_file', 'search_replace', 'apply_patch', 'delete_file', 'run_command', 'run_in_terminal', 'load_skill', 'skill.activated', 'todo_write'].includes(name)) {
+    if (name === 'run_command' || name === 'run_in_terminal') return 'terminal'
     if (name === 'todo_write' || block.type === 'todo') return 'other'
     return 'tool'
   }
@@ -80,7 +80,7 @@ export function classifyBlock(block: Block): TrajectoryKind {
 function blockSubtitle(block: Block): string {
   const args = (block.meta.args as Record<string, unknown>) || {}
   const name = String(block.meta.name || '')
-  if (name === 'run_command' || block.type === 'terminal') {
+  if (name === 'run_command' || name === 'run_in_terminal' || block.type === 'terminal' || block.type === 'terminal.launch') {
     return String(args.command || block.meta.command || '')
   }
   const path = String(block.meta.path || args.path || args.name || '')
@@ -111,6 +111,7 @@ function blockLabel(block: Block, kind: TrajectoryKind): string {
     'file.delete': '删除文件',
     'file.read': '读取文件',
     terminal: '终端',
+    'terminal.launch': '终端启动',
     error: '错误',
     approval: '审批',
     todo: '待办',
@@ -120,6 +121,7 @@ function blockLabel(block: Block, kind: TrajectoryKind): string {
   if (name) {
     const toolLabels: Record<string, string> = {
       run_command: '运行命令',
+      run_in_terminal: '终端启动',
       read_file: '读取文件',
       write_file: '写入文件',
       search_replace: '编辑文件',

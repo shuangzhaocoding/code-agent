@@ -233,6 +233,32 @@ export function linkifyFilePathsInHtml(html: string, workspaceRoot = ''): string
   return tpl.innerHTML
 }
 
+/** Find file/dir path spans in a single line of text (for xterm link providers). */
+export function findFilePathMatches(
+  text: string,
+  workspaceRoot = '',
+): Array<{ raw: string; start: number; end: number; ref: ChatFileRef }> {
+  const out: Array<{ raw: string; start: number; end: number; ref: ChatFileRef }> = []
+  if (!text) return out
+  PATH_IN_TEXT.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = PATH_IN_TEXT.exec(text))) {
+    const raw = m[0]
+    // Skip URL-ish matches (http paths, scheme leftovers).
+    if (/:\/\//.test(raw) || /^https?:/i.test(raw)) continue
+    const cleaned = raw.replace(TRAILING_PUNCT, '')
+    const ref = parseChatFileRef(cleaned, workspaceRoot)
+    if (!ref) continue
+    out.push({
+      raw: cleaned,
+      start: m.index,
+      end: m.index + cleaned.length,
+      ref,
+    })
+  }
+  return out
+}
+
 export function fileLinkFromClickTarget(target: EventTarget | null): { path: string; line?: number } | null {
   if (!(target instanceof Element)) return null
   const el = target.closest('a.ca-file-link, a[data-ca-file]')

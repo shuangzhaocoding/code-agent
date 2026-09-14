@@ -30,6 +30,7 @@ const catalog: Record<string, { icon: string; label: string; tone: Tone }> = {
   glob_search: { icon: 'search', label: '查找文件', tone: 'default' },
   grep_search: { icon: 'search', label: '搜索内容', tone: 'default' },
   run_command: { icon: 'terminal', label: '运行命令', tone: 'default' },
+  run_in_terminal: { icon: 'terminal', label: '终端启动', tone: 'default' },
   load_skill: { icon: 'book', label: '加载 Skill', tone: 'tool' },
   list_skills: { icon: 'book', label: '列出 Skill', tone: 'default' },
   explore_codebase: { icon: 'search', label: '探索代码', tone: 'think' },
@@ -86,7 +87,7 @@ function openFile() {
 }
 
 const subtitle = computed(() => {
-  if (toolName.value === 'run_command' || props.block.type === 'terminal') {
+  if (toolName.value === 'run_command' || toolName.value === 'run_in_terminal' || props.block.type === 'terminal' || props.block.type === 'terminal.launch') {
     return String(args.value.command || props.block.meta.command || '')
   }
   if (props.block.type === 'skill.activated') return String(props.block.meta.name || '')

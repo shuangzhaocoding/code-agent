@@ -6,6 +6,7 @@ import { matchApprovalHint } from '@/utils/approvals'
 import { classifyBlock, isAnswerMarkdown, isConversationBlock } from '@/utils/trajectory'
 import AppIcon from '@/components/AppIcon.vue'
 import ApprovalInlineHint from '@/components/ApprovalInlineHint.vue'
+import TodoBlock from '@/renderers/TodoBlock.vue'
 
 const props = defineProps<{
   msg: ChatMessage
@@ -27,8 +28,9 @@ const lastTodoId = computed(() => {
 const workBlocks = computed(() =>
   props.msg.blocks.filter((b) => {
     if (b.type === 'error') return false
+    // Live todo is pinned above the composer; finished todo stays in the answer.
+    if (b.type === 'todo') return false
     if (b.type === 'approval') return finished.value
-    if (b.type === 'todo') return finished.value && b.id !== lastTodoId.value
     return !isConversationBlock(b.type)
   }),
 )
@@ -39,14 +41,17 @@ const answerBlocks = computed(() => {
     (b.type === 'assistant.markdown' && isAnswerMarkdown(b)) ||
     b.type === 'error' ||
     b.type === 'user.text' ||
-    (b.type === 'todo' && b.id === lastTodo)
+    (finished.value && b.type === 'todo' && b.id === lastTodo)
 
   const candidates = props.msg.blocks.filter(
     (b) => (b.type === 'assistant.markdown' && isAnswerMarkdown(b as Block)) || b.type === 'error',
   )
   if (!finished.value) {
     return props.msg.blocks.filter(
-      (b) => b.type !== 'approval' && (isConversationBlock(b.type) || b.type === 'error'),
+      (b) =>
+        b.type !== 'approval' &&
+        b.type !== 'todo' &&
+        (isConversationBlock(b.type) || b.type === 'error'),
     )
   }
   if (candidates.length <= 1) {
@@ -85,14 +90,17 @@ const visibleRows = computed((): VisibleRow[] => {
     const used = new Set<string>()
     const rows: VisibleRow[] = []
     for (const block of props.msg.blocks) {
-      if (block.type === 'approval') continue
+      if (block.type === 'approval' || block.type === 'todo') continue
       const hint = matchApprovalHint(block, props.msg.blocks, used)
       rows.push({ key: block.id, block, hint })
     }
     return rows
   }
+  const lastTodo = lastTodoId.value
   const blocks =
-    !showCollapseChrome.value || workExpanded.value ? props.msg.blocks : answerBlocks.value
+    !showCollapseChrome.value || workExpanded.value
+      ? props.msg.blocks.filter((b) => b.type !== 'todo' || b.id === lastTodo)
+      : answerBlocks.value
   return blocks.map((block) => ({ key: block.id, block }))
 })
 
@@ -111,17 +119,13 @@ function summaryLabel(): string {
   let tools = 0
   let files = 0
   let approvals = 0
-  let todos = 0
   let other = 0
   for (const b of blocks) {
     if (b.type === 'approval') {
       approvals += 1
       continue
     }
-    if (b.type === 'todo') {
-      todos += 1
-      continue
-    }
+    if (b.type === 'todo') continue
     const kind = classifyBlock(b)
     if (kind === 'think') think += 1
     else if (kind === 'tool' || kind === 'context' || kind === 'terminal') tools += 1
@@ -132,7 +136,6 @@ function summaryLabel(): string {
   if (think) parts.push(`${think} 次思考`)
   if (tools) parts.push(`${tools} 次工具`)
   if (files) parts.push(`${files} 处变更`)
-  if (todos) parts.push(`${todos} 份待办`)
   if (approvals) parts.push(`${approvals} 次确认`)
   if (!parts.length) parts.push(`${blocks.length || other} 步`)
   return parts.join(' · ')
@@ -154,7 +157,12 @@ function summaryLabel(): string {
     </button>
     <template v-for="row in visibleRows" :key="row.key">
       <section class="block">
-        <component :is="rendererFor(row.block.type)" :block="row.block as Block" />
+        <TodoBlock
+          v-if="row.block.type === 'todo'"
+          :block="row.block as Block"
+          :default-collapsed="true"
+        />
+        <component :is="rendererFor(row.block.type)" v-else :block="row.block as Block" />
       </section>
       <ApprovalInlineHint v-if="row.hint" :block="row.hint" />
     </template>

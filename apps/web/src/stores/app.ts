@@ -2039,6 +2039,20 @@ export const useAppStore = defineStore('app', () => {
       notifyApprovalRequired(String(meta.approval_id || blockId || ''))
       syncCurrentConversationStatus({ awaiting_approval: true })
     }
+    if (event.type === 'block.started' && type === 'terminal.launch') {
+      const command = String(meta.command || '').trim()
+      if (command) {
+        window.dispatchEvent(
+          new CustomEvent('ca-run-in-terminal', {
+            detail: {
+              command,
+              cwd: typeof meta.cwd === 'string' ? meta.cwd : undefined,
+              newTab: meta.new_tab !== false,
+            },
+          }),
+        )
+      }
+    }
     if (event.type === 'run.completed') {
       playTaskCompleteSound()
     }
@@ -2046,8 +2060,22 @@ export const useAppStore = defineStore('app', () => {
       runStatus.value = event.type.replace('run.', '')
       const now = new Date().toISOString()
       const decision = event.type === 'run.cancelled' ? 'cancelled' : 'denied'
+      const todoOutcome =
+        event.type === 'run.cancelled' ? 'cancelled' : event.type === 'run.failed' ? 'failed' : 'completed'
       messages.value = settleUndecidedApprovals(
-        messages.value.map((m) => (m.run_id === event.run_id ? { ...m, ended_at: now } : m)),
+        messages.value.map((m) => {
+          if (m.run_id !== event.run_id && m.id !== `run-${event.run_id}`) return m
+          if (m.role !== 'assistant') return { ...m, ended_at: now }
+          const blocks = m.blocks.map((b) => {
+            if (b.type !== 'todo') return b
+            return {
+              ...b,
+              meta: { ...b.meta, outcome: todoOutcome },
+              status: b.status === 'streaming' ? 'ok' : b.status,
+            }
+          })
+          return { ...m, ended_at: now, blocks }
+        }),
         { runId: event.run_id, decision },
       )
       void refreshTree()
@@ -2264,7 +2292,7 @@ export const useAppStore = defineStore('app', () => {
       return
     }
     if (
-      (event.type === 'block.delta' || event.type === 'block.completed') &&
+      (event.type === 'block.delta' || event.type === 'block.completed' || event.type === 'block.updated') &&
       blockId &&
       heldBlockIds().has(blockId)
     ) {
@@ -2920,6 +2948,7 @@ export const useAppStore = defineStore('app', () => {
     clearConversationQueue,
     conversationQueue,
     isRunBusy,
+    activeRunId,
     loadProviders,
     loadSkills,
     conversationSkillName,

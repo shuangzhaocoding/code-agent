@@ -32,6 +32,51 @@ async def _emit(block_type: str, meta: dict, text: str = "", complete: bool = Tr
         await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
 
 
+async def _find_run_todo_block_id(run_id: str) -> str | None:
+    """Return the existing todo block id for this run, if any."""
+    from code_agent.db.models import Message
+
+    msg = await Message.filter(run_id=str(run_id), role="assistant").first()
+    if msg is None:
+        return None
+    for block in msg.blocks or []:
+        if str(block.get("type") or "") == "todo" and block.get("id"):
+            return str(block["id"])
+    return None
+
+
+async def _emit_todo(meta: dict, text: str) -> None:
+    """Create or in-place update the single todo checklist block for this run."""
+    from code_agent.protocol.events import new_id
+    from code_agent.streaming.broker import broker
+
+    run_id = get_run_id()
+    existing_id = await _find_run_todo_block_id(run_id)
+    if existing_id:
+        await broker.publish(
+            run_id,
+            "block.updated",
+            {
+                "block_id": existing_id,
+                "block_type": "todo",
+                "text": text,
+                "meta": meta,
+                "status": "ok",
+            },
+        )
+        return
+
+    block_id = new_id()
+    await broker.publish(
+        run_id,
+        "block.started",
+        {"block_id": block_id, "block_type": "todo", "meta": meta},
+    )
+    if text:
+        await broker.publish(run_id, "block.delta", {"block_id": block_id, "text": text})
+    await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
+
+
 async def _backend():
     from code_agent.db.models import Workspace
     from code_agent.workspace.backend import get_workspace_backend
@@ -314,11 +359,11 @@ async def apply_patch(patch: str, path: str = "") -> str:
 
 @tool
 async def todo_write(todos: list | str) -> str:
-    """Replace the current task checklist. Call this for multi-step work and keep it updated.
+    """Create or update the task checklist for this turn. Call for multi-step work and keep it current.
 
     `todos` is an array of objects: [{"id":"1","content":"Inspect auth flow","status":"in_progress"}].
     status: pending | in_progress | completed | cancelled. At most one item may be in_progress.
-    Always send the full list (not a delta).
+    Always send the full list (not a delta). Subsequent calls update the same checklist in place.
     """
     from code_agent.tools.todos import normalize_todos, render_todo_text, todo_summary
 
@@ -328,13 +373,60 @@ async def todo_write(todos: list | str) -> str:
         return f"ERROR: {exc}"
     text = render_todo_text(items)
     summary = todo_summary(items)
-    await _emit("todo", {"items": items, **summary}, text)
+    await _emit_todo({"items": items, **summary}, text)
     return text
+
+
+async def _launch_in_terminal(command: str, cwd: str = ".", *, tool: str = "run_in_terminal") -> str:
+    from code_agent.tools.long_lived import normalize_terminal_command
+
+    cmd = normalize_terminal_command(command)
+    if not cmd:
+        return "ERROR: empty command"
+    if is_command_blocked(cmd):
+        return f"ERROR: command blocked by policy: {cmd}"
+    if not await request_approval(
+        tool,
+        f"在终端运行：{cmd}",
+        {"command": cmd, "cwd": cwd},
+        kind="command",
+    ):
+        return "ERROR: user denied this operation"
+    await _emit(
+        "terminal.launch",
+        {"command": cmd, "cwd": cwd, "new_tab": True},
+        f"$ {cmd}",
+    )
+    return (
+        "Launched in a new interactive Terminal tab (keeps running there; "
+        "stdout is not captured by this tool). Ask the user to watch the Terminal panel. "
+        "For web apps, use the Ports panel for the listening URL / in-app preview."
+    )
+
+
+@tool
+async def run_in_terminal(command: str, cwd: str = ".") -> str:
+    """Start a long-running command in a new interactive Terminal tab (dev servers, watchers).
+
+    Use for npm/pnpm/yarn/bun run dev|start, vite, next dev, uvicorn, etc.
+    Do not use run_command / background (&, nohup) for these — they belong in the Terminal panel.
+    Short one-shot commands should still use run_command.
+    """
+    return await _launch_in_terminal(command, cwd, tool="run_in_terminal")
 
 
 @tool
 async def run_command(command: str, cwd: str = ".") -> str:
-    """Run a shell command. cwd may be workspace-relative or absolute (incl. ~)."""
+    """Run a short shell command and capture output. cwd may be workspace-relative or absolute (incl. ~).
+
+    For long-lived servers (npm run dev, vite, next dev, uvicorn, …) prefer run_in_terminal,
+    or this tool will auto-launch them in the Terminal panel instead of a timed subprocess.
+    """
+    from code_agent.tools.long_lived import is_long_lived_command
+
+    if is_long_lived_command(command):
+        return await _launch_in_terminal(command, cwd, tool="run_in_terminal")
+
     if is_command_blocked(command):
         return f"ERROR: command blocked by policy: {command}"
     if not await request_approval(
@@ -419,6 +511,7 @@ def register_builtin_tools() -> None:
         (apply_patch, ("agent",)),
         (delete_file, ("agent",)),
         (run_command, ("agent",)),
+        (run_in_terminal, ("agent",)),
     ]:
         registry.register_tool(t, source="builtin", modes=modes)
     registry.register_plugin(

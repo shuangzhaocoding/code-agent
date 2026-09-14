@@ -251,6 +251,23 @@ class EventBroker:
             await msg.save(update_fields=["blocks"])
         elif et == "block.delta":
             pass
+        elif et == "block.updated":
+            await self._flush_message_deltas(str(run.id))
+            msg = await self._assistant_message(run, cache=False)
+            blocks = list(msg.blocks or [])
+            for block in blocks:
+                if block.get("id") != payload.get("block_id"):
+                    continue
+                if "text" in payload:
+                    block["text"] = str(payload.get("text") or "")
+                if payload.get("meta"):
+                    block["meta"] = {**(block.get("meta") or {}), **payload["meta"]}
+                if payload.get("status"):
+                    block["status"] = payload.get("status")
+                block["ended_at"] = datetime.now(timezone.utc).isoformat()
+                break
+            msg.blocks = blocks
+            await msg.save(update_fields=["blocks"])
         elif et == "block.completed":
             await self._flush_message_deltas(str(run.id))
             msg = await self._assistant_message(run, cache=False)
@@ -259,6 +276,8 @@ class EventBroker:
                 if block.get("id") == payload.get("block_id"):
                     if payload.get("meta"):
                         block["meta"] = {**(block.get("meta") or {}), **payload["meta"]}
+                    if "text" in payload and payload.get("text") is not None:
+                        block["text"] = str(payload.get("text") or "")
                     block["status"] = payload.get("status") or "ok"
                     block["ended_at"] = datetime.now(timezone.utc).isoformat()
                     break

@@ -16,6 +16,8 @@ const RUNNERS: Record<string, { unix: string; win: string }> = {
 export type TerminalRunRequest = {
   command: string
   cwd?: string
+  /** Open a fresh PTY tab instead of reusing the active one. */
+  newTab?: boolean
 }
 
 export function isWindowsRoot(root: string | null | undefined): boolean {
