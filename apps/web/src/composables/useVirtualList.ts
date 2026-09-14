@@ -5,6 +5,9 @@ export type VirtualRow<T> = {
   index: number
 }
 
+const NEAR_END_PX = 120
+const SIZE_EPSILON_PX = 2
+
 export function useVirtualList<T extends { id: string }>(
   items: Ref<T[]>,
   scrollElement: Ref<HTMLElement | null>,
@@ -44,7 +47,7 @@ export function useVirtualList<T extends { id: string }>(
     if (!count) return { start: 0, end: -1 }
     if (!enabled.value) return { start: 0, end: count - 1 }
 
-    const { offsets } = layout.value
+    const { offsets, total } = layout.value
     const viewTop = scrollTop.value
     const viewBottom = viewTop + Math.max(viewportHeight.value, 1)
 
@@ -64,6 +67,13 @@ export function useVirtualList<T extends { id: string }>(
         break
       }
     }
+
+    // Keep the tail mounted while near/at bottom so streaming growth and
+    // pin-to-end do not drop the last message out of the DOM.
+    if (viewBottom >= total - NEAR_END_PX) {
+      end = count - 1
+    }
+
     return { start, end }
   })
 
@@ -101,10 +111,11 @@ export function useVirtualList<T extends { id: string }>(
     if (!el || !(el instanceof HTMLElement) || !enabled.value) return
 
     const measure = () => {
-      const height = Math.ceil(el.getBoundingClientRect().height)
+      const height = Math.round(el.getBoundingClientRect().height)
       if (!height) return
       const current = sizeMap.value.get(id)
-      if (current === height) return
+      // Ignore sub-pixel / 1px churn from fonts/images reflow.
+      if (current !== undefined && Math.abs(current - height) < SIZE_EPSILON_PX) return
       const next = new Map(sizeMap.value)
       next.set(id, height)
       sizeMap.value = next
@@ -116,11 +127,23 @@ export function useVirtualList<T extends { id: string }>(
     observers.set(id, ro)
   }
 
+  function syncViewportFromEl(el: HTMLElement) {
+    scrollTop.value = el.scrollTop
+    viewportHeight.value = el.clientHeight
+  }
+
   function onScroll() {
     const el = scrollElement.value
     if (!el) return
-    scrollTop.value = el.scrollTop
-    viewportHeight.value = el.clientHeight
+    syncViewportFromEl(el)
+  }
+
+  /** Move the virtual window to the estimated end without aligning to item tops. */
+  function prepareEndWindow() {
+    const el = scrollElement.value
+    const vh = el?.clientHeight || viewportHeight.value || 1
+    viewportHeight.value = vh
+    scrollTop.value = Math.max(0, layout.value.total - vh)
   }
 
   function scrollToIndex(index: number, behavior: ScrollBehavior = 'smooth') {
@@ -132,16 +155,25 @@ export function useVirtualList<T extends { id: string }>(
     viewportHeight.value = el.clientHeight
   }
 
+  /**
+   * Scroll to the true container bottom.
+   * Must not use scrollToIndex(last): that aligns to the TOP of the last message,
+   * which scrolls UP when the last message is taller than the viewport.
+   */
   function scrollToEnd(behavior: ScrollBehavior = 'auto') {
     const el = scrollElement.value
     if (!el) return
+
     if (enabled.value && items.value.length) {
-      scrollToIndex(items.value.length - 1, 'auto')
+      prepareEndWindow()
+    } else {
+      viewportHeight.value = el.clientHeight
     }
+
     const top = Math.max(0, el.scrollHeight - el.clientHeight)
-    el.scrollTo({ top, behavior })
-    scrollTop.value = el.scrollTop
-    viewportHeight.value = el.clientHeight
+    if (behavior === 'auto') el.scrollTop = top
+    else el.scrollTo({ top, behavior })
+    syncViewportFromEl(el)
   }
 
   watch(
@@ -167,10 +199,7 @@ export function useVirtualList<T extends { id: string }>(
   watch(scrollElement, (el, prev) => {
     prev?.removeEventListener('scroll', onScroll)
     el?.addEventListener('scroll', onScroll, { passive: true })
-    if (el) {
-      viewportHeight.value = el.clientHeight
-      scrollTop.value = el.scrollTop
-    }
+    if (el) syncViewportFromEl(el)
   })
 
   onBeforeUnmount(() => {
@@ -187,6 +216,7 @@ export function useVirtualList<T extends { id: string }>(
     totalHeight: computed(() => layout.value.total),
     setItemEl,
     onScroll,
+    prepareEndWindow,
     scrollToIndex,
     scrollToEnd,
   }

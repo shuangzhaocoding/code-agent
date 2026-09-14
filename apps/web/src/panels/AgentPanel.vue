@@ -984,22 +984,33 @@ function applyScrollTop(el: HTMLElement, behavior: ScrollBehavior) {
   virtualList.onScroll()
 }
 
-function jumpToEnd(behavior: ScrollBehavior = 'smooth') {
+/** Programmatic stick scroll; keeps locking so onScroll does not pause follow. */
+function stickScrollNow(behavior: ScrollBehavior = 'auto') {
   if (!stick.value && !forcePinning.value) return
   const el = scroller.value
   if (!el) return
   const top = Math.max(0, el.scrollHeight - el.clientHeight)
-  if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) return
+  if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) {
+    virtualList.onScroll()
+    return
+  }
   locking = true
-  applyScrollTop(el, behavior)
+  if (virtualList.enabled.value) virtualList.scrollToEnd(behavior)
+  else applyScrollTop(el, behavior)
   requestAnimationFrame(() => {
-    locking = false
+    // Do not drop the pin lock while forcePinning owns the session.
+    if (!forcePinning.value) locking = false
   })
+}
+
+function jumpToEnd(behavior: ScrollBehavior = 'auto') {
+  stickScrollNow(behavior)
 }
 
 function scrollToEnd() {
   if (!stick.value) return
-  jumpToEnd('smooth')
+  // Prefer instant pin: smooth + growing content causes bounce.
+  jumpToEnd('auto')
 }
 
 function resumeStickScroll() {
@@ -1016,10 +1027,12 @@ function onScroll() {
 }
 
 function onWheel(e: WheelEvent) {
+  if (forcePinning.value) return
   if (e.deltaY < 0) pauseFollow()
 }
 
 function onPointerDown(e: PointerEvent) {
+  if (forcePinning.value) return
   const el = scroller.value
   if (!el) return
   if (e.offsetX >= el.clientWidth - 18) pauseFollow()
@@ -1033,8 +1046,7 @@ function scheduleStickScroll() {
     pinRaf = 0
     if (locking) return
     if (!stick.value && !forcePinning.value) return
-    if (virtualList.enabled.value) virtualList.scrollToEnd('auto')
-    else jumpToEnd('auto')
+    stickScrollNow('auto')
   })
 }
 
@@ -1055,8 +1067,10 @@ async function waitForScrollerReady(maxMs = 4000) {
     if (!store.messages.length) return true
 
     if (virtualList.enabled.value) {
-      virtualList.scrollToIndex(store.messages.length - 1, 'auto')
+      // Move the virtual window to the estimated end (not top-of-last-item).
+      virtualList.prepareEndWindow()
       await nextTick()
+      virtualList.scrollToEnd('auto')
       await raf()
     }
 
@@ -1064,6 +1078,8 @@ async function waitForScrollerReady(maxMs = 4000) {
     const lastInDom = lastId ? Boolean(document.getElementById(`msg-${lastId}`)) : false
     const scrollable = el.scrollHeight > el.clientHeight + 1
     if (scrollable && (lastInDom || !virtualList.enabled.value)) return true
+    // Short conversations may not overflow; still ready once layout exists.
+    if (!scrollable && (lastInDom || !virtualList.enabled.value)) return true
     await raf()
   }
   return Boolean(scroller.value?.clientHeight)
@@ -1087,20 +1103,37 @@ async function pinToBottom() {
 
   try {
     await waitForScrollerReady()
-    for (let i = 0; i < 20; i++) {
+    if (token !== followGen) return
+    for (let i = 0; i < 24; i++) {
       if (token !== followGen) return
       scrollMessagesToEnd('auto')
       await nextTick()
       await raf()
       const el = scroller.value
-      if (el && distanceToBottom(el) <= 2) break
+      if (el && distanceToBottom(el) <= 2) {
+        // Extra frames so late ResizeObserver size fixes do not leave a gap.
+        await raf()
+        if (token !== followGen) return
+        scrollMessagesToEnd('auto')
+        if (el && distanceToBottom(el) <= 2) break
+      }
     }
-  } finally {
+
+    // Only the latest pin may release locks; overlapping pins must not clobber each other.
+    if (token !== followGen) return
     locking = false
+    // Brief grace: trailing measurements must not trip pauseFollow.
+    await raf()
+    await raf()
+    if (token !== followGen) return
+    forcePinning.value = false
+    const el = scroller.value
+    if (el && distanceToBottom(el) <= 16) stick.value = true
+    else if (el) scheduleStickScroll()
+  } catch {
     if (token === followGen) {
+      locking = false
       forcePinning.value = false
-      const el = scroller.value
-      if (el && distanceToBottom(el) <= 16) stick.value = true
     }
   }
 }
@@ -1108,9 +1141,6 @@ async function pinToBottom() {
 function onMessagesLoaded() {
   if (!store.messages.length) return
   void pinToBottom()
-  requestAnimationFrame(() => {
-    if (store.messages.length) void pinToBottom()
-  })
 }
 
 onMounted(() => {
