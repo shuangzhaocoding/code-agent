@@ -11,6 +11,7 @@ import XlsxPreview from '@/preview/adapters/XlsxPreview.vue'
 import PptxPreview from '@/preview/adapters/PptxPreview.vue'
 import SqlitePreview from '@/preview/adapters/SqlitePreview.vue'
 import BinaryFallback from '@/preview/adapters/BinaryFallback.vue'
+import MissingFilePreview from '@/preview/adapters/MissingFilePreview.vue'
 
 const adapters: PreviewAdapter[] = [
   { id: 'image', component: ImagePreview },
@@ -23,12 +24,14 @@ const adapters: PreviewAdapter[] = [
   { id: 'pptx', component: PptxPreview },
   { id: 'sqlite', component: SqlitePreview },
   { id: 'binary', component: BinaryFallback },
+  { id: 'missing', component: MissingFilePreview },
 ]
 
 const byId = new Map(adapters.map((a) => [a.id, a]))
 
 export function resolvePreviewAdapter(kind: OpenFileKind): Component | null {
   if (kind === 'text') return null
+  if (kind === 'missing') return MissingFilePreview
   return byId.get(kind)?.component || BinaryFallback
 }
 

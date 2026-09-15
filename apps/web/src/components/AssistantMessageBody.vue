@@ -30,6 +30,7 @@ const workBlocks = computed(() =>
     if (b.type === 'error') return false
     // Live todo is pinned above the composer; finished todo stays in the answer.
     if (b.type === 'todo') return false
+    if (b.type === 'context.injected') return false
     if (b.type === 'approval') return finished.value
     return !isConversationBlock(b.type)
   }),
@@ -90,7 +91,7 @@ const visibleRows = computed((): VisibleRow[] => {
     const used = new Set<string>()
     const rows: VisibleRow[] = []
     for (const block of props.msg.blocks) {
-      if (block.type === 'approval' || block.type === 'todo') continue
+      if (block.type === 'approval' || block.type === 'todo' || block.type === 'context.injected') continue
       const hint = matchApprovalHint(block, props.msg.blocks, used)
       rows.push({ key: block.id, block, hint })
     }
@@ -99,7 +100,10 @@ const visibleRows = computed((): VisibleRow[] => {
   const lastTodo = lastTodoId.value
   const blocks =
     !showCollapseChrome.value || workExpanded.value
-      ? props.msg.blocks.filter((b) => b.type !== 'todo' || b.id === lastTodo)
+      ? props.msg.blocks.filter(
+          (b) =>
+            (b.type !== 'todo' || b.id === lastTodo) && b.type !== 'context.injected',
+        )
       : answerBlocks.value
   return blocks.map((block) => ({ key: block.id, block }))
 })

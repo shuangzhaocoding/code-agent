@@ -40,6 +40,7 @@ BLOCK_TYPES = [
     "terminal",
     "todo",
     "skill.activated",
+    "context.injected",
     "approval",
     "error",
     "usage",

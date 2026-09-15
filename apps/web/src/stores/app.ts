@@ -1,11 +1,24 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
-import { api, subscribeRun, type StreamConnectionState, type StreamEnvelope } from '@/api/http'
+import {
+  api,
+  isPathNotFoundError,
+  subscribeRun,
+  type StreamConnectionState,
+  type StreamEnvelope,
+} from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { applyEvent, type ChatMessage } from '@/protocol/applyEvent'
 import type { ThinkingLevel } from '@/types/thinking'
 import { loadThinkingLevel } from '@/types/thinking'
-import { classifyOpenKind, isEditableKind, isPreviewKind, rawFileUrl, type OpenFileKind } from '@/preview/classify'
+import {
+  classifyOpenKind,
+  isEditableKind,
+  isMissingKind,
+  isPreviewKind,
+  rawFileUrl,
+  type OpenFileKind,
+} from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { draftCommitFromPaths } from '@/utils/gitCommitDraft'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
@@ -1072,6 +1085,47 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function friendlyFileError(err: unknown, fallbackKey = 'file.openFailed'): string {
+    if (isPathNotFoundError(err)) return t('file.notFound')
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!msg) return t(fallbackKey)
+    if (msg.startsWith('{') || msg.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(msg) as { code?: string; message?: string }
+        if (parsed.code === 'path.not_found') return t('file.notFound')
+        if (typeof parsed.message === 'string' && parsed.message.trim()) return parsed.message
+        if (typeof parsed.code === 'string') return t(fallbackKey)
+      } catch {
+        /* keep raw */
+      }
+    }
+    return msg
+  }
+
+  function openMissingFile(path: string) {
+    const existing = openFiles.value.find((f) => f.path === path)
+    if (existing) {
+      existing.kind = 'missing'
+      existing.content = ''
+      existing.dirty = false
+      existing.readonly = true
+      existing.previewUrl = undefined
+      existing.mime = undefined
+    } else {
+      openFiles.value = [
+        ...openFiles.value,
+        { path, kind: 'missing', content: '', dirty: false, readonly: true },
+      ]
+    }
+    activePath.value = path
+    fileNotice.value = null
+    window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
+  async function retryOpenPath(path: string) {
+    await openPath(path, false)
+  }
+
   async function openPath(path: string, isDir: boolean) {
     if (isDir) {
       await toggleDir(path)
@@ -1080,8 +1134,9 @@ export const useAppStore = defineStore('app', () => {
     const existing = openFiles.value.find((f) => f.path === path)
     const activeReview = pendingReview(path)
     const kind = classifyOpenKind(path)
+    const retryingMissing = Boolean(existing && isMissingKind(existing.kind))
 
-    if (existing) {
+    if (existing && !retryingMissing) {
       if (!existing.dirty && workspaceId.value) {
         if (existing.kind === 'html') {
           existing.previewUrl = rawFileUrl(workspaceId.value, path)
@@ -1091,7 +1146,11 @@ export const useAppStore = defineStore('app', () => {
             )
             existing.content = data.content
             window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
-          } catch {
+          } catch (err) {
+            if (isPathNotFoundError(err)) {
+              openMissingFile(path)
+              return
+            }
             /* keep previous content */
           }
         } else if (isPreviewKind(existing.kind)) {
@@ -1103,7 +1162,11 @@ export const useAppStore = defineStore('app', () => {
             )
             existing.content = data.content
             window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
-          } catch {
+          } catch (err) {
+            if (isPathNotFoundError(err)) {
+              openMissingFile(path)
+              return
+            }
             if (activeReview) {
               existing.content = activeReview.after
               window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: activeReview.after } }))
@@ -1124,31 +1187,52 @@ export const useAppStore = defineStore('app', () => {
         const data = await api<{ path: string; content: string }>(
           `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
         )
-        openFiles.value = [
-          ...openFiles.value,
-          {
-            path: data.path,
-            kind: 'html',
-            content: data.content,
-            previewUrl: rawFileUrl(ws, data.path),
-            dirty: false,
-          },
-        ]
-        activePath.value = data.path
+        if (existing && retryingMissing) {
+          existing.kind = 'html'
+          existing.content = data.content
+          existing.previewUrl = rawFileUrl(ws, data.path)
+          existing.dirty = false
+          existing.readonly = false
+          activePath.value = data.path
+        } else {
+          openFiles.value = [
+            ...openFiles.value,
+            {
+              path: data.path,
+              kind: 'html',
+              content: data.content,
+              previewUrl: rawFileUrl(ws, data.path),
+              dirty: false,
+            },
+          ]
+          activePath.value = data.path
+        }
         window.dispatchEvent(new Event('ca-focus-editor'))
         return
       } catch (err) {
-        fileNotice.value = err instanceof Error ? err.message : String(err)
+        if (isPathNotFoundError(err)) {
+          openMissingFile(path)
+          return
+        }
+        fileNotice.value = friendlyFileError(err)
         return
       }
     }
 
     if (isPreviewKind(kind)) {
       const url = rawFileUrl(ws, path)
-      openFiles.value = [
-        ...openFiles.value,
-        { path, kind, content: '', previewUrl: url, dirty: false },
-      ]
+      if (existing && retryingMissing) {
+        existing.kind = kind
+        existing.content = ''
+        existing.previewUrl = url
+        existing.dirty = false
+        existing.readonly = false
+      } else {
+        openFiles.value = [
+          ...openFiles.value,
+          { path, kind, content: '', previewUrl: url, dirty: false },
+        ]
+      }
       activePath.value = path
       window.dispatchEvent(new Event('ca-focus-editor'))
       return
@@ -1158,28 +1242,61 @@ export const useAppStore = defineStore('app', () => {
       const data = await api<{ path: string; content: string }>(
         `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
       )
-      openFiles.value = [...openFiles.value, { path: data.path, kind: 'text', content: data.content, dirty: false }]
-      activePath.value = data.path
+      if (existing && retryingMissing) {
+        existing.kind = 'text'
+        existing.content = data.content
+        existing.dirty = false
+        existing.readonly = false
+        existing.previewUrl = undefined
+        activePath.value = data.path
+      } else {
+        openFiles.value = [...openFiles.value, { path: data.path, kind: 'text', content: data.content, dirty: false }]
+        activePath.value = data.path
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      if (isPathNotFoundError(err)) {
+        openMissingFile(path)
+        return
+      }
       // Unknown/binary: fall back to binary preview tab
       if (msg.includes('file.binary') || msg.includes('Binary file')) {
         try {
           const url = rawFileUrl(ws, path)
-          openFiles.value = [
-            ...openFiles.value,
-            { path, kind: 'binary', content: '', previewUrl: url, dirty: false },
-          ]
+          if (existing && retryingMissing) {
+            existing.kind = 'binary'
+            existing.content = ''
+            existing.previewUrl = url
+            existing.dirty = false
+            existing.readonly = false
+          } else {
+            openFiles.value = [
+              ...openFiles.value,
+              { path, kind: 'binary', content: '', previewUrl: url, dirty: false },
+            ]
+          }
           activePath.value = path
         } catch (fallbackErr) {
-          fileNotice.value = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr)
+          if (isPathNotFoundError(fallbackErr)) {
+            openMissingFile(path)
+            return
+          }
+          fileNotice.value = friendlyFileError(fallbackErr)
           return
         }
       } else if (activeReview) {
-        openFiles.value = [...openFiles.value, { path, kind: 'text', content: activeReview.after, dirty: false }]
+        if (existing && retryingMissing) {
+          existing.kind = 'text'
+          existing.content = activeReview.after
+          existing.dirty = false
+          existing.readonly = false
+          existing.previewUrl = undefined
+        } else {
+          openFiles.value = [...openFiles.value, { path, kind: 'text', content: activeReview.after, dirty: false }]
+        }
         activePath.value = path
       } else {
-        fileNotice.value = msg || t('file.openFailed')
+        fileNotice.value = friendlyFileError(err) || t('file.openFailed')
         return
       }
     }
@@ -1303,7 +1420,11 @@ export const useAppStore = defineStore('app', () => {
       window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path: tabPath, content: data.content } }))
       window.dispatchEvent(new Event('ca-focus-editor'))
     } catch (err) {
-      fileNotice.value = err instanceof Error ? err.message : String(err)
+      if (isPathNotFoundError(err)) {
+        openMissingFile(tabPath)
+        return
+      }
+      fileNotice.value = friendlyFileError(err)
     }
   }
 
@@ -2901,6 +3022,7 @@ export const useAppStore = defineStore('app', () => {
     moveFsEntry,
     uploadWorkspaceFiles,
     openPath,
+    retryOpenPath,
     openPathAtLine,
     openChatFilePath,
     openAgentFile,

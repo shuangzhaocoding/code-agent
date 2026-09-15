@@ -6,8 +6,12 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from code_agent.config import settings
 from code_agent.db.models import Conversation, Message, Workspace
+from code_agent.agent.context_debug import (
+    build_context_debug,
+    build_rules_debug,
+    build_skills_catalog_debug,
+)
 from code_agent.agent.prompt import build_system_prompt
-from code_agent.agent.rules import load_workspace_rules
 from code_agent.agent.memory.retrieve import retrieve_memories
 from code_agent.llm.vision import build_user_content, message_files, message_text
 
@@ -76,6 +80,7 @@ async def build_run_context(
     need_vision: bool,
     skill_name: str | None = None,
     skill_body: str | None = None,
+    skill_source: str | None = None,
     user_query: str = "",
 ) -> dict[str, Any]:
     rows = await load_conversation_rows(str(conversation.id))
@@ -91,7 +96,9 @@ async def build_run_context(
     if settings.get("agent.memory.enabled", True):
         memory_facts = await retrieve_memories(str(workspace.id), user_query or message_text(rows[-1].blocks if rows else []))
 
-    workspace_rules = await load_workspace_rules(workspace)
+    workspace_rules, rules_debug = await build_rules_debug(workspace)
+    skills_catalog = build_skills_catalog_debug(workspace)
+    window_ids = [str(r.id) for r in inside]
 
     system = build_system_prompt(
         workspace,
@@ -103,8 +110,23 @@ async def build_run_context(
         conversation_summary=summary,
         workspace_rules=workspace_rules,
     )
+    token_estimate = estimate_tokens(system) + estimate_messages_tokens(inside)
     lc_messages = [SystemMessage(content=system)] + history_to_lc_messages(
         inside, vision=vision and need_vision
+    )
+    context_debug = build_context_debug(
+        mode=mode,
+        thinking_level=thinking_level,
+        rules_debug=rules_debug,
+        skills_catalog=skills_catalog,
+        memory_facts=memory_facts,
+        conversation_summary=summary,
+        skill_name=skill_name,
+        skill_body=skill_body,
+        skill_source=skill_source,
+        window_message_ids=window_ids,
+        token_estimate=token_estimate,
+        needs_compress=needs_compress,
     )
     return {
         "messages": lc_messages,
@@ -114,6 +136,7 @@ async def build_run_context(
         "needs_compress": needs_compress,
         "outside_rows": outside_uncovered,
         "window_rows": inside,
-        "window_message_ids": [str(r.id) for r in inside],
-        "token_estimate": estimate_tokens(system) + estimate_messages_tokens(inside),
+        "window_message_ids": window_ids,
+        "token_estimate": token_estimate,
+        "context_debug": context_debug,
     }

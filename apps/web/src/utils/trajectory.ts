@@ -62,6 +62,8 @@ export function classifyBlock(block: Block): TrajectoryKind {
   if (block.type === 'assistant.thinking') return 'think'
   if (block.type === 'todo') return 'other'
   if (block.type === 'error') return 'error'
+  if (block.type === 'context.injected') return 'context'
+  if (block.type === 'skill.activated') return 'tool'
   if (block.type === 'terminal' || block.type === 'terminal.launch') return 'terminal'
   if (block.type === 'file.diff' || block.type.startsWith('file.')) return 'diff'
   if (block.type === 'tool.call' || block.type === 'tool.result') return 'tool'
@@ -116,6 +118,7 @@ function blockLabel(block: Block, kind: TrajectoryKind): string {
     approval: '审批',
     todo: '待办',
     'skill.activated': 'Skill',
+    'context.injected': '上下文注入',
   }
   if (labels[block.type]) return labels[block.type]
   if (name) {

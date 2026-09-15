@@ -18,6 +18,7 @@ import {
 import { attachTerminalPathLinks, handleTerminalUrlClick, terminalUrlLinkHoverOptions } from '@/utils/terminalLinks'
 import { toWorkspaceRelative } from '@/utils/chatFileLinks'
 import { formatRelativeTime } from '@/utils/relativeTime'
+import { decorGlassRgba } from '@/utils/desktopDecor'
 
 const { t } = useI18n()
 const store = useAppStore()
@@ -151,8 +152,7 @@ const darkTheme = {
 function termTheme(theme: Theme) {
   const base = theme === 'dark' ? darkTheme : lightTheme
   if (typeof document === 'undefined') return base
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--surface').trim()
-  if (!bg) return base
+  const bg = decorGlassRgba('terminal')
   return { ...base, background: bg, cursorAccent: bg }
 }
 
@@ -258,6 +258,7 @@ function createAndMount(entry: TermEntry) {
     theme: termTheme(currentTheme()),
     convertEol: true,
     allowProposedApi: false,
+    allowTransparency: true,
     drawBoldTextInBrightColors: true,
     rightClickSelectsWord: false,
   })
@@ -300,6 +301,9 @@ function createAndMount(entry: TermEntry) {
     const mod = ev.ctrlKey || ev.metaKey
     if (!mod) return true
     const key = ev.key.toLowerCase()
+    // Let workbench handle terminal open / new / close-tab chords.
+    if (ev.code === 'Backquote' || key === '`' || key === '~') return false
+    if (key === 'w' && !ev.shiftKey && !ev.altKey) return false
     if (key === 'c' && term.hasSelection()) {
       void copySelection(term)
       return false
@@ -490,6 +494,18 @@ async function removeTerminal(id: string) {
     if (next) activateTab(next.id)
     else activeId.value = null
   }
+  if (tabs.length === 0) {
+    window.dispatchEvent(new Event('ca-close-terminal'))
+  }
+}
+
+function onTerminalNew() {
+  void addTerminal().catch(() => {})
+}
+
+function onTerminalCloseTab() {
+  if (!activeId.value) return
+  void removeTerminal(activeId.value)
 }
 
 async function loadExisting() {
@@ -525,10 +541,21 @@ async function loadExisting() {
 }
 
 function onTheme(e: Event) {
-  const theme = termTheme((e as CustomEvent<Theme>).detail)
+  const detail = (e as CustomEvent<Theme>).detail
+  const theme = termTheme(detail === 'dark' || detail === 'light' ? detail : currentTheme())
   for (const entry of tabs) {
-    if (entry.term) entry.term.options.theme = theme
+    if (!entry.term) continue
+    try {
+      entry.term.options.allowTransparency = true
+    } catch {
+      /* ignore */
+    }
+    entry.term.options.theme = theme
   }
+}
+
+function onWallpaper() {
+  onTheme(new CustomEvent('ca-theme', { detail: currentTheme() }))
 }
 
 function onDragStart(e: MouseEvent) {
@@ -552,7 +579,10 @@ function onTerminalRun() {
 
 onMounted(async () => {
   window.addEventListener('ca-theme', onTheme as EventListener)
+  window.addEventListener('ca-wallpaper', onWallpaper as EventListener)
   window.addEventListener('ca-terminal-cwd', flushQueuedTerminal)
+  window.addEventListener('ca-terminal-new', onTerminalNew)
+  window.addEventListener('ca-terminal-close-tab', onTerminalCloseTab)
   await loadExisting()
   await flushQueuedTerminal()
   window.addEventListener('ca-terminal-run', onTerminalRun)
@@ -575,8 +605,11 @@ watch(() => store.workspaceId, async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('ca-theme', onTheme as EventListener)
+  window.removeEventListener('ca-wallpaper', onWallpaper as EventListener)
   window.removeEventListener('ca-terminal-cwd', flushQueuedTerminal)
   window.removeEventListener('ca-terminal-run', onTerminalRun)
+  window.removeEventListener('ca-terminal-new', onTerminalNew)
+  window.removeEventListener('ca-terminal-close-tab', onTerminalCloseTab)
   clearHoverTip()
   for (const entry of tabs) {
     entry.ws?.close()

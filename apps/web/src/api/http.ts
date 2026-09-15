@@ -1,6 +1,63 @@
+export class ApiError extends Error {
+  readonly status: number
+  readonly code?: string
+  readonly detail: unknown
+
+  constructor(status: number, detail: unknown, statusText = '') {
+    const parsed = extractApiDetail(detail)
+    super(parsed.message || parsed.code || statusText || `HTTP ${status}`)
+    this.name = 'ApiError'
+    this.status = status
+    this.code = parsed.code
+    this.detail = detail
+  }
+}
+
+/** Unwrap FastAPI `{ detail }` and pull `code` / `message` when present. */
+export function extractApiDetail(detail: unknown): { code?: string; message?: string; raw: unknown } {
+  let body: unknown = detail
+  if (body && typeof body === 'object' && 'detail' in (body as object)) {
+    body = (body as { detail: unknown }).detail
+  }
+  if (typeof body === 'string') {
+    try {
+      const nested = JSON.parse(body) as unknown
+      if (nested && typeof nested === 'object') body = nested
+      else return { message: body, raw: body }
+    } catch {
+      return { message: body, raw: body }
+    }
+  }
+  if (body && typeof body === 'object') {
+    const o = body as Record<string, unknown>
+    const code = typeof o.code === 'string' ? o.code : undefined
+    const message = typeof o.message === 'string' ? o.message : undefined
+    return { code, message, raw: body }
+  }
+  return { raw: body }
+}
+
+export function getErrorCode(err: unknown): string | undefined {
+  if (err instanceof ApiError) return err.code
+  const msg = err instanceof Error ? err.message : String(err)
+  if (!msg) return undefined
+  try {
+    const parsed = extractApiDetail(JSON.parse(msg))
+    return parsed.code
+  } catch {
+    const m = msg.match(/"code"\s*:\s*"([^"]+)"/)
+    return m?.[1]
+  }
+}
+
+export function isPathNotFoundError(err: unknown): boolean {
+  return getErrorCode(err) === 'path.not_found' || (err instanceof Error && err.message.includes('path.not_found'))
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
+    credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
       ...(init?.headers || {}),
@@ -14,14 +71,18 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       detail = raw
     }
-    const msg =
-      typeof detail === 'string'
-        ? detail
-        : JSON.stringify((detail as { detail?: unknown }).detail || detail)
-    throw new Error(msg || res.statusText)
+    const err = new ApiError(res.status, detail, res.statusText)
+    if (res.status === 401 && getErrorCode(err) === 'auth.required') {
+      window.dispatchEvent(new CustomEvent('ca-auth-required'))
+    }
+    throw err
   }
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
+}
+
+export async function fetchAuthStatus(): Promise<{ required: boolean; unlocked: boolean }> {
+  return api('/api/auth/status')
 }
 
 export type StreamEnvelope = {

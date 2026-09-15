@@ -1024,8 +1024,17 @@ function onScroll() {
   if (!el) return
   const dist = distanceToBottom(el)
   // Hysteresis: leave bottom sooner than we re-attach, avoids flicker at the edge.
-  if (dist > 24) pauseFollow()
-  else if (dist <= 8 && performance.now() >= userDetachUntil) stick.value = true
+  if (dist > 40) {
+    pauseFollow()
+    return
+  }
+  // Physically at bottom → hide the jump button and resume stick.
+  // Do not gate on userDetachUntil: that only blocks auto-scroll bounce-back,
+  // and with no further scroll events stick would stay false forever.
+  if (dist <= 24) {
+    stick.value = true
+    userDetachUntil = 0
+  }
 }
 
 function onWheel(e: WheelEvent) {
@@ -1141,6 +1150,11 @@ function onMessagesLoaded() {
 onMounted(() => {
   if (timelineInner.value) {
     resizeObs = new ResizeObserver(() => {
+      const el = scroller.value
+      if (el && !locking && !forcePinning.value && distanceToBottom(el) <= 24) {
+        stick.value = true
+        userDetachUntil = 0
+      }
       scheduleStickScroll()
     })
     resizeObs.observe(timelineInner.value)
@@ -1574,6 +1588,11 @@ function openContextUsageDialog() {
         </div>
       </Transition>
       <!-- @ mention chips -->
+      <div v-if="running()" class="bg-run-tip">
+        <AppIcon name="zap" :size="14" />
+        <span>{{ t('chat.backgroundTip') }}</span>
+        <button type="button" class="bg-run-btn" @click="store.newChat()">{{ t('chat.newChatBackground') }}</button>
+      </div>
       <div v-if="queuedMessages.length" class="send-queue" :class="{ collapsed: !queueExpanded }">
         <div class="send-queue-head">
           <button type="button" class="queue-toggle" :aria-expanded="queueExpanded" @click="toggleQueueExpanded">
@@ -2192,7 +2211,7 @@ html[data-theme='dark'] .scroll-to-bottom-btn {
   min-width: 0;
   border: var(--border-width) solid var(--border);
   border-radius: 14px;
-  background: var(--surface);
+  background: var(--panel-bg);
   box-shadow: none;
   overflow: hidden;
 }
@@ -2206,6 +2225,36 @@ html[data-theme='dark'] .agent-sender-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
+}
+.bg-run-tip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--primary-soft, #f59e0b22) 55%, transparent);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.bg-run-tip span {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+.bg-run-btn {
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  background: var(--panel-bg);
+  color: var(--text-h);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bg-run-btn:hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
 }
 .send-queue-head {
   display: flex;

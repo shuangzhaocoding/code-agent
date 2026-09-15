@@ -4,6 +4,7 @@ import { useAppStore } from '@/stores/app'
 import { currentTheme } from '@/theme'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import DebugActionIcon from '@/components/DebugActionIcon.vue'
 import MarkdownPreview from '@/components/MarkdownPreview.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import InlineEditWidget from '@/components/InlineEditWidget.vue'
@@ -18,8 +19,11 @@ import { isRunnableScript, isWindowsRoot, scriptRunCommand } from '@/utils/scrip
 import { api } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { t } from '@/i18n'
+import { decorGlassHex } from '@/utils/desktopDecor'
+import { useDebugStore } from '@/stores/debug'
 
 const store = useAppStore()
+const debugStore = useDebugStore()
 const toast = useToast()
 const host = ref<HTMLDivElement | null>(null)
 const wrapEl = ref<HTMLDivElement | null>(null)
@@ -136,6 +140,146 @@ const canRunScript = computed(() => {
   if (!path || !file || file.readonly || showingDiff.value || showFilePreview.value) return false
   return isRunnableScript(path)
 })
+const canDebugPython = computed(() => {
+  const path = store.activePath
+  if (!path || !store.workspaceId) return false
+  return path.toLowerCase().endsWith('.py')
+})
+
+const debugSessionForActiveFile = computed(() => debugStore.sessionForProgram(store.activePath))
+const showActiveFileDebugControls = computed(() => Boolean(debugSessionForActiveFile.value))
+const canStartDebugActiveFile = computed(
+  () => canDebugPython.value && !debugSessionForActiveFile.value,
+)
+
+function controlActiveFileDebug(action: 'continue' | 'next' | 'stepIn' | 'stepOut' | 'pause' | 'stop') {
+  const sess = debugSessionForActiveFile.value
+  if (!sess) return
+  debugStore.selectSession(sess.id)
+  void debugStore.callControl(action, sess.id)
+}
+
+function restartActiveFileDebug() {
+  const sess = debugSessionForActiveFile.value
+  if (!sess) return
+  debugStore.selectSession(sess.id)
+  void debugStore.restart(sess.id)
+}
+
+let bpDecorations: string[] = []
+let bpHintDecorations: string[] = []
+let bpHintLine: number | null = null
+let debugLineDecorations: string[] = []
+
+function clearBreakpointHint() {
+  bpHintLine = null
+  if (!editor) {
+    bpHintDecorations = []
+    return
+  }
+  bpHintDecorations = editor.deltaDecorations(bpHintDecorations, [])
+}
+
+function isBreakpointGutter(type: number) {
+  if (!monacoMod) return false
+  const T = monacoMod.editor.MouseTargetType
+  return (
+    type === T.GUTTER_GLYPH_MARGIN ||
+    type === T.GUTTER_LINE_NUMBERS ||
+    type === T.GUTTER_LINE_DECORATIONS
+  )
+}
+
+function setBreakpointHint(line: number) {
+  if (!editor || !monacoMod) return
+  const path = store.activePath
+  if (!path) {
+    clearBreakpointHint()
+    return
+  }
+  if (debugStore.breakpointsFor(path).some((bp) => bp.line === line)) {
+    clearBreakpointHint()
+    return
+  }
+  if (bpHintLine === line) return
+  bpHintLine = line
+  bpHintDecorations = editor.deltaDecorations(bpHintDecorations, [
+    {
+      range: new monacoMod.Range(line, 1, line, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: 'ca-bp-hint',
+        glyphMarginHoverMessage: { value: t('debug.addBreakpointHint') },
+      },
+    },
+  ])
+}
+
+function refreshBreakpointDecorations() {
+  if (!editor || !monacoMod) return
+  const path = store.activePath
+  const bps = path ? debugStore.breakpointsFor(path) : []
+  bpDecorations = editor.deltaDecorations(
+    bpDecorations,
+    bps.map((bp) => ({
+      range: new monacoMod!.Range(bp.line, 1, bp.line, 1),
+      options: {
+        isWholeLine: false,
+        glyphMarginClassName: bp.condition ? 'ca-bp-glyph ca-bp-conditional' : 'ca-bp-glyph',
+        glyphMarginHoverMessage: {
+          value: bp.condition ? `${t('debug.breakpoint')} · ${bp.condition}` : t('debug.breakpoint'),
+        },
+      },
+    })),
+  )
+  if (bpHintLine != null && bps.some((bp) => bp.line === bpHintLine)) {
+    clearBreakpointHint()
+  }
+}
+
+function debugLineForPath(path: string | null): number | null {
+  return debugStore.pausedLineForPath(path)
+}
+
+function refreshDebugLineDecoration() {
+  if (!editor || !monacoMod) return
+  const path = store.activePath
+  const line = debugLineForPath(path)
+  debugLineDecorations = editor.deltaDecorations(
+    debugLineDecorations,
+    line
+      ? [
+          {
+            range: new monacoMod.Range(line, 1, line, 1),
+            options: {
+              isWholeLine: true,
+              className: 'ca-debug-line',
+              lineNumberClassName: 'ca-debug-line-num',
+              glyphMarginClassName: 'ca-debug-ip',
+              glyphMarginHoverMessage: { value: t('debug.currentLineHint', { line }) },
+            },
+          },
+        ]
+      : [],
+  )
+  if (line) {
+    editor.revealLineInCenter(line)
+    editor.setPosition({ lineNumber: line, column: 1 })
+  }
+}
+
+async function startDebugActive() {
+  if (!store.activePath?.toLowerCase().endsWith('.py')) return
+  if (store.openFile?.dirty) {
+    try {
+      await onEditorSave()
+    } catch {
+      /* continue */
+    }
+  }
+  window.dispatchEvent(new CustomEvent('ca-open-panel', { detail: { id: 'debug' } }))
+  await debugStore.start({ program: store.activePath, configName: null, stopOnEntry: false })
+}
 
 async function runActiveScript(path = store.activePath) {
   if (!path || runningScript.value) return
@@ -163,21 +307,37 @@ function onRunFileEvent() {
   void runActiveScript()
 }
 
+function onDebugPaused() {
+  void nextTick(() => refreshDebugLineDecoration())
+}
+
+function onDebugResumed() {
+  refreshDebugLineDecoration()
+}
+
 function cssColor(name: string, fallback: string) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
   if (raw.startsWith('#')) {
     if (raw.length === 4) return `#${raw[1]}${raw[1]}${raw[2]}${raw[2]}${raw[3]}${raw[3]}`
     return raw
   }
-  const m = raw.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/)
+  const m = raw.match(/rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)(?:[,\s/]+([\d.]+))?/)
   if (!m) return fallback
-  return `#${[m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')}`
+  const hex = [m[1], m[2], m[3]].map((n) => Number(n).toString(16).padStart(2, '0')).join('')
+  if (m[4] != null && Number(m[4]) < 1) {
+    const aa = Math.round(Number(m[4]) * 255).toString(16).padStart(2, '0')
+    return `#${hex}${aa}`
+  }
+  return `#${hex}`
 }
 
 function applyEditorTheme() {
   if (!monacoMod) return
   const dark = currentTheme() === 'dark'
-  const bg = cssColor('--editor-bg', dark ? '#121218' : '#ffffff')
+  // Monaco can't resolve CSS color-mix(); use wallpaper-aware glass hex instead.
+  const bg = document.documentElement.hasAttribute('data-wallpaper')
+    ? decorGlassHex('editor')
+    : cssColor('--editor-bg', dark ? '#121218' : '#ffffff')
   monacoMod.editor.defineTheme('ca-editor', {
     base: dark ? 'vs-dark' : 'vs',
     inherit: true,
@@ -267,6 +427,7 @@ function ensureOrigModel(path: string, content: string) {
 
 const editorOptions = {
   automaticLayout: true,
+  glyphMargin: true,
   minimap: { enabled: false },
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 13,
@@ -312,7 +473,11 @@ function showPathOn(
   ed.setModel(model)
   ed.updateOptions({ readOnly: Boolean(file.readonly) })
   bindEditorContextMenu(ed)
-  if (ed === editor) applySearchReveal(path)
+  if (ed === editor) {
+    applySearchReveal(path)
+    refreshBreakpointDecorations()
+    refreshDebugLineDecoration()
+  }
   requestAnimationFrame(() => ed.layout())
 }
 
@@ -867,8 +1032,71 @@ function bindEditorCommands(ed: import('monaco-editor').editor.IStandaloneCodeEd
     void gotoDefinition()
   })
   ed.addCommand(monacoMod.KeyCode.F5, () => {
-    void runActiveScript()
+    const sess = debugStore.sessionForProgram(store.activePath)
+    if (sess?.state === 'paused') {
+      debugStore.selectSession(sess.id)
+      void debugStore.callControl('continue', sess.id)
+    } else if (!sess) void runActiveScript()
   })
+  ed.addCommand(monacoMod.KeyMod.Shift | monacoMod.KeyCode.F5, () => {
+    void startDebugActive()
+  })
+  ed.addCommand(monacoMod.KeyCode.F10, () => {
+    const sess = debugStore.sessionForProgram(store.activePath)
+    if (sess?.state === 'paused') {
+      debugStore.selectSession(sess.id)
+      void debugStore.callControl('next', sess.id)
+    }
+  })
+  ed.addCommand(monacoMod.KeyCode.F11, () => {
+    const sess = debugStore.sessionForProgram(store.activePath)
+    if (sess?.state === 'paused') {
+      debugStore.selectSession(sess.id)
+      void debugStore.callControl('stepIn', sess.id)
+    }
+  })
+  ed.addCommand(monacoMod.KeyMod.Shift | monacoMod.KeyCode.F11, () => {
+    const sess = debugStore.sessionForProgram(store.activePath)
+    if (sess?.state === 'paused') {
+      debugStore.selectSession(sess.id)
+      void debugStore.callControl('stepOut', sess.id)
+    }
+  })
+  ed.addCommand(monacoMod.KeyCode.F9, () => {
+    const path = store.activePath
+    const pos = ed.getPosition()
+    if (!path || !pos) return
+    debugStore.toggleBreakpoint(path, pos.lineNumber)
+    refreshBreakpointDecorations()
+  })
+  editorInputDisposables.push(
+    ed.onMouseDown((e) => {
+      if (!monacoMod) return
+      if (e.target.type !== monacoMod.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) return
+      const path = store.activePath
+      const line = e.target.position?.lineNumber
+      if (!path || !line) return
+      e.event.preventDefault()
+      debugStore.toggleBreakpoint(path, line)
+      refreshBreakpointDecorations()
+      clearBreakpointHint()
+    }),
+  )
+  editorInputDisposables.push(
+    ed.onMouseMove((e) => {
+      if (!monacoMod) return
+      if (!isBreakpointGutter(e.target.type)) {
+        clearBreakpointHint()
+        return
+      }
+      const line = e.target.position?.lineNumber
+      if (!line) {
+        clearBreakpointHint()
+        return
+      }
+      setBreakpointHint(line)
+    }),
+  )
   editorInputDisposables.push(
     ed.onKeyDown((e) => {
       if (
@@ -925,6 +1153,7 @@ function bindEditorCommands(ed: import('monaco-editor').editor.IStandaloneCodeEd
     ed.onMouseLeave(() => {
       if (lastGotoMouse?.ed === ed) lastGotoMouse = null
       if (gotoHoverEd === ed) clearGotoHover()
+      clearBreakpointHint()
     }),
   )
 }
@@ -1357,13 +1586,17 @@ async function gotoDefinitionAt(position: { lineNumber: number; column: number }
 }
 
 watch(
-  () => store.activePath,
+  () => [debugStore.breakpoints, debugStore.sessions, debugStore.activeSessionId] as const,
   () => {
-    if (inlineOpen.value) closeInlineEdit(inlinePreviewApplied)
-    hideInlineChip()
-    gotoOpen.value = false
+    refreshBreakpointDecorations()
+    refreshDebugLineDecoration()
   },
+  { deep: true },
 )
+
+function onBreakpointsChanged() {
+  refreshBreakpointDecorations()
+}
 
 onMounted(async () => {
   monacoMod = await import('monaco-editor')
@@ -1388,13 +1621,20 @@ onMounted(async () => {
   host.value.addEventListener('copy', onEditorCopy)
   primaryPath.value = store.activePath
   showPath(store.activePath)
+  refreshBreakpointDecorations()
+  refreshDebugLineDecoration()
   window.addEventListener('ca-theme', onTheme as EventListener)
+  window.addEventListener('ca-wallpaper', onTheme as EventListener)
   window.addEventListener('ca-file-reload', onReload as EventListener)
   window.addEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.addEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
   window.addEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
   window.addEventListener('ca-goto-definition', onGotoEvent as EventListener)
   window.addEventListener('ca-run-file', onRunFileEvent as EventListener)
+  window.addEventListener('ca-debug-paused', onDebugPaused as EventListener)
+  window.addEventListener('ca-debug-resumed', onDebugResumed as EventListener)
+  window.addEventListener('ca-debug-ended', onDebugResumed as EventListener)
+  window.addEventListener('ca-debug-breakpoints-changed', onBreakpointsChanged)
   window.addEventListener('keydown', onGotoModifierKey, true)
   window.addEventListener('keyup', onGotoModifierKey, true)
   window.addEventListener('blur', onWindowBlur)
@@ -1404,6 +1644,8 @@ onMounted(async () => {
 function onFocusEditor() {
   showPath(store.activePath)
   scrollActiveTabIntoView(store.activePath)
+  refreshBreakpointDecorations()
+  refreshDebugLineDecoration()
 }
 
 function scrollActiveTabIntoView(path: string | null) {
@@ -1522,12 +1764,20 @@ watch(
 watch(
   () => store.activePath,
   (path, prev) => {
+    if (inlineOpen.value) closeInlineEdit(inlinePreviewApplied)
+    hideInlineChip()
+    gotoOpen.value = false
+    clearBreakpointHint()
     scrollActiveTabIntoView(path)
     if (!path || !prev || !isMarkdownFile(path) || !isMarkdownFile(prev)) mdPreview.value = false
     // Reset HTML to source when switching between different HTML files / leaving HTML
     const nextHtml = path ? /\.(html?|HTML?)$/.test(path) : false
     const prevHtml = prev ? /\.(html?|HTML?)$/.test(prev) : false
     if (!nextHtml || !prevHtml || path !== prev) htmlPreview.value = false
+    nextTick(() => {
+      refreshBreakpointDecorations()
+      refreshDebugLineDecoration()
+    })
   },
 )
 
@@ -1572,12 +1822,17 @@ watch(
 onBeforeUnmount(() => {
   host.value?.removeEventListener('copy', onEditorCopy)
   window.removeEventListener('ca-theme', onTheme as EventListener)
+  window.removeEventListener('ca-wallpaper', onTheme as EventListener)
   window.removeEventListener('ca-file-reload', onReload as EventListener)
   window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.removeEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
   window.removeEventListener('ca-inline-edit', onInlineEditEvent as EventListener)
   window.removeEventListener('ca-goto-definition', onGotoEvent as EventListener)
   window.removeEventListener('ca-run-file', onRunFileEvent as EventListener)
+  window.removeEventListener('ca-debug-paused', onDebugPaused as EventListener)
+  window.removeEventListener('ca-debug-resumed', onDebugResumed as EventListener)
+  window.removeEventListener('ca-debug-ended', onDebugResumed as EventListener)
+  window.removeEventListener('ca-debug-breakpoints-changed', onBreakpointsChanged)
   window.removeEventListener('keydown', onGotoModifierKey, true)
   window.removeEventListener('keyup', onGotoModifierKey, true)
   window.removeEventListener('blur', onWindowBlur)
@@ -2042,6 +2297,88 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
           <AppIcon name="play" :size="15" :stroke-width="1.75" />
         </button>
         <button
+          v-if="canStartDebugActiveFile"
+          type="button"
+          class="ghost-icon-btn file-bar-debug"
+          :title="t('debug.startHint')"
+          :disabled="Boolean(debugSessionForActiveFile?.busy)"
+          :aria-label="t('debug.start')"
+          @click="startDebugActive()"
+        >
+          <DebugActionIcon kind="start" :size="16" />
+        </button>
+        <template v-if="showActiveFileDebugControls && debugSessionForActiveFile">
+          <span class="debug-toolbar-sep" aria-hidden="true" />
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn"
+            :title="t('debug.restartHint')"
+            :disabled="debugSessionForActiveFile.busy || !debugSessionForActiveFile.lastStartOpts"
+            @click="restartActiveFileDebug()"
+          >
+            <DebugActionIcon kind="restart" :size="16" />
+          </button>
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn debug-ctrl-btn--stop"
+            :title="t('debug.stop')"
+            @click="controlActiveFileDebug('stop')"
+          >
+            <AppIcon name="debug-stop" :size="13" />
+          </button>
+          <span class="debug-toolbar-sep" aria-hidden="true" />
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn debug-ctrl-btn--continue"
+            :title="t('debug.continueHint')"
+            :disabled="debugSessionForActiveFile.state !== 'paused' || debugSessionForActiveFile.busy"
+            @click="controlActiveFileDebug('continue')"
+          >
+            <AppIcon name="debug-continue" :size="15" :stroke-width="1.6" />
+          </button>
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn"
+            :title="t('debug.pause')"
+            :disabled="
+              debugSessionForActiveFile.state === 'paused' ||
+              debugSessionForActiveFile.busy ||
+              (debugSessionForActiveFile.state !== 'running' &&
+                debugSessionForActiveFile.state !== 'starting')
+            "
+            @click="controlActiveFileDebug('pause')"
+          >
+            <AppIcon name="debug-pause" :size="15" :stroke-width="1.6" />
+          </button>
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn"
+            :title="t('debug.stepOverHint')"
+            :disabled="debugSessionForActiveFile.state !== 'paused' || debugSessionForActiveFile.busy"
+            @click="controlActiveFileDebug('next')"
+          >
+            <AppIcon name="debug-step-over" :size="15" :stroke-width="1.6" />
+          </button>
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn"
+            :title="t('debug.stepInHint')"
+            :disabled="debugSessionForActiveFile.state !== 'paused' || debugSessionForActiveFile.busy"
+            @click="controlActiveFileDebug('stepIn')"
+          >
+            <AppIcon name="debug-step-into" :size="15" :stroke-width="1.6" />
+          </button>
+          <button
+            type="button"
+            class="ghost-icon-btn debug-ctrl-btn"
+            :title="t('debug.stepOutHint')"
+            :disabled="debugSessionForActiveFile.state !== 'paused' || debugSessionForActiveFile.busy"
+            @click="controlActiveFileDebug('stepOut')"
+          >
+            <AppIcon name="debug-step-out" :size="15" :stroke-width="1.6" />
+          </button>
+        </template>
+        <button
           type="button"
           class="ghost-icon-btn"
           :title="t('editor.splitRight')"
@@ -2088,6 +2425,19 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
       <span class="review-path" :title="store.activePath || ''">
         {{ store.activePath || t('editor.openFromSidebar') }}
       </span>
+      <div
+        v-if="debugSessionForActiveFile?.state === 'paused' && debugSessionForActiveFile.currentPath"
+        class="debug-location"
+        role="status"
+      >
+        <DebugActionIcon kind="start" :size="13" />
+        <span>{{
+          t('debug.currentLocation', {
+            path: debugSessionForActiveFile.currentPath,
+            line: debugSessionForActiveFile.currentLine ?? '?',
+          })
+        }}</span>
+      </div>
       <div v-if="gitDiff && !review" class="git-diff-bar">
         <span>{{ t('git.diffVsHead') }}</span>
         <button
@@ -2269,7 +2619,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   min-height: 32px;
   padding: 0 12px;
   border-bottom: var(--border-width) solid var(--border);
-  background: color-mix(in srgb, #dc2626 12%, var(--bg));
+  background: color-mix(in srgb, var(--text-secondary) 10%, var(--bg));
   color: var(--text-h);
   font-size: 12.5px;
 }
@@ -2344,9 +2694,51 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
   background: var(--primary-soft);
   opacity: 1;
 }
+.file-bar-debug:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, #89d185 16%, transparent);
+}
 .file-bar-tools .ghost-icon-btn:disabled {
   opacity: 0.28;
   cursor: default;
+}
+.debug-toolbar-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.debug-ctrl-btn {
+  transition: background 0.12s ease, color 0.12s ease, opacity 0.12s ease;
+}
+.debug-ctrl-btn:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--text-h) 12%, transparent);
+}
+.debug-ctrl-btn--continue {
+  color: #89d185;
+}
+.debug-ctrl-btn--stop {
+  color: #f14c4c;
+}
+.debug-location {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #ca8a04 18%, transparent);
+  color: var(--text-h);
+  font-size: 12px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  max-width: min(420px, 45vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-bar-tools .ghost-icon-btn.danger {
+  color: #dc2626;
 }
 .name {
   overflow: hidden;
@@ -2570,6 +2962,55 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
 <style>
 .ca-search-match {
   background: color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.ca-bp-glyph {
+  background: var(--danger, #e11d48);
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 3px;
+  margin-top: 4px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.ca-bp-glyph.ca-bp-conditional {
+  background: transparent;
+  border: 2px solid var(--danger, #e11d48);
+  box-sizing: border-box;
+}
+.ca-bp-hint {
+  box-sizing: border-box;
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 3px;
+  margin-top: 4px;
+  border-radius: 50%;
+  background: transparent !important;
+  border: 1.5px solid color-mix(in srgb, var(--danger, #e11d48) 58%, transparent);
+  opacity: 0.9;
+  cursor: pointer;
+  pointer-events: none;
+}
+.ca-debug-line {
+  background: color-mix(in srgb, #ca8a04 30%, transparent) !important;
+  border-left: 3px solid #ca8a04 !important;
+}
+.ca-debug-line-num {
+  background: color-mix(in srgb, #ca8a04 40%, transparent) !important;
+  color: #92400e !important;
+  font-weight: 700;
+}
+.ca-debug-ip {
+  position: relative;
+}
+.ca-debug-ip::before {
+  content: '▶';
+  display: block;
+  color: #ca8a04;
+  font-size: 11px;
+  line-height: 1;
+  margin-left: 1px;
+  margin-top: 4px;
+  font-weight: 700;
 }
 .ca-search-current {
   background: color-mix(in srgb, var(--primary) 42%, transparent);

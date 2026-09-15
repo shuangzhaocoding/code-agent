@@ -49,13 +49,13 @@ const frameSrc = computed(() => {
 .html-preview {
   width: 100%;
   height: 100%;
-  background: #fff;
+  background: transparent;
 }
 iframe {
   width: 100%;
   height: 100%;
   border: 0;
   display: block;
-  background: #fff;
+  background: var(--panel-bg);
 }
 </style>

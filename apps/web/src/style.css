@@ -82,6 +82,14 @@ html[data-theme='light'] {
   --tr-container-border-color: var(--border);
   --tr-border-color-default: var(--border);
   --select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  --debug-var-name: #2563eb;
+  --debug-var-index: #c2410c;
+  --debug-var-type: #78716c;
+  --debug-var-value: var(--text-h);
+  --debug-var-eq: var(--text-secondary);
+  --debug-var-row-hover: color-mix(in srgb, var(--primary) 12%, transparent);
+  --debug-var-row-selected: color-mix(in srgb, var(--primary) 18%, transparent);
+  --debug-vars-bg: var(--code-bg);
   color-scheme: light;
 }
 
@@ -149,6 +157,14 @@ html[data-theme='dark'] {
   --bg-elevated: var(--surface);
   --bg-muted: var(--surface-inset);
   --editor-bg: var(--surface);
+  --debug-var-name: #9cdcfe;
+  --debug-var-index: #ce9178;
+  --debug-var-type: #c4b5a0;
+  --debug-var-value: var(--text-h);
+  --debug-var-eq: var(--text-secondary);
+  --debug-var-row-hover: color-mix(in srgb, var(--primary) 16%, transparent);
+  --debug-var-row-selected: color-mix(in srgb, var(--primary) 24%, transparent);
+  --debug-vars-bg: color-mix(in srgb, var(--code-bg) 80%, var(--panel-bg));
   color-scheme: dark;
 
   --tv-base-color-brand: var(--primary);
@@ -313,6 +329,87 @@ html {
   display: none;
   width: 0;
   height: 0;
+}
+
+html[data-wallpaper] body,
+html[data-wallpaper] .workbench,
+html[data-wallpaper] .launch-page {
+  background: transparent;
+}
+html[data-wallpaper] .launch-page {
+  position: relative;
+  z-index: 1;
+}
+/*
+ * Wallpaper must remain visible across the workbench.
+ * Clear dock chrome, keep a light glass on panels (~35–45%), and leave
+ * widgets (composer / code chips) on higher-opacity tokens.
+ */
+html[data-wallpaper] {
+  --page-bg: color-mix(in srgb, var(--surface) 38%, transparent);
+  --panel-bg: color-mix(in srgb, var(--surface) 42%, transparent);
+  --sidebar-bg: color-mix(in srgb, var(--surface) 42%, transparent);
+  --code-bg: color-mix(in srgb, var(--surface-inset) 70%, transparent);
+  --bg: var(--page-bg);
+  --bg-elevated: color-mix(in srgb, var(--surface) 78%, transparent);
+  --bg-muted: var(--code-bg);
+  --editor-bg: color-mix(in srgb, var(--surface) 40%, transparent);
+  --tr-sender-bg-color: color-mix(in srgb, var(--surface) 88%, transparent);
+  --tr-page-bg-default: var(--page-bg);
+  --tr-container-bg-default: var(--panel-bg);
+}
+html[data-wallpaper] .dockview-theme-codeagent {
+  --dv-background-color: transparent;
+  --dv-group-view-background-color: transparent;
+  --dv-tabs-and-actions-container-background-color: color-mix(in srgb, var(--surface) 55%, transparent);
+  --dv-floating-titlebar-background-color: color-mix(in srgb, var(--surface) 70%, transparent);
+  --dv-activegroup-visiblepanel-tab-background-color: color-mix(in srgb, var(--surface) 70%, transparent);
+  --dv-inactivegroup-visiblepanel-tab-background-color: color-mix(in srgb, var(--surface) 45%, transparent);
+}
+html[data-wallpaper] .panel-shell,
+html[data-wallpaper] .agent,
+html[data-wallpaper] .panel-chromeless {
+  background: color-mix(in srgb, var(--surface) 36%, transparent) !important;
+}
+html[data-wallpaper] .panel-head,
+html[data-wallpaper] .app-menu-bar,
+html[data-wallpaper] .desktop-titlebar {
+  background: color-mix(in srgb, var(--surface) 55%, transparent) !important;
+}
+html[data-wallpaper] .agent-sender-wrap {
+  background: color-mix(in srgb, var(--surface) 88%, transparent) !important;
+}
+html[data-wallpaper] .agent-footer {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--surface) 82%, transparent) 65%,
+    transparent
+  ) !important;
+}
+html[data-wallpaper] .dv-content-container,
+html[data-wallpaper] .dv-view,
+html[data-wallpaper] .dv-groupview,
+html[data-wallpaper] .dv-dockview,
+html[data-wallpaper] .dv-gridview,
+html[data-wallpaper] .dv-branch-node,
+html[data-wallpaper] .dv-split-view-container {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+html[data-wallpaper] .editor-shell,
+html[data-wallpaper] .preview-shell,
+html[data-wallpaper] .term-panel,
+html[data-wallpaper] .host-wrap,
+html[data-wallpaper] .term-hosts,
+html[data-wallpaper] .term-hosts .term-instance,
+html[data-wallpaper] .monaco-editor,
+html[data-wallpaper] .monaco-editor-background,
+html[data-wallpaper] .monaco-editor .margin,
+html[data-wallpaper] .overflow-guard,
+html[data-wallpaper] .html-preview,
+html[data-wallpaper] .file-preview-host {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 body {

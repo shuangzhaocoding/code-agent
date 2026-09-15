@@ -66,6 +66,7 @@ const fileShortcut = isMacMod() ? '⌘P' : 'Ctrl+P'
 const searchShortcut = isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F'
 const saveShortcut = `${modKey}S`
 const newChatShortcut = `${modKey}N`
+const terminalShortcut = isMacMod() ? '⌘`' : 'Ctrl+`'
 const newWindowShortcut = isMacMod() ? '⌘⇧N' : 'Ctrl+Shift+N'
 const isDesktop = isDesktopApp()
 
@@ -111,9 +112,12 @@ const PANEL_ICONS: Record<string, AppIconName> = {
   preview: 'globe',
   terminal: 'terminal',
   ports: 'ports',
+  debug: 'bug',
   git: 'git',
   skills: 'book',
   memory: 'memory',
+  contextDebug: 'eye',
+  checkpoints: 'history',
   plugins: 'puzzle',
   models: 'chip',
   settings: 'sliders',
@@ -367,8 +371,8 @@ const menus = computed(() => {
   const PANEL_GROUPS: string[][] = [
     ['agent', 'trajectory'],
     ['explorer', 'search', 'editor', 'preview', 'terminal'],
-    ['ports', 'git'],
-    ['skills', 'memory', 'plugins', 'models', 'settings'],
+    ['ports', 'debug', 'git'],
+    ['skills', 'memory', 'contextDebug', 'checkpoints', 'plugins', 'models', 'settings'],
   ]
 
   const panelItems: MenuItem[] = []
@@ -379,6 +383,7 @@ const menus = computed(() => {
         id: `panel-${id}`,
         label: t(`panels.${id}`),
         icon: PANEL_ICONS[id],
+        ...(id === 'terminal' ? { shortcut: terminalShortcut } : {}),
         run: () => {
           if (id === 'search') {
             store.openSearch()

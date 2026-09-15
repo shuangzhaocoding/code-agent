@@ -264,7 +264,7 @@ function reload() {
   padding: 0 10px;
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-sm, 6px);
-  background: var(--surface);
+  background: var(--panel-bg);
   color: var(--text);
   font-size: 12px;
   font-family: var(--mono);
@@ -277,7 +277,7 @@ function reload() {
   flex: 1;
   min-height: 0;
   position: relative;
-  background: var(--surface);
+  background: transparent;
 }
 .frame {
   position: absolute;
@@ -285,7 +285,7 @@ function reload() {
   width: 100%;
   height: 100%;
   border: 0;
-  background: var(--surface);
+  background: var(--panel-bg);
 }
 .empty,
 .fallback {

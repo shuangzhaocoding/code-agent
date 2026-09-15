@@ -68,6 +68,28 @@ async def kill_terminal(terminal_id: str):
 
 @router.websocket("/{terminal_id}/ws")
 async def terminal_ws(websocket: WebSocket, terminal_id: str):
+    from code_agent.middleware.access_password import (
+        access_password_enabled,
+        verify_access_token,
+        verify_password_attempt,
+        COOKIE_NAME,
+        HEADER_NAME,
+    )
+
+    if access_password_enabled():
+        header = websocket.headers.get(HEADER_NAME.lower()) or websocket.headers.get(HEADER_NAME)
+        cookie = websocket.cookies.get(COOKIE_NAME)
+        q = websocket.query_params.get("access_token") or websocket.query_params.get("password")
+        ok = (
+            (header and verify_password_attempt(header))
+            or verify_access_token(cookie)
+            or verify_access_token(q)
+            or (q and verify_password_attempt(q))
+        )
+        if not ok:
+            await websocket.close(code=4401)
+            return
+
     await websocket.accept()
     row = await TerminalSession.get_or_none(id=terminal_id)
     if not row:

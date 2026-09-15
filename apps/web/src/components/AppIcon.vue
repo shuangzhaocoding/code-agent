@@ -71,6 +71,7 @@ export type AppIconName =
   | 'file-edit'
   | 'alert'
   | 'ban'
+  | 'bug'
   | 'think'
   | 'gear'
   | 'spark'
@@ -89,6 +90,14 @@ export type AppIconName =
   | 'collapse-all'
   | 'maximize'
   | 'minimize'
+  | 'debug-restart'
+  | 'debug-stop'
+  | 'debug-continue'
+  | 'debug-pause'
+  | 'debug-step-over'
+  | 'debug-step-into'
+  | 'debug-step-out'
+  | 'circle'
 
 const props = withDefaults(
   defineProps<{
@@ -370,6 +379,16 @@ const paths: Record<string, string[]> = {
   ],
   alert: ['M10.3 3.8 1.8 18.5A2 2 0 0 0 3.5 21.5h16.9a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z', 'M12 9v4', 'M12 17h.01'],
   ban: ['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z', 'M4.9 4.9l14.2 14.2'],
+  bug: [
+    'M8 7.5a4 4 0 0 1 8 0V9a4 4 0 0 1-8 0V7.5Z',
+    'M12 13v7',
+    'M8 14H5',
+    'M16 14h3',
+    'M8 18H6',
+    'M16 18h2',
+    'M9 5 7 3',
+    'M15 5l2-2',
+  ],
   think: [
     'M12 3a5 5 0 0 0-3.2 8.9c.5.4.9 1 .9 1.6h5c0-.6.4-1.2.9-1.6A5 5 0 0 0 12 3Z',
     'M10 16h4',
@@ -409,11 +428,45 @@ const paths: Record<string, string[]> = {
     'M3 16h3a2 2 0 0 1 2 2v3',
     'M16 21v-3a2 2 0 0 1 2-2h3',
   ],
+  'debug-restart': [
+    'M4.5 12a7.5 7.5 0 1 0 2.2-5.3',
+    'M4.5 3.8v4.7h4.7',
+  ],
+  'debug-stop': ['M7.5 7.5h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z'],
+  'debug-continue': ['M6 5.5v13', 'M10.5 6.5v11L20 12 10.5 6.5Z'],
+  'debug-pause': ['M8 5.5v13', 'M16 5.5v13'],
+  // Arc over a baseline, arrowhead pointing down onto the line (VS Code style)
+  'debug-step-over': [
+    'M4 18h16',
+    'M7.5 5.5H10a5 5 0 0 1 5 5v4.5',
+    'M12 12l3 3 3-3',
+  ],
+  'debug-step-into': [
+    'M12 3.5v11',
+    'M8 10.5l4 4 4-4',
+    'M5 18.5h14',
+  ],
+  'debug-step-out': [
+    'M12 20.5V9.5',
+    'M8 13.5l4-4 4 4',
+    'M5 5.5h14',
+  ],
+  circle: ['M12 20a8 8 0 1 0 0-16 8 8 0 0 0 0 16Z'],
 }
+
+const filledIcons = new Set(['debug-stop'])
 
 function glyphs(name: string) {
   const key = aliases[name] || name
   return paths[key] || paths.help
+}
+
+function resolvedName(name: string) {
+  return aliases[name] || name
+}
+
+function isFilled(name: string) {
+  return filledIcons.has(resolvedName(name))
 }
 </script>
 
@@ -430,7 +483,8 @@ function glyphs(name: string) {
       v-for="(d, index) in glyphs(props.name)"
       :key="index"
       :d="d"
-      stroke="currentColor"
+      :fill="isFilled(props.name) ? 'currentColor' : 'none'"
+      :stroke="isFilled(props.name) ? 'none' : 'currentColor'"
       :stroke-width="strokeWidth"
       stroke-linecap="round"
       stroke-linejoin="round"

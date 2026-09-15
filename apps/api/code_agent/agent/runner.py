@@ -82,17 +82,27 @@ async def run_agent_graph(
             if isinstance(skill_meta, dict):
                 skill_name = skill_meta.get("name")
         skill_body = None
+        skill_source = None
         if skill_name:
             from code_agent.skills.registry import ensure_skills_ready, load_skill_body
 
             await ensure_skills_ready(workspace)
             skill_body = load_skill_body(workspace, str(skill_name))
             if skill_body:
+                skill_source = "user_mention"
                 block_id = new_id()
                 await broker.publish(
                     run_id,
                     "block.started",
-                    {"block_id": block_id, "block_type": "skill.activated", "meta": {"name": skill_name}},
+                    {
+                        "block_id": block_id,
+                        "block_type": "skill.activated",
+                        "meta": {
+                            "name": skill_name,
+                            "source": "user_mention",
+                            "reason": "User @-selected this skill; body injected into system prompt for the whole turn.",
+                        },
+                    },
                 )
                 await broker.publish(run_id, "block.delta", {"block_id": block_id, "text": skill_body[:500]})
                 await broker.publish(run_id, "block.completed", {"block_id": block_id, "status": "ok"})
@@ -127,6 +137,7 @@ async def run_agent_graph(
                 "need_vision": need_vision,
                 "skill_name": str(skill_name) if skill_name and skill_body else None,
                 "skill_body": skill_body,
+                "skill_source": skill_source,
                 "user_query": current_text,
             },
             "recursion_limit": max(1, recursion_limit),

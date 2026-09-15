@@ -13,6 +13,7 @@ export const renderers: Record<string, Component> = {
   terminal: defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
   'terminal.launch': defineAsyncComponent(() => import('./TerminalReplayBlock.vue')),
   'skill.activated': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
+  'context.injected': defineAsyncComponent(() => import('./ToolCallBlock.vue')),
   explore: defineAsyncComponent(() => import('./ExploreBlock.vue')),
   todo: defineAsyncComponent(() => import('./TodoBlock.vue')),
   approval: defineAsyncComponent(() => import('./ApprovalBlock.vue')),

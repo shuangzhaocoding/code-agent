@@ -43,6 +43,7 @@ const icons: Record<string, string> = {
   agent: 'atom',
   terminal: 'terminal',
   ports: 'ports',
+  debug: 'bug',
   preview: 'globe',
   git: 'git',
   skills: 'book',
@@ -51,6 +52,8 @@ const icons: Record<string, string> = {
   settings: 'sliders',
   trajectory: 'clock',
   memory: 'memory',
+  contextDebug: 'eye',
+  checkpoints: 'history',
 }
 
 const menu = ref<{ x: number; y: number } | null>(null)

@@ -10,7 +10,7 @@ const AUTO_CLOSE_SEC = 10
 const COMPACT_DELAY_MS = 700
 
 const { t } = useI18n()
-const { ports, markPortHighlighted, autoRefresh } = usePortsWatch()
+const { ports, markPortHighlighted, notifyNewPorts } = usePortsWatch()
 const notices = ref<PortNotice[]>([])
 const known = ref<Set<number> | null>(null)
 let seq = 0
@@ -100,7 +100,12 @@ async function copyAddress(item: PortNotice) {
 watch(
   ports,
   (list) => {
-    if (!autoRefresh.value) return
+    if (!notifyNewPorts.value) {
+      // Keep baseline in sync so enabling later does not flush historical ports as “new”.
+      const interesting = list.filter(isInterestingPort)
+      known.value = new Set(interesting.map((p) => p.port))
+      return
+    }
     const interesting = list.filter(isInterestingPort)
     const next = new Set(interesting.map((p) => p.port))
     if (known.value === null) {
@@ -114,6 +119,15 @@ watch(
   },
   { deep: true },
 )
+
+watch(notifyNewPorts, (on) => {
+  if (!on) {
+    for (const id of [...countdownTimers.keys()]) clearNoticeTimers(id)
+    notices.value = []
+  } else {
+    known.value = new Set(ports.value.filter(isInterestingPort).map((p) => p.port))
+  }
+})
 
 onBeforeUnmount(() => {
   for (const id of [...countdownTimers.keys()]) clearNoticeTimers(id)

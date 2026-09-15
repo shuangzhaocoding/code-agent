@@ -13,10 +13,10 @@ const adapter = computed(() => resolvePreviewAdapter(props.file.kind))
 <template>
   <component
     :is="adapter"
-    v-if="adapter && file.previewUrl"
+    v-if="adapter && (file.previewUrl || file.kind === 'missing')"
     class="file-preview-host"
     :path="file.path"
-    :preview-url="file.previewUrl"
+    :preview-url="file.previewUrl || ''"
     :mime="file.mime"
     :kind="file.kind"
     :content="file.content"

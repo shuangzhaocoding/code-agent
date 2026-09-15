@@ -139,7 +139,10 @@ def _mount_gateway_proxies(app: FastAPI) -> None:
 
 def _mount_api_routers(app: FastAPI) -> None:
     from code_agent.routers import (
+        auth,
         conversations,
+        debug,
+        decor,
         git,
         llm,
         mcp,
@@ -150,11 +153,14 @@ def _mount_api_routers(app: FastAPI) -> None:
         uploads,
         workspaces,
     )
+    from code_agent.middleware.access_password import AccessPasswordMiddleware
 
     origins = settings.get("server.cors_origins") or [
         "http://127.0.0.1:4061",
         "http://localhost:4061",
     ]
+    # Last added = outermost. CORS outside access gate so OPTIONS preflight works.
+    app.add_middleware(AccessPasswordMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
@@ -162,6 +168,7 @@ def _mount_api_routers(app: FastAPI) -> None:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.include_router(auth.router)
     app.include_router(workspaces.router)
     app.include_router(memories.router)
     app.include_router(mcp.router)
@@ -172,6 +179,8 @@ def _mount_api_routers(app: FastAPI) -> None:
     app.include_router(skills.router)
     app.include_router(settings_router.router)
     app.include_router(uploads.router)
+    app.include_router(decor.router)
+    app.include_router(debug.router)
 
 
 def _mount_static_ui(app: FastAPI) -> None:

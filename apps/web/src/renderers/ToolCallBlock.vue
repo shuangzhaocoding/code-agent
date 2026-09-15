@@ -36,6 +36,7 @@ const catalog: Record<string, { icon: string; label: string; tone: Tone }> = {
   explore_codebase: { icon: 'search', label: '探索代码', tone: 'think' },
   'file.read': { icon: 'eye', label: '读取文件', tone: 'default' },
   'skill.activated': { icon: 'book', label: '加载 Skill', tone: 'tool' },
+  'context.injected': { icon: 'eye', label: '上下文注入', tone: 'think' },
   'tool.call': { icon: 'wrench', label: '工具调用', tone: 'tool' },
   'tool.result': { icon: 'check', label: '工具结果', tone: 'tool' },
 }
@@ -90,7 +91,16 @@ const subtitle = computed(() => {
   if (toolName.value === 'run_command' || toolName.value === 'run_in_terminal' || props.block.type === 'terminal' || props.block.type === 'terminal.launch') {
     return String(args.value.command || props.block.meta.command || '')
   }
-  if (props.block.type === 'skill.activated') return String(props.block.meta.name || '')
+  if (props.block.type === 'skill.activated') {
+    const name = String(props.block.meta.name || '')
+    const source = String(props.block.meta.source || '')
+    return source ? `${name} · ${source}` : name
+  }
+  if (props.block.type === 'context.injected') {
+    const skill = props.block.meta.active_skill ? `@${props.block.meta.active_skill}` : ''
+    const rules = props.block.meta.rules_count != null ? `${props.block.meta.rules_count} rules` : ''
+    return [rules, skill].filter(Boolean).join(' · ')
+  }
   return path.value && path.value !== spec.value.label ? path.value : ''
 })
 

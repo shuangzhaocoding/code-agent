@@ -42,8 +42,11 @@ const ModelsPanel = defineAsyncComponent(() => import('@/panels/ModelsPanel.vue'
 const SettingsPanel = defineAsyncComponent(() => import('@/panels/SettingsPanel.vue'))
 const GitPanel = defineAsyncComponent(() => import('@/panels/GitPanel.vue'))
 const PortsPanel = defineAsyncComponent(() => import('@/panels/PortsPanel.vue'))
+const DebugPanel = defineAsyncComponent(() => import('@/panels/DebugPanel.vue'))
 const UrlPreviewPanel = defineAsyncComponent(() => import('@/panels/UrlPreviewPanel.vue'))
 const MemoryPanel = defineAsyncComponent(() => import('@/panels/MemoryPanel.vue'))
+const ContextDebugPanel = defineAsyncComponent(() => import('@/panels/ContextDebugPanel.vue'))
+const CheckpointsPanel = defineAsyncComponent(() => import('@/panels/CheckpointsPanel.vue'))
 
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
@@ -68,8 +71,11 @@ const components = {
   settings: SettingsPanel,
   git: GitPanel,
   ports: PortsPanel,
+  debug: DebugPanel,
   preview: UrlPreviewPanel,
   memory: MemoryPanel,
+  contextDebug: ContextDebugPanel,
+  checkpoints: CheckpointsPanel,
   trajectory: TrajectoryDockPanel,
 } as unknown as Record<string, VueComponent>
 
@@ -112,7 +118,10 @@ onMounted(() => {
   window.addEventListener('ca-open-search', openSearch)
   window.addEventListener('ca-open-explorer', openExplorer)
   window.addEventListener('ca-open-terminal', onOpenTerminal)
+  window.addEventListener('ca-close-terminal', closeTerminalPanel)
+  window.addEventListener('ca-terminal-shortcut-new', onTerminalShortcutNew)
   window.addEventListener('ca-run-in-terminal', onRunInTerminal)
+  window.addEventListener('ca-open-panel', onOpenPanelEvent as EventListener)
   window.addEventListener('ca-open-skills', openSkills)
   window.addEventListener('ca-open-git', openGit)
   window.addEventListener('ca-open-url-preview', openUrlPreviewPanel)
@@ -134,7 +143,10 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-search', openSearch)
   window.removeEventListener('ca-open-explorer', openExplorer)
   window.removeEventListener('ca-open-terminal', onOpenTerminal)
+  window.removeEventListener('ca-close-terminal', closeTerminalPanel)
+  window.removeEventListener('ca-terminal-shortcut-new', onTerminalShortcutNew)
   window.removeEventListener('ca-run-in-terminal', onRunInTerminal)
+  window.removeEventListener('ca-open-panel', onOpenPanelEvent as EventListener)
   window.removeEventListener('ca-open-skills', openSkills)
   window.removeEventListener('ca-open-git', openGit)
   window.removeEventListener('ca-open-url-preview', openUrlPreviewPanel)
@@ -170,6 +182,27 @@ function openTerminal() {
   openPanel('terminal', 'terminal', panelTitle('terminal'))
 }
 
+function closeTerminalPanel() {
+  dock.value?.getPanel('terminal')?.api.close()
+}
+
+async function newTerminalTab() {
+  const existed = Boolean(dock.value?.getPanel('terminal'))
+  openTerminal()
+  await nextTick()
+  await new Promise<void>((r) => requestAnimationFrame(() => r()))
+  // Fresh mount already creates/restores tabs in TerminalPanel.loadExisting().
+  if (existed) window.dispatchEvent(new Event('ca-terminal-new'))
+}
+
+function onTerminalShortcutNew() {
+  void newTerminalTab()
+}
+
+function closeActiveTerminalTab() {
+  window.dispatchEvent(new Event('ca-terminal-close-tab'))
+}
+
 async function onOpenTerminal(e: Event) {
   const detail = (e as CustomEvent<{ cwd?: string }>).detail
   queueTerminalCwd(detail?.cwd ?? '')
@@ -199,6 +232,16 @@ function openUrlPreviewPanel() {
 
 function openSkills() {
   openPanel('skills', 'skills', panelTitle('skills'))
+}
+
+function openDebug() {
+  openPanel('debug', 'debug', panelTitle('debug'))
+}
+
+function onOpenPanelEvent(e: Event) {
+  const id = (e as CustomEvent<{ id?: string }>).detail?.id
+  if (!id) return
+  openPanel(id, id, panelTitle(id))
 }
 
 function onWorkbenchKey(e: KeyboardEvent) {
@@ -262,6 +305,26 @@ function onWorkbenchKey(e: KeyboardEvent) {
     e.preventDefault()
     store.openSearch()
     return
+  }
+
+  // Ctrl/Cmd+` → open/focus terminal; Ctrl/Cmd+Shift+` → new terminal tab
+  if (e.code === 'Backquote' || key === '`' || key === '~') {
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.shiftKey) void newTerminalTab()
+    else openTerminal()
+    return
+  }
+
+  // Ctrl/Cmd+W → close active terminal tab when focus is in the terminal panel
+  if (key === 'w' && !e.shiftKey) {
+    const inTerminal = !!target?.closest?.('.term-panel, .xterm, .xterm-helper-textarea')
+    if (inTerminal) {
+      e.preventDefault()
+      e.stopPropagation()
+      closeActiveTerminalTab()
+      return
+    }
   }
 
   if (e.shiftKey && key === 'z') return
@@ -399,7 +462,7 @@ function seed(apiRef: DockviewApi) {
 }
 
 const LEFT_PANELS = ['workspace', 'explorer', 'search'] as const
-const AGENT_PANELS = ['agent', 'memory'] as const
+const AGENT_PANELS = ['agent', 'memory', 'contextDebug', 'checkpoints'] as const
 
 function findExisting(apiRef: DockviewApi, ids: readonly string[]) {
   return ids.find((id) => apiRef.getPanel(id))
@@ -601,6 +664,8 @@ const dockThemeClass = computed(() =>
 
 <style scoped>
 .workbench {
+  position: relative;
+  z-index: 1;
   height: 100vh;
   display: flex;
   flex-direction: column;

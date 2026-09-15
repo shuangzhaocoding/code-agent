@@ -5,6 +5,7 @@ import { useAppStore } from '@/stores/app'
 const SYSTEM_PORTS = new Set([22, 25, 53, 111, 123, 135, 139, 445, 631, 5353])
 const HIGHLIGHT_TTL_MS = 60_000
 const AUTO_REFRESH_KEY = 'ca.ports.autoRefresh'
+const NOTIFY_NEW_KEY = 'ca.ports.notifyNew'
 
 export type PortItem = {
   port: number
@@ -31,18 +32,28 @@ const loading = ref(false)
 const updatedAt = ref(0)
 const activeWorkspaceId = ref<string | null>(null)
 
-function readAutoRefreshPref(): boolean {
+function readBoolPref(key: string, defaultValue: boolean): boolean {
   try {
-    const raw = localStorage.getItem(AUTO_REFRESH_KEY)
-    if (raw == null) return false
+    const raw = localStorage.getItem(key)
+    if (raw == null) return defaultValue
     return raw === '1' || raw === 'true'
   } catch {
-    return false
+    return defaultValue
+  }
+}
+
+function writeBoolPref(key: string, enabled: boolean) {
+  try {
+    localStorage.setItem(key, enabled ? '1' : '0')
+  } catch {
+    /* ignore */
   }
 }
 
 /** Default off — manual refresh only unless user enables it. */
-const autoRefresh = ref(readAutoRefreshPref())
+const autoRefresh = ref(readBoolPref(AUTO_REFRESH_KEY, false))
+/** Default off — no floating “new port” toasts unless enabled in Settings. */
+const notifyNewPorts = ref(readBoolPref(NOTIFY_NEW_KEY, false))
 
 const highlightTimers = new Map<number, ReturnType<typeof setTimeout>>()
 
@@ -108,7 +119,8 @@ async function refreshPorts(opts?: { quiet?: boolean }) {
 }
 
 function startSharedTimer() {
-  if (timer || !autoRefresh.value || subscribers <= 0) return
+  if (timer || subscribers <= 0) return
+  if (!autoRefresh.value && !notifyNewPorts.value) return
   timer = setInterval(() => {
     void refreshPorts({ quiet: true })
   }, POLL_MS)
@@ -121,18 +133,24 @@ function stopSharedTimer() {
 }
 
 function syncSharedTimer() {
-  if (autoRefresh.value && subscribers > 0) startSharedTimer()
+  if ((autoRefresh.value || notifyNewPorts.value) && subscribers > 0) startSharedTimer()
   else stopSharedTimer()
 }
 
 export function setPortsAutoRefresh(enabled: boolean) {
   autoRefresh.value = Boolean(enabled)
-  try {
-    localStorage.setItem(AUTO_REFRESH_KEY, autoRefresh.value ? '1' : '0')
-  } catch {
-    /* ignore */
-  }
+  writeBoolPref(AUTO_REFRESH_KEY, autoRefresh.value)
   syncSharedTimer()
+}
+
+export function setPortsNotifyNew(enabled: boolean) {
+  notifyNewPorts.value = Boolean(enabled)
+  writeBoolPref(NOTIFY_NEW_KEY, notifyNewPorts.value)
+  syncSharedTimer()
+}
+
+export function getPortsNotifyNew(): boolean {
+  return notifyNewPorts.value
 }
 
 function retainPortsWatch() {
@@ -155,7 +173,9 @@ export function usePortsWatch(): {
   loading: Ref<boolean>
   updatedAt: Ref<number>
   autoRefresh: Ref<boolean>
+  notifyNewPorts: Ref<boolean>
   setAutoRefresh: (enabled: boolean) => void
+  setNotifyNew: (enabled: boolean) => void
   refresh: (opts?: { quiet?: boolean }) => Promise<void>
   pollMs: number
   markPortHighlighted: (port: number, ttlMs?: number) => void
@@ -193,7 +213,9 @@ export function usePortsWatch(): {
     loading,
     updatedAt,
     autoRefresh,
+    notifyNewPorts,
     setAutoRefresh: setPortsAutoRefresh,
+    setNotifyNew: setPortsNotifyNew,
     refresh: refreshPorts,
     pollMs: POLL_MS,
     markPortHighlighted,

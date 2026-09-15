@@ -10,6 +10,7 @@ export type OpenFileKind =
   | 'pptx'
   | 'sqlite'
   | 'binary'
+  | 'missing'
 
 const IMAGE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'ico'])
 const VIDEO_EXT = new Set(['mp4', 'webm', 'ogg', 'mov', 'm4v'])
@@ -114,6 +115,10 @@ export function classifyOpenKind(path: string): OpenFileKind {
 
 export function isPreviewKind(kind: OpenFileKind): boolean {
   return kind !== 'text'
+}
+
+export function isMissingKind(kind: OpenFileKind): boolean {
+  return kind === 'missing'
 }
 
 /** Kinds that can be edited in Monaco (including dual preview/source). */

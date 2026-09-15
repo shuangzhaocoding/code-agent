@@ -283,6 +283,14 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "maximum": 200,
             "default": 80,
         },
+        "agent.max_concurrent_runs": {
+            "type": "integer",
+            "title": "最大并行 Run 数",
+            "minimum": 1,
+            "maximum": 16,
+            "default": 2,
+            "description": "跨会话同时执行的 Agent 任务上限。同会话仍一次只跑一个（其余进入发送队列）。",
+        },
         "agent.tool_timeout_sec": {
             "type": "integer",
             "title": "单工具超时（秒）",
@@ -415,6 +423,19 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "default": "",
             "example": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints",
             "requires_restart": True,
+        },
+        "server.access_password_enabled": {
+            "type": "boolean",
+            "title": "启用访问口令",
+            "default": False,
+            "description": "关闭时不校验口令（默认）。开启后需先设置下方口令，访问工作台会要求解锁。",
+        },
+        "server.access_password": {
+            "type": "string",
+            "title": "访问口令",
+            "format": "password",
+            "default": "",
+            "description": "启用后使用的共享口令（不是账号系统）。可随时修改；清除口令不会自动关闭上方开关。",
         },
     },
 }

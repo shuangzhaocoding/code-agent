@@ -212,6 +212,37 @@ async def estimate_context_usage(conversation_id: str, body: ContextUsageIn):
     return data
 
 
+@router.get("/conversations/{conversation_id}/context-debug")
+async def list_context_debug(conversation_id: str):
+    """List runs that have context injection debug payloads (newest first)."""
+    row = await Conversation.get_or_none(id=conversation_id)
+    if not row:
+        raise HTTPException(status_code=404, detail={"code": "conversation.not_found"})
+    runs = await Run.filter(conversation_id=conversation_id).order_by("-started_at")
+    items = []
+    for run in runs:
+        debug = (run.model_snapshot or {}).get("context_debug")
+        if not debug:
+            continue
+        items.append(
+            {
+                "run_id": str(run.id),
+                "status": run.status,
+                "mode": run.mode,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "context_debug": debug,
+            }
+        )
+    return {"conversation_id": conversation_id, "runs": items}
+
+
+@router.get("/conversations/{conversation_id}/checkpoints")
+async def list_checkpoints(conversation_id: str):
+    from code_agent.file_checkpoints import list_conversation_checkpoints
+
+    return await list_conversation_checkpoints(conversation_id)
+
+
 class RollbackIn(BaseModel):
     message_id: str
     mode: str = "to"

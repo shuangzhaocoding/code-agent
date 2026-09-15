@@ -203,7 +203,9 @@ function toggle() {
               :stroke-width="2"
             />
             <AppIcon v-else-if="item.status === 'cancelled' || itemVisualClass(item.status) === 'skipped'" name="minus" :size="12" :stroke-width="2" />
-            <AppIcon v-else-if="item.status === 'in_progress'" name="loader" :size="12" :stroke-width="1.75" />
+            <span v-else-if="item.status === 'in_progress'" class="todo-spin" aria-hidden="true">
+              <AppIcon name="loader" :size="12" :stroke-width="1.75" />
+            </span>
           </span>
           <span class="todo-text">{{ item.content }}</span>
           <span class="todo-item-status">{{ itemStatusLabel(item.status) }}</span>
@@ -379,6 +381,17 @@ function toggle() {
   color: var(--primary);
   border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
   background: var(--primary-soft);
+}
+.todo-spin {
+  display: inline-grid;
+  place-items: center;
+  animation: todo-spin 0.9s linear infinite;
+  transform-origin: center;
+}
+@keyframes todo-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 .todo-item.interrupted .todo-mark {
   color: #b45309;

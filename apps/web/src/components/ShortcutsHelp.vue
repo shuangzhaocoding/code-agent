@@ -20,6 +20,9 @@ const rows = computed(() => {
     { keys: isMacMod() ? '⌘⇧F' : 'Ctrl+Shift+F', label: t('shortcuts.searchFiles') },
     { keys: `${mod}S`, label: t('shortcuts.save') },
     { keys: isMacMod() ? '⇧⌥F' : 'Shift+Alt+F', label: t('shortcuts.formatDocument') },
+    { keys: isMacMod() ? '⌘`' : 'Ctrl+`', label: t('shortcuts.openTerminal') },
+    { keys: isMacMod() ? '⌘⇧`' : 'Ctrl+Shift+`', label: t('shortcuts.newTerminal') },
+    { keys: isMacMod() ? '⌘W' : 'Ctrl+W', label: t('shortcuts.closeTerminalTab') },
     { keys: `${mod}N`, label: t('shortcuts.newChat') },
     { keys: `${mod}Z`, label: t('shortcuts.undoDelete') },
   ]

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, toRef, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, toRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { scrollToBottom } from '@/utils/smoothScroll'
 import { useAppStore } from '@/stores/app'
+import { api } from '@/api/http'
 import AppIcon from '@/components/AppIcon.vue'
 import TrajectoryOverview from '@/components/TrajectoryOverview.vue'
 import { rendererFor } from '@/renderers'
@@ -12,13 +14,27 @@ import {
   type TrajectoryEntry,
   type TrajectoryKind,
 } from '@/utils/trajectory'
+import { formatRelativeTime } from '@/utils/relativeTime'
 
+type ActiveRun = {
+  run_id: string
+  status: string
+  mode: string
+  started_at?: string | null
+  conversation_id: string
+  conversation_title?: string | null
+}
+
+const { t } = useI18n()
 const store = useAppStore()
 const filter = ref<'all' | TrajectoryKind>('all')
 const expanded = ref<string | null>(null)
 const activeId = ref<string | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const followTail = ref(true)
+const activeRuns = ref<ActiveRun[]>([])
+const cancellingId = ref<string | null>(null)
+let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const { entries, timelineSpans } = useThrottledTrajectory(toRef(store, 'messages'))
 
@@ -44,6 +60,37 @@ const counts = computed(() => {
   }
   return out
 })
+
+async function loadActiveRuns() {
+  const wid = store.workspaceId
+  if (!wid) {
+    activeRuns.value = []
+    return
+  }
+  try {
+    const data = await api<{ runs: ActiveRun[] }>(`/api/runs/active?workspace_id=${encodeURIComponent(wid)}`)
+    activeRuns.value = data.runs || []
+  } catch {
+    /* ignore poll errors */
+  }
+}
+
+async function openRun(row: ActiveRun) {
+  if (row.conversation_id !== store.conversationId) {
+    await store.openConversation(row.conversation_id)
+  }
+}
+
+async function cancelRun(row: ActiveRun) {
+  if (cancellingId.value) return
+  cancellingId.value = row.run_id
+  try {
+    await api(`/api/runs/${row.run_id}/cancel`, { method: 'POST' })
+    await loadActiveRuns()
+  } finally {
+    cancellingId.value = null
+  }
+}
 
 function toggle(entry: TrajectoryEntry) {
   expanded.value = expanded.value === entry.id ? null : entry.id
@@ -78,6 +125,19 @@ watch(
 )
 
 watch(filter, () => scrollToTail(true))
+
+watch(
+  () => [store.workspaceId, store.runStatus, store.conversationId] as const,
+  () => void loadActiveRuns(),
+)
+
+onMounted(() => {
+  void loadActiveRuns()
+  pollTimer = setInterval(() => void loadActiveRuns(), 4000)
+})
+onUnmounted(() => {
+  if (pollTimer) clearInterval(pollTimer)
+})
 </script>
 
 <template>
@@ -85,10 +145,44 @@ watch(filter, () => scrollToTail(true))
     <header class="trajectory-head">
       <div class="trajectory-title">
         <AppIcon name="clock" :size="15" />
-        <span>轨迹</span>
+        <span>{{ t('trajectory.title') }}</span>
         <em v-if="entries.length" class="trajectory-count">{{ entries.length }}</em>
       </div>
     </header>
+
+    <section v-if="activeRuns.length" class="active-runs">
+      <div class="active-head">
+        <AppIcon name="zap" :size="14" />
+        <strong>{{ t('trajectory.activeRuns', { n: activeRuns.length }) }}</strong>
+        <span class="active-hint">{{ t('trajectory.activeHint') }}</span>
+      </div>
+      <button
+        v-for="row in activeRuns"
+        :key="row.run_id"
+        type="button"
+        class="active-row"
+        :class="{ current: row.conversation_id === store.conversationId }"
+        @click="openRun(row)"
+      >
+        <span class="active-dot" :data-status="row.status" />
+        <span class="active-copy">
+          <strong>{{ row.conversation_title || t('trajectory.untitled') }}</strong>
+          <small>
+            {{ row.status }} · {{ row.mode }}
+            <template v-if="row.started_at"> · {{ formatRelativeTime(row.started_at) }}</template>
+          </small>
+        </span>
+        <button
+          type="button"
+          class="active-cancel"
+          :disabled="cancellingId === row.run_id"
+          :title="t('common.stop')"
+          @click.stop="cancelRun(row)"
+        >
+          <AppIcon name="close" :size="14" />
+        </button>
+      </button>
+    </section>
 
     <TrajectoryOverview
       v-if="timelineSpans.length"
@@ -97,7 +191,7 @@ watch(filter, () => scrollToTail(true))
       @select="focusEntry"
     />
 
-    <div class="trajectory-filters" role="tablist" aria-label="轨迹筛选">
+    <div class="trajectory-filters" role="tablist" :aria-label="t('trajectory.filter')">
       <button
         v-for="item in TRAJECTORY_FILTERS"
         :key="item.id"
@@ -114,7 +208,7 @@ watch(filter, () => scrollToTail(true))
 
     <div ref="scroller" class="trajectory-ledger" @scroll="onScroll">
       <p v-if="!entries.length" class="trajectory-empty">
-        Agent 运行后，工具调用、思考过程与上下文注入会显示在这里。
+        {{ t('trajectory.empty') }}
       </p>
 
       <section v-for="[turn, turnEntries] in grouped" :key="turn" class="turn-group">
@@ -133,8 +227,8 @@ watch(filter, () => scrollToTail(true))
             <span class="ledger-copy">
               <span class="ledger-label">
                 {{ entry.label }}
-                <i v-if="entry.block.status === 'streaming'" class="ledger-live">进行中</i>
-                <i v-else-if="entry.block.status === 'error'" class="ledger-live error">失败</i>
+                <i v-if="entry.block.status === 'streaming'" class="ledger-live">{{ t('trajectory.running') }}</i>
+                <i v-else-if="entry.block.status === 'error'" class="ledger-live error">{{ t('trajectory.failed') }}</i>
               </span>
               <span v-if="entry.subtitle" class="ledger-sub">{{ entry.subtitle }}</span>
             </span>
@@ -183,6 +277,81 @@ watch(filter, () => scrollToTail(true))
   background: var(--code-bg);
   padding: 1px 6px;
   border-radius: 999px;
+}
+.active-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: var(--border-width) solid var(--border);
+  flex-shrink: 0;
+  background: color-mix(in srgb, var(--primary-soft, #f59e0b22) 40%, transparent);
+}
+.active-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.active-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.active-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  color: inherit;
+  padding: 8px 8px 8px 10px;
+  cursor: pointer;
+  text-align: left;
+}
+.active-row.current {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+}
+.active-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary);
+  flex-shrink: 0;
+}
+.active-dot[data-status='queued'] {
+  background: var(--text-muted);
+}
+.active-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.active-copy strong {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.active-copy small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.active-cancel {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+}
+.active-cancel:hover {
+  color: var(--danger, #f87171);
+  background: color-mix(in srgb, var(--danger, #f87171) 12%, transparent);
 }
 .trajectory-filters {
   display: flex;

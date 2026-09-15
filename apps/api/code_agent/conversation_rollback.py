@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from fastapi import HTTPException
 
 from code_agent.db.models import Conversation, Message, Run, RunEvent, Workspace
 from code_agent.policy.engine import is_protected
-from code_agent.routers.workspaces import _delete_entry_fs, _write_text_file
 from code_agent.streaming.run_manager import cancel_run
-from code_agent.tools.paths import resolve_in_workspace
-from code_agent.async_io import run_sync
 
 
 @dataclass
@@ -62,7 +60,7 @@ async def rollback_conversation_to_message(conversation_id: str, message_id: str
             await cancel_run(str(run.id))
 
     file_ops = _collect_file_changes(trailing)
-    reverted_paths, warnings = await _revert_file_changes(ws.root_path, file_ops)
+    reverted_paths, warnings = await _revert_file_changes(ws, file_ops)
 
     trailing_ids = [m.id for m in trailing]
     if trailing_run_ids:
@@ -156,39 +154,61 @@ def _collect_file_changes(messages: list[Message]) -> list[FileChange]:
     return ops
 
 
-async def _revert_file_changes(root_path: str, ops: list[FileChange]) -> tuple[list[str], list[str]]:
+async def _revert_file_changes(workspace: Workspace | str, ops: list[FileChange]) -> tuple[list[str], list[str]]:
+    from code_agent.workspace.backend import get_workspace_backend
+    from code_agent.workspace.local import LocalWorkspaceBackend
+
     reverted: list[str] = []
     warnings: list[str] = []
     seen: set[str] = set()
 
-    for op in ops:
-        if op.path in seen:
-            continue
-        seen.add(op.path)
+    if isinstance(workspace, str):
 
-        if is_protected(op.path):
-            warnings.append(f"跳过受保护文件: {op.path}")
-            continue
+        class _Shim:
+            id = None
+            root_path = workspace
+            kind = "local"
+            ignore_globs: list[Any] = []
 
-        try:
-            file_path = resolve_in_workspace(root_path, op.path)
-        except Exception:
-            warnings.append(f"无法解析路径: {op.path}")
-            continue
+        ws_obj: Any = _Shim()
+    else:
+        ws_obj = workspace
 
-        created = op.action == "create" or (op.block_type == "file.diff" and not op.before and bool(op.after))
-        try:
-            if op.block_type == "file.delete" or op.action == "delete":
-                await run_sync(_write_text_file, file_path, op.before)
-                reverted.append(op.path)
-            elif created:
-                if file_path.exists():
-                    await run_sync(_delete_entry_fs, file_path)
-                reverted.append(op.path)
-            else:
-                await run_sync(_write_text_file, file_path, op.before)
-                reverted.append(op.path)
-        except Exception as exc:
-            warnings.append(f"恢复失败 {op.path}: {exc}")
+    try:
+        fs = await get_workspace_backend(ws_obj)
+    except Exception:
+        fs = LocalWorkspaceBackend(ws_obj)
+
+    try:
+        for op in ops:
+            if op.path in seen:
+                continue
+            seen.add(op.path)
+
+            if is_protected(op.path):
+                warnings.append(f"跳过受保护文件: {op.path}")
+                continue
+
+            created = op.action == "create" or (op.block_type == "file.diff" and not op.before and bool(op.after))
+            try:
+                if op.block_type == "file.delete" or op.action == "delete":
+                    await fs.write_text(op.path, op.before)
+                    reverted.append(op.path)
+                elif created:
+                    if await fs.exists(op.path):
+                        await fs.delete(op.path)
+                    reverted.append(op.path)
+                else:
+                    await fs.write_text(op.path, op.before)
+                    reverted.append(op.path)
+            except Exception as exc:
+                warnings.append(f"恢复失败 {op.path}: {exc}")
+    finally:
+        close = getattr(fs, "close", None)
+        if close:
+            try:
+                await close()
+            except Exception:
+                pass
 
     return reverted, warnings

@@ -19,6 +19,7 @@ _CLEAR_ON_EMPTY = frozenset(
         "storage.postgres_url",
         "storage.redis_url",
         "storage.checkpoint_postgres_url",
+        "server.access_password",
     }
 )
 
@@ -31,6 +32,7 @@ def _clear_live_setting(key: str) -> None:
 async def get_settings():
     from code_agent.runtime.profile import runtime_public
     from code_agent.storage.backends import storage_public
+    from code_agent.middleware.access_password import access_password_enabled
 
     stored = {s.key: s.value_json for s in await Setting.all()}
     values = {}
@@ -41,9 +43,19 @@ async def get_settings():
             values[key] = settings.get(key)
         else:
             values[key] = spec.get("default")
+    # Never leak the access password; only signal whether a password is stored.
+    raw_pw = stored.get("server.access_password")
+    if raw_pw is None:
+        raw_pw = settings.get("server.access_password")
+    password_set = bool(str(raw_pw or "").strip())
+    values["server.access_password"] = ""
+    if "server.access_password_enabled" not in values or values.get("server.access_password_enabled") is None:
+        values["server.access_password_enabled"] = False
     return {
         "schema": SETTINGS_SCHEMA,
         "values": values,
+        "access_password_set": password_set,
+        "access_password_enabled": access_password_enabled(),
         "config": settings.raw(),
         "runtime": runtime_public(),
         "storage": storage_public(),
@@ -53,11 +65,33 @@ async def get_settings():
 
 @router.patch("/settings")
 async def patch_settings(body: dict[str, Any]):
+    from code_agent.middleware.access_password import access_password_plain, store_access_password
+    from code_agent.streaming.run_capacity import reset_run_slots
+
     storage_patch: dict[str, Any] = {}
     uploads_patch: dict[str, Any] = {}
+
+    # Reject enabling the gate without a password (existing or newly provided).
+    if body.get("server.access_password_enabled") is True:
+        incoming_pw = body.get("server.access_password")
+        has_new = isinstance(incoming_pw, str) and incoming_pw.strip() and incoming_pw.strip() not in {"********", "****"}
+        if not has_new and not access_password_plain():
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "auth.password_required", "message": "启用访问口令前请先设置口令"},
+            )
+
     for key, value in body.items():
         if key not in SETTINGS_SCHEMA["properties"]:
             continue
+
+        if key == "server.access_password":
+            # Empty / placeholder means clear; non-empty stores encrypted.
+            text = "" if value is None else str(value)
+            if text in {"", "********", "****"}:
+                value = ""
+            else:
+                value = store_access_password(text)
 
         clear = key in _CLEAR_ON_EMPTY and (value is None or value == "")
         if clear:
@@ -84,6 +118,8 @@ async def patch_settings(body: dict[str, Any]):
             storage_patch[parts[1]] = value
         if key in UPLOADS_SETTING_KEYS and len(parts) == 2:
             uploads_patch[parts[1]] = value
+        if key == "agent.max_concurrent_runs":
+            reset_run_slots()
     if storage_patch:
         merge_user_config("storage", storage_patch)
     if uploads_patch:

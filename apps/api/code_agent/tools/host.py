@@ -408,9 +408,11 @@ async def _launch_in_terminal(command: str, cwd: str = ".", *, tool: str = "run_
 async def run_in_terminal(command: str, cwd: str = ".") -> str:
     """Start a long-running command in a new interactive Terminal tab (dev servers, watchers).
 
-    Use for npm/pnpm/yarn/bun run dev|start, vite, next dev, uvicorn, etc.
-    Do not use run_command / background (&, nohup) for these — they belong in the Terminal panel.
-    Short one-shot commands should still use run_command.
+    YOU decide: if the process should keep running (dev/start/serve, vite/next/uvicorn,
+    watchers, `docker compose up` without -d), call this tool — including compounds like
+    `cd backend && npm run dev` or `cd apps/web && pnpm start`.
+    Do not use run_command / background (&, nohup) for these.
+    Short one-shot commands that exit should use run_command instead.
     """
     return await _launch_in_terminal(command, cwd, tool="run_in_terminal")
 
@@ -419,8 +421,8 @@ async def run_in_terminal(command: str, cwd: str = ".") -> str:
 async def run_command(command: str, cwd: str = ".") -> str:
     """Run a short shell command and capture output. cwd may be workspace-relative or absolute (incl. ~).
 
-    For long-lived servers (npm run dev, vite, next dev, uvicorn, …) prefer run_in_terminal,
-    or this tool will auto-launch them in the Terminal panel instead of a timed subprocess.
+    Prefer run_in_terminal yourself for long-lived servers/watchers (including `cd … && npm run dev`).
+    As a safety net, obvious long-lived patterns may still be auto-launched in the Terminal panel.
     """
     from code_agent.tools.long_lived import is_long_lived_command
 
@@ -476,6 +478,7 @@ async def load_skill(name: str) -> str:
     """Load the full SKILL.md body for a skill. Call when the task matches a listed skill."""
     from code_agent.db.models import Workspace
     from code_agent.skills.registry import ensure_skills_ready, load_skill_body
+    from code_agent.agent.context_debug import append_skill_loaded
 
     ctx = get_workspace()
     ws = None
@@ -487,7 +490,23 @@ async def load_skill(name: str) -> str:
     body = load_skill_body(ws or ctx.get("root_path"), name)
     if not body:
         return f"ERROR: skill not found: {name}"
-    await _emit("skill.activated", {"name": name}, body[:500])
+    meta = {
+        "name": name,
+        "source": "load_skill",
+        "reason": "Agent called load_skill; body returned as a tool result (not re-injected into system prompt).",
+    }
+    await _emit("skill.activated", meta, body[:500])
+    run_id = get_run_id()
+    if run_id:
+        await append_skill_loaded(
+            str(run_id),
+            {
+                "name": name,
+                "source": "load_skill",
+                "reason": meta["reason"],
+                "chars": len(body),
+            },
+        )
     return body
 
 
