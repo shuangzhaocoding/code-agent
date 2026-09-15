@@ -20,12 +20,13 @@ export function extractApiDetail(detail: unknown): { code?: string; message?: st
     body = (body as { detail: unknown }).detail
   }
   if (typeof body === 'string') {
+    const text = body
     try {
-      const nested = JSON.parse(body) as unknown
+      const nested = JSON.parse(text) as unknown
       if (nested && typeof nested === 'object') body = nested
-      else return { message: body, raw: body }
+      else return { message: text, raw: text }
     } catch {
-      return { message: body, raw: body }
+      return { message: text, raw: text }
     }
   }
   if (body && typeof body === 'object') {

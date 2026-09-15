@@ -710,7 +710,7 @@ export const useDebugStore = defineStore('debug', () => {
   async function restart(id?: string) {
     const sid = id || activeSessionId.value
     const sess = getSession(sid)
-    if (!sess?.lastStartOpts) return
+    if (!sid || !sess?.lastStartOpts) return
     const opts = { ...sess.lastStartOpts }
     await callControl('stop', sid)
     await start(opts)
@@ -798,7 +798,7 @@ export const useDebugStore = defineStore('debug', () => {
   async function evaluate(expression: string, context = 'repl', id?: string) {
     const sid = id || activeSessionId.value
     const sess = getSession(sid)
-    if (!sess || !expression.trim()) return
+    if (!sid || !sess || !expression.trim()) return
     patchSession(sid, {
       consoleLines: [...sess.consoleLines, { text: expression, kind: 'in' }],
     })
@@ -836,7 +836,7 @@ export const useDebugStore = defineStore('debug', () => {
   ): Promise<{ ok: true; value?: string } | { ok: false; error: string }> {
     const sid = id || activeSessionId.value
     const sess = getSession(sid)
-    if (!sess || sess.state !== 'paused' || !variablesReference || !name) {
+    if (!sid || !sess || sess.state !== 'paused' || !variablesReference || !name) {
       return { ok: false, error: t('debug.setValueNeedPause') }
     }
     try {

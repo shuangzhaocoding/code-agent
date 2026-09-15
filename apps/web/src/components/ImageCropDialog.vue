@@ -27,7 +27,6 @@ const PRESETS = {
   pet: { aspect: 1, outW: 384, outH: 384, labelKey: 'desktopDecor.crop.petSize' },
 } as const
 
-const stageRef = ref<HTMLDivElement | null>(null)
 const imgNatural = ref({ w: 0, h: 0 })
 const objectUrl = ref('')
 const ownsObjectUrl = ref(false)
@@ -301,7 +300,6 @@ onBeforeUnmount(revoke)
 
         <div class="crop-body">
           <div
-            ref="stageRef"
             class="crop-frame"
             :style="frameStyle"
             @wheel.prevent="onWheel"

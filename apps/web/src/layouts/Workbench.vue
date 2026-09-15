@@ -234,10 +234,6 @@ function openSkills() {
   openPanel('skills', 'skills', panelTitle('skills'))
 }
 
-function openDebug() {
-  openPanel('debug', 'debug', panelTitle('debug'))
-}
-
 function onOpenPanelEvent(e: Event) {
   const id = (e as CustomEvent<{ id?: string }>).detail?.id
   if (!id) return
