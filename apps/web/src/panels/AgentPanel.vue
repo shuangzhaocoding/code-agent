@@ -19,7 +19,7 @@ import RunReviewActions from '@/components/RunReviewActions.vue'
 import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
 import TodoBlock from '@/renderers/TodoBlock.vue'
-import { scrollToTop } from '@/utils/smoothScroll'
+import { animateScrollTo, cancelSmoothScroll, scrollToTop } from '@/utils/smoothScroll'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
 import { useContextUsagePreview } from '@/composables/useContextUsagePreview'
@@ -979,12 +979,22 @@ function pauseFollow() {
     cancelAnimationFrame(pinRaf)
     pinRaf = 0
   }
+  const el = scroller.value
+  if (el) cancelSmoothScroll(el)
+}
+
+function endScrollTop(el: HTMLElement) {
+  return Math.max(0, el.scrollHeight - el.clientHeight)
 }
 
 function applyScrollTop(el: HTMLElement, behavior: ScrollBehavior) {
-  const top = Math.max(0, el.scrollHeight - el.clientHeight)
-  if (behavior === 'auto') el.scrollTop = top
-  else el.scrollTo({ top, behavior })
+  const top = endScrollTop(el)
+  if (behavior === 'auto') {
+    cancelSmoothScroll(el)
+    el.scrollTop = top
+    return
+  }
+  void animateScrollTo(el, top)
 }
 
 /** Programmatic stick scroll; keeps locking so onScroll does not pause follow. */
@@ -993,12 +1003,18 @@ function stickScrollNow(behavior: ScrollBehavior = 'auto') {
   if (!forcePinning.value && performance.now() < userDetachUntil) return
   const el = scroller.value
   if (!el) return
-  const top = Math.max(0, el.scrollHeight - el.clientHeight)
+  const top = endScrollTop(el)
   if (behavior === 'auto' && !forcePinning.value && Math.abs(el.scrollTop - top) < 2) return
   locking = true
-  applyScrollTop(el, behavior)
-  requestAnimationFrame(() => {
-    // Do not drop the pin lock while forcePinning owns the session.
+  if (behavior === 'auto') {
+    cancelSmoothScroll(el)
+    el.scrollTop = top
+    requestAnimationFrame(() => {
+      if (!forcePinning.value) locking = false
+    })
+    return
+  }
+  void animateScrollTo(el, top).then(() => {
     if (!forcePinning.value) locking = false
   })
 }
@@ -1009,13 +1025,35 @@ function jumpToEnd(behavior: ScrollBehavior = 'auto') {
 
 function scrollToEnd() {
   if (!stick.value) return
-  // Prefer instant pin: smooth + growing content causes bounce.
+  // Instant pin while content may still be mounting; jump button uses smooth.
   jumpToEnd('auto')
 }
 
-function resumeStickScroll() {
+/** Jump-to-bottom button: ease down, then hard-pin if layout still grew. */
+async function resumeStickScroll() {
   userDetachUntil = 0
-  void pinToBottom()
+  stick.value = true
+  followGen += 1
+  const token = followGen
+  const el = scroller.value
+  if (!el) {
+    void pinToBottom()
+    return
+  }
+  locking = true
+  forcePinning.value = true
+  await animateScrollTo(el, endScrollTop(el))
+  if (token !== followGen) return
+  // Content may have grown during the animation (live stream).
+  if (distanceToBottom(el) > 8) {
+    locking = false
+    forcePinning.value = false
+    await pinToBottom()
+    return
+  }
+  locking = false
+  forcePinning.value = false
+  stick.value = true
 }
 
 function onScroll() {
@@ -1104,6 +1142,8 @@ async function pinToBottom() {
   userDetachUntil = 0
   forcePinning.value = true
   locking = true
+  const el0 = scroller.value
+  if (el0) cancelSmoothScroll(el0)
 
   try {
     await waitForScrollerReady()

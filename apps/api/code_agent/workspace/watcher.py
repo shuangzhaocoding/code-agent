@@ -4,14 +4,15 @@ Local workspaces use ``watchfiles`` (inotify/FSEvents/ReadDirectoryChanges).
 
 SSH workspaces (in order):
 1. Remote ``inotifywait`` when available (true remote watch, like VS Code remote).
-2. Otherwise poll a filesystem mtime fingerprint (does **not** require git).
-   Git status is included in the fingerprint when the remote is a repo, so Git
-   marks also refresh; non-git workspaces still detect create/modify/delete.
+2. If missing, try to install ``inotify-tools`` non-interactively on the host.
+3. Otherwise poll a filesystem mtime fingerprint (does **not** require git) and
+   surface an install hint to the UI.
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import shlex
@@ -50,9 +51,132 @@ _WATCH_EXTRA_IGNORES = [
 _DEBOUNCE_MS = 400
 _SSH_POLL_SEC = 8.0
 _SSH_INOTIFY_DEBOUNCE_SEC = 0.45
+_SSH_INSTALL_TIMEOUT_SEC = 240
 _MAX_PATHS_PER_EVENT = 40
 _SSH_FIND_MAXDEPTH = 4
 _SSH_FIND_MAX_LINES = 8000
+
+# Multi-strategy install: try every common package manager, as root and with
+# passwordless ``sudo -n``. Password prompts are never used (would hang SSH).
+_SSH_INSTALL_INOTIFY_SCRIPT = r"""
+set +e
+if command -v inotifywait >/dev/null 2>&1; then
+  echo OK_ALREADY
+  exit 0
+fi
+os=$(uname -s 2>/dev/null || echo unknown)
+case "$os" in
+  Linux|linux) ;;
+  *)
+    echo "UNSUPPORTED_OS:$os"
+    exit 2
+    ;;
+esac
+
+run_as_admin() {
+  # 1) already root
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return $?
+  fi
+  # 2) plain command (some images allow apt without sudo for the login user)
+  "$@"
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    return 0
+  fi
+  # 3) passwordless sudo
+  if command -v sudo >/dev/null 2>&1; then
+    sudo -n "$@"
+    return $?
+  fi
+  return $rc
+}
+
+try_cmd() {
+  label="$1"
+  shift
+  echo "TRY:$label"
+  run_as_admin "$@"
+  rc=$?
+  if command -v inotifywait >/dev/null 2>&1; then
+    echo "OK:$label"
+    exit 0
+  fi
+  echo "FAIL:$label:rc=$rc"
+  return $rc
+}
+
+# apt / apt-get
+if command -v apt-get >/dev/null 2>&1 || command -v apt >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  APT_BIN=$(command -v apt-get || command -v apt)
+  try_cmd apt-update-install bash -c "$APT_BIN update -qq && $APT_BIN install -y -qq inotify-tools"
+  try_cmd apt-install bash -c "$APT_BIN install -y -qq inotify-tools"
+  try_cmd apt-install-verbose bash -c "$APT_BIN install -y inotify-tools"
+fi
+
+# dnf / microdnf / yum
+if command -v dnf >/dev/null 2>&1; then
+  try_cmd dnf-install dnf install -y inotify-tools
+fi
+if command -v microdnf >/dev/null 2>&1; then
+  try_cmd microdnf-install microdnf install -y inotify-tools
+fi
+if command -v yum >/dev/null 2>&1; then
+  try_cmd yum-install yum install -y inotify-tools
+fi
+
+# Alpine
+if command -v apk >/dev/null 2>&1; then
+  try_cmd apk-install apk add --no-cache inotify-tools
+  try_cmd apk-install-update bash -c "apk update && apk add --no-cache inotify-tools"
+fi
+
+# Arch
+if command -v pacman >/dev/null 2>&1; then
+  try_cmd pacman-install pacman -Sy --noconfirm inotify-tools
+fi
+
+# openSUSE
+if command -v zypper >/dev/null 2>&1; then
+  try_cmd zypper-install zypper --non-interactive install -y inotify-tools
+fi
+
+# Extra: some distros ship the binary under a different package name path after
+# a partial install — rehash and recheck.
+hash -r 2>/dev/null
+if command -v inotifywait >/dev/null 2>&1; then
+  echo OK_INSTALLED
+  exit 0
+fi
+
+echo INSTALL_FAILED
+echo HINT:need_root_or_passwordless_sudo
+exit 1
+""".strip()
+
+# Fallback one-liners if the bundled script cannot run (no bash / no base64).
+_SSH_INSTALL_FALLBACK_CMDS: tuple[str, ...] = (
+    "DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq inotify-tools",
+    "DEBIAN_FRONTEND=noninteractive sudo -n apt-get update -qq && DEBIAN_FRONTEND=noninteractive sudo -n apt-get install -y -qq inotify-tools",
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y inotify-tools",
+    "DEBIAN_FRONTEND=noninteractive sudo -n apt-get install -y inotify-tools",
+    "DEBIAN_FRONTEND=noninteractive apt install -y inotify-tools",
+    "DEBIAN_FRONTEND=noninteractive sudo -n apt install -y inotify-tools",
+    "dnf install -y inotify-tools",
+    "sudo -n dnf install -y inotify-tools",
+    "microdnf install -y inotify-tools",
+    "sudo -n microdnf install -y inotify-tools",
+    "yum install -y inotify-tools",
+    "sudo -n yum install -y inotify-tools",
+    "apk add --no-cache inotify-tools",
+    "sudo -n apk add --no-cache inotify-tools",
+    "pacman -Sy --noconfirm inotify-tools",
+    "sudo -n pacman -Sy --noconfirm inotify-tools",
+    "zypper --non-interactive install -y inotify-tools",
+    "sudo -n zypper --non-interactive install -y inotify-tools",
+)
 
 _PRUNE_EXPR = " -o ".join(
     f"-name {shlex.quote(n)}"
@@ -90,6 +214,7 @@ class _WorkspaceWatch:
     task: asyncio.Task | None = None
     stop: asyncio.Event = field(default_factory=asyncio.Event)
     mode: str = "watch"
+    ready_extra: dict[str, Any] = field(default_factory=dict)
 
     def subscriber_count(self) -> int:
         return len(self.queues)
@@ -126,7 +251,12 @@ class WorkspaceWatchHub:
                 "type": "fs.ready",
                 "workspace_id": str(ws.id),
                 "mode": entry.mode,
+                **entry.ready_extra,
             }
+            # Late subscribers while poll is running: ask poll loop to re-check inotify
+            # (user may have installed tools after the first failed attempt).
+            if entry.is_ssh and entry.mode == "ssh-poll" and entry.task and not entry.task.done():
+                entry.ready_extra["reprobe_inotify"] = True
             while True:
                 event = await queue.get()
                 yield event
@@ -169,6 +299,22 @@ class WorkspaceWatchHub:
         for q in dead:
             if q in entry.queues:
                 entry.queues.remove(q)
+
+    def _emit_ready(self, entry: _WorkspaceWatch, **extra: Any) -> None:
+        merged = {**entry.ready_extra}
+        for key, value in extra.items():
+            if value is not None:
+                merged[key] = value
+        entry.ready_extra = merged
+        self._broadcast(
+            entry,
+            {
+                "type": "fs.ready",
+                "workspace_id": entry.workspace_id,
+                "mode": entry.mode,
+                **entry.ready_extra,
+            },
+        )
 
     async def _run_watch(self, entry: _WorkspaceWatch) -> None:
         try:
@@ -266,15 +412,128 @@ class WorkspaceWatchHub:
         )
 
     async def _watch_ssh(self, entry: _WorkspaceWatch) -> None:
-        """Prefer remote inotifywait; else poll FS mtime fingerprint (+ git if present)."""
-        if await self._ssh_try_inotify(entry):
+        """Prefer remote inotifywait (install if needed); else poll and keep re-probing."""
+        while not entry.stop.is_set():
+            if await self._ssh_try_inotify(entry):
+                # Stream ended (process exit / network). Retry instead of dying silent.
+                try:
+                    await asyncio.wait_for(entry.stop.wait(), timeout=2.0)
+                except TimeoutError:
+                    pass
+                continue
+
+            entry.mode = "ssh-poll"
+            self._emit_ready(
+                entry,
+                reason="inotify_unavailable",
+                hint_code="install_inotify_tools",
+                install_attempted=bool(entry.ready_extra.get("install_attempted")),
+                install_ok=False,
+            )
+            # Returns when stop set, or when inotify became available (upgrade).
+            upgraded = await self._watch_ssh_poll(entry)
+            if entry.stop.is_set():
+                return
+            if upgraded:
+                # Clear stale hint before switching to realtime watch.
+                entry.ready_extra.pop("hint_code", None)
+                entry.ready_extra.pop("reason", None)
+                continue
             return
-        entry.mode = "ssh-poll"
+
+    async def _ssh_has_inotifywait(self, backend: Any) -> bool:
+        # Non-login SSH shells often have a slim PATH — check common locations too.
+        code, which_out, _ = await backend.run_command(
+            "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH\"; "
+            "(command -v inotifywait) || "
+            "(test -x /usr/bin/inotifywait && echo /usr/bin/inotifywait) || "
+            "(test -x /usr/local/bin/inotifywait && echo /usr/local/bin/inotifywait)",
+            cwd=".",
+            timeout=10,
+        )
+        return code == 0 and bool((which_out or "").strip())
+
+    async def _ssh_probe_inotify_available(self, entry: _WorkspaceWatch) -> bool:
+        """Lightweight check (no install) used while polling."""
+        ws = await Workspace.get_or_none(id=entry.workspace_id)
+        if ws is None:
+            return False
+        backend = await get_workspace_backend(ws)
+        try:
+            return await self._ssh_has_inotifywait(backend)
+        except Exception:
+            return False
+        finally:
+            try:
+                await backend.close()
+            except Exception:
+                pass
+
+    async def _ssh_ensure_inotifywait(self, entry: _WorkspaceWatch, backend: Any) -> bool:
+        """Return True if inotifywait is available (already present or after install)."""
+        if await self._ssh_has_inotifywait(backend):
+            return True
+
         self._broadcast(
             entry,
-            {"type": "fs.ready", "workspace_id": entry.workspace_id, "mode": entry.mode},
+            {
+                "type": "fs.progress",
+                "workspace_id": entry.workspace_id,
+                "phase": "installing_inotify",
+            },
         )
-        await self._watch_ssh_poll(entry)
+        entry.ready_extra["install_attempted"] = True
+        logger.info("SSH ws=%s: inotifywait missing, attempting install", entry.workspace_id)
+
+        details: list[str] = []
+
+        # Prefer base64|bash so newlines survive asyncssh wrapping.
+        b64 = base64.b64encode(_SSH_INSTALL_INOTIFY_SCRIPT.encode("utf-8")).decode("ascii")
+        primary = f"printf '%s' {shlex.quote(b64)} | base64 -d | bash"
+        try:
+            code, out, err = await backend.run_command(
+                primary, cwd=".", timeout=_SSH_INSTALL_TIMEOUT_SEC
+            )
+            details.append(f"script:exit={code}\n{(out or '')}\n{(err or '')}".strip())
+        except Exception as exc:
+            details.append(f"script:exc={exc}")
+            code, out, err = 1, "", str(exc)
+
+        if await self._ssh_has_inotifywait(backend):
+            logger.info("SSH ws=%s: inotify-tools installed via script", entry.workspace_id)
+            entry.ready_extra["install_ok"] = True
+            entry.ready_extra["install_detail"] = details[-1][-400:]
+            return True
+
+        # Fallback: try discrete package-manager one-liners.
+        for idx, cmd in enumerate(_SSH_INSTALL_FALLBACK_CMDS):
+            if entry.stop.is_set():
+                break
+            try:
+                code, out, err = await backend.run_command(cmd, cwd=".", timeout=90)
+                details.append(
+                    f"fallback[{idx}]:exit={code} cmd={cmd[:80]}\n{(out or '')[-120:]}\n{(err or '')[-120:]}".strip()
+                )
+            except Exception as exc:
+                details.append(f"fallback[{idx}]:exc={exc}")
+                continue
+            if await self._ssh_has_inotifywait(backend):
+                logger.info(
+                    "SSH ws=%s: inotify-tools installed via fallback[%s]",
+                    entry.workspace_id,
+                    idx,
+                )
+                entry.ready_extra["install_ok"] = True
+                entry.ready_extra["install_detail"] = details[-1][-400:]
+                return True
+
+        entry.ready_extra["install_detail"] = "\n---\n".join(details)[-800:]
+        logger.warning(
+            "SSH ws=%s: inotify install failed after %s attempts",
+            entry.workspace_id,
+            1 + len(_SSH_INSTALL_FALLBACK_CMDS),
+        )
+        return False
 
     async def _ssh_try_inotify(self, entry: _WorkspaceWatch) -> bool:
         """Stream remote inotifywait events. Returns False if unavailable."""
@@ -283,17 +542,30 @@ class WorkspaceWatchHub:
             return False
         backend = await get_workspace_backend(ws)
         try:
-            code, which_out, _ = await backend.run_command(
-                "command -v inotifywait", cwd=".", timeout=10
-            )
-            if code != 0 or not (which_out or "").strip():
+            if not await self._ssh_ensure_inotifywait(entry, backend):
+                try:
+                    await backend.close()
+                except Exception:
+                    pass
                 return False
+
+            # Use absolute path when possible — remote PATH may omit /usr/bin.
+            code, which_out, _ = await backend.run_command(
+                "export PATH=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH\"; "
+                "command -v inotifywait || true",
+                cwd=".",
+                timeout=10,
+            )
+            inotify_bin = (which_out or "").strip().splitlines()[-1].strip() if which_out else ""
+            if not inotify_bin:
+                inotify_bin = "inotifywait"
 
             # Exclude heavy / VCS dirs; still notice project file changes.
             exclude = r"(/\.(git|venv|idea|vscode|mypy_cache|pytest_cache|ruff_cache|tox|nox|next|nuxt|turbo)|/(node_modules|__pycache__|venv|dist|build|coverage)/)"
             root_q = shlex.quote(entry.root_path)
+            bin_q = shlex.quote(inotify_bin)
             cmd = (
-                f"cd {root_q} && inotifywait -mrq "
+                f"cd {root_q} && {bin_q} -mrq "
                 f"-e modify,create,delete,move,attrib "
                 f"--exclude {shlex.quote(exclude)} "
                 f"--format '%w%f' ."
@@ -308,9 +580,15 @@ class WorkspaceWatchHub:
             return False
 
         entry.mode = "ssh-watch"
-        self._broadcast(
+        # Drop poll hint so reconnecting clients stop showing the install toast.
+        entry.ready_extra.pop("hint_code", None)
+        entry.ready_extra.pop("reason", None)
+        self._emit_ready(
             entry,
-            {"type": "fs.ready", "workspace_id": entry.workspace_id, "mode": entry.mode},
+            install_attempted=bool(entry.ready_extra.get("install_attempted")),
+            install_ok=bool(
+                entry.ready_extra.get("install_ok", not entry.ready_extra.get("install_attempted"))
+            ),
         )
 
         pending: dict[str, str] = {}
@@ -368,9 +646,22 @@ class WorkspaceWatchHub:
                 pass
         return True
 
-    async def _watch_ssh_poll(self, entry: _WorkspaceWatch) -> None:
+    async def _watch_ssh_poll(self, entry: _WorkspaceWatch) -> bool:
+        """Poll until stopped. Returns True if inotifywait appeared and we should upgrade."""
         last_fp: str | None = None
+        ticks = 0
         while not entry.stop.is_set():
+            ticks += 1
+            # First tick + every ~24s, or when a new SSE subscriber asks for a re-probe.
+            force = bool(entry.ready_extra.pop("reprobe_inotify", False))
+            if force or ticks == 1 or ticks % 3 == 0:
+                if await self._ssh_probe_inotify_available(entry):
+                    logger.info(
+                        "SSH ws=%s: inotifywait detected while polling — upgrading",
+                        entry.workspace_id,
+                    )
+                    return True
+
             fp = await self._ssh_fingerprint(entry.workspace_id, entry.root_path)
             if fp is not None and fp != last_fp:
                 if last_fp is not None:
@@ -380,6 +671,7 @@ class WorkspaceWatchHub:
                 await asyncio.wait_for(entry.stop.wait(), timeout=_SSH_POLL_SEC)
             except TimeoutError:
                 continue
+        return False
 
     async def _ssh_fingerprint(self, workspace_id: str, root_path: str) -> str | None:
         """Hash remote tree mtimes (+ git status when available). Works without git."""

@@ -177,6 +177,10 @@ export type WorkspaceFsEvent = {
   reason?: string
   mode?: string
   message?: string
+  hint_code?: string
+  install_attempted?: boolean
+  install_ok?: boolean
+  phase?: string
 }
 
 /** Subscribe to workspace filesystem change events (local watch / SSH poll). */

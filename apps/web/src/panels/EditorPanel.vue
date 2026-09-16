@@ -20,6 +20,7 @@ import { api } from '@/api/http'
 import { useToast } from '@/composables/useToast'
 import { t } from '@/i18n'
 import { decorGlassHex } from '@/utils/desktopDecor'
+import { installMonacoFindHoverGuard, uninstallMonacoFindHoverGuard } from '@/utils/monacoFindHoverGuard'
 import { useDebugStore } from '@/stores/debug'
 
 const store = useAppStore()
@@ -1610,6 +1611,7 @@ onMounted(async () => {
   }
   if (!host.value) return
   applyEditorTheme()
+  installMonacoFindHoverGuard()
   editor = monacoMod.editor.create(host.value, {
     value: '',
     language: 'plaintext',
@@ -1824,6 +1826,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  uninstallMonacoFindHoverGuard()
   host.value?.removeEventListener('copy', onEditorCopy)
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('ca-wallpaper', onTheme as EventListener)

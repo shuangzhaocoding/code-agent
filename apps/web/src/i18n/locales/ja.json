@@ -197,6 +197,7 @@
     "sshPathPlaceholder": "リモートパス",
     "sshConnect": "接続して参照",
     "sshBrowse": "リモートフォルダー",
+    "sshInotifyMissing": "リモートに inotify-tools がありません（自動インストール失敗：root またはパスワードなし sudo が必要なことが多い）。ファイルツリーはポーリング中です。SSH ホストで実行:\nsudo apt-get install -y inotify-tools\nsudo dnf install -y inotify-tools\nsudo apk add inotify-tools",
     "switching": "ワークスペースを切り替えています…",
     "panel": {
       "title": "ワークスペース",
@@ -582,6 +583,7 @@
     "toolCount": "ツール {n} 回",
     "fileCount": "ファイル変更 {n}",
     "stepCount": "{n} ステップ",
+    "approvalCount": "{n} 回の確認",
     "planTitle": "タスク一覧",
     "planCount": "{n} 件",
     "needsConfirm": "この操作には確認が必要です",

@@ -76,6 +76,7 @@ function iconFor(kind: string) {
   flex: 1;
   min-width: 0;
   word-break: break-word;
+  white-space: pre-line;
 }
 .app-toast-close {
   flex-shrink: 0;

@@ -1605,6 +1605,39 @@ html[data-theme='light'] .tr-tooltip.placement-top .tr-tooltip-arrow {
   border-top-color: var(--tr-tooltip-bg-color);
 }
 
+/*
+ * Monaco find-widget icon tips (e.g. "Close (Escape)") render in a .context-view
+ * overlay. With HoverStyle.Pointer + hideOnHover the tip often sits on top of the
+ * button: the wrapper keeps pointer-events, so clicks never reach the button and
+ * mouseleave↔show loops flicker forever.
+ *
+ * Disable hit-testing on the whole hover context-view (not just the inner node).
+ * Menus use .context-view with .monaco-menu — leave those alone.
+ */
+.context-view:has(.workbench-hover-container),
+.context-view:has(.monaco-hover.workbench-hover),
+.context-view:has(.monaco-hover.compact),
+.workbench-hover-container,
+.monaco-hover.workbench-hover,
+.monaco-hover.workbench-hover.compact {
+  pointer-events: none !important;
+}
+
+/*
+ * Global `* { box-sizing: border-box }` shrinks Monaco find `.button`s (16px + 3px
+ * padding was designed as content-box → 22px). Close stays at top:5px for that
+ * 22px box, so it drifts off the prev/next baseline.
+ *
+ * `.codicon-find-selection` is already authored as 22×22 with padding under
+ * border-box — keep border-box so it stays the same outer size as the buttons.
+ */
+.monaco-editor .find-widget .button {
+  box-sizing: content-box;
+}
+.monaco-editor .find-widget .codicon-find-selection {
+  box-sizing: border-box;
+}
+
 .app-icon {
   display: block;
   flex-shrink: 0;

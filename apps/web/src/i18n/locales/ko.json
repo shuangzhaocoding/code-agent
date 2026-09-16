@@ -197,6 +197,7 @@
     "sshPathPlaceholder": "원격 경로",
     "sshConnect": "연결 후 탐색",
     "sshBrowse": "원격 폴더",
+    "sshInotifyMissing": "원격에 inotify-tools가 없습니다(자동 설치 실패: 보통 root 또는 비밀번호 없는 sudo 필요). 파일 트리는 폴링 중입니다. SSH 호스트에서 실행:\nsudo apt-get install -y inotify-tools\nsudo dnf install -y inotify-tools\nsudo apk add inotify-tools",
     "switching": "작업 공간 전환 중…",
     "panel": {
       "title": "작업 공간",
@@ -582,6 +583,7 @@
     "toolCount": "도구 {n}회",
     "fileCount": "파일 변경 {n}",
     "stepCount": "{n}단계",
+    "approvalCount": "확인 {n}회",
     "planTitle": "작업 목록",
     "planCount": "{n}개",
     "needsConfirm": "이 작업은 확인이 필요합니다",

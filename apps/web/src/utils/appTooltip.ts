@@ -35,6 +35,14 @@ function findHost(target: EventTarget | null): HTMLElement | null {
   if (SKIP.has(el.tagName)) return null
   if (el.classList.contains('app-tooltip')) return null
   if (el.closest('.tiny-tooltip, .tr-tooltip, .app-tooltip')) return null
+  // Skip Monaco's own hover chrome. Find-widget buttons get a stable title via
+  // monacoFindHoverGuard (Monaco's overlapping tip is suppressed).
+  if (
+    el.hasAttribute('custom-hover') ||
+    el.closest('.monaco-hover, .workbench-hover, .workbench-hover-container, .context-view:has(.monaco-hover)')
+  ) {
+    return null
+  }
   return el
 }
 
@@ -102,7 +110,11 @@ function hide() {
   }, 120)
   if (active) {
     const stored = active.getAttribute('data-app-tooltip')
-    if (stored && !active.getAttribute('title')) active.setAttribute('title', stored)
+    // Restoring title while the pointer is still over the host re-arms the native
+    // tooltip and can flicker against our custom tip / Monaco hovers.
+    if (stored && !active.getAttribute('title') && !active.matches(':hover')) {
+      active.setAttribute('title', stored)
+    }
   }
   active = null
 }

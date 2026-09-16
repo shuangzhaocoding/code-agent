@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { rendererFor } from '@/renderers'
 import type { Block, ChatMessage } from '@/protocol/applyEvent'
 import { matchApprovalHint } from '@/utils/approvals'
@@ -15,8 +16,10 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ toggle: [] }>()
+const { t } = useI18n()
 
 const workExpanded = ref(false)
+const workToggleEl = ref<HTMLElement | null>(null)
 
 const finished = computed(() => !props.streaming)
 
@@ -112,9 +115,14 @@ watch(finished, (done) => {
   if (done) workExpanded.value = false
 })
 
-function toggleWork() {
+async function toggleWork(fromBottom = false) {
+  const collapsing = workExpanded.value
   workExpanded.value = !workExpanded.value
   emit('toggle')
+  if (collapsing && fromBottom) {
+    await nextTick()
+    workToggleEl.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
 }
 
 function summaryLabel(): string {
@@ -137,11 +145,11 @@ function summaryLabel(): string {
     else other += 1
   }
   const parts: string[] = []
-  if (think) parts.push(`${think} 次思考`)
-  if (tools) parts.push(`${tools} 次工具`)
-  if (files) parts.push(`${files} 处变更`)
-  if (approvals) parts.push(`${approvals} 次确认`)
-  if (!parts.length) parts.push(`${blocks.length || other} 步`)
+  if (think) parts.push(t('chat.thinkCount', { n: think }))
+  if (tools) parts.push(t('chat.toolCount', { n: tools }))
+  if (files) parts.push(t('chat.fileCount', { n: files }))
+  if (approvals) parts.push(t('chat.approvalCount', { n: approvals }))
+  if (!parts.length) parts.push(t('chat.stepCount', { n: blocks.length || other }))
   return parts.join(' · ')
 }
 </script>
@@ -150,13 +158,14 @@ function summaryLabel(): string {
   <div class="assistant-body">
     <button
       v-if="showCollapseChrome"
+      ref="workToggleEl"
       type="button"
       class="work-toggle"
       :aria-expanded="workExpanded"
-      @click="toggleWork"
+      @click="toggleWork(false)"
     >
       <AppIcon class="chev" name="chevron-right" :size="12" />
-      <span class="work-label">{{ workExpanded ? '收起工作过程' : '工作过程' }}</span>
+      <span class="work-label">{{ workExpanded ? t('chat.hideWork') : t('chat.workProcess') }}</span>
       <span class="work-meta">{{ summaryLabel() }}</span>
     </button>
     <template v-for="row in visibleRows" :key="row.key">
@@ -170,6 +179,16 @@ function summaryLabel(): string {
       </section>
       <ApprovalInlineHint v-if="row.hint" :block="row.hint" />
     </template>
+    <button
+      v-if="showCollapseChrome && workExpanded"
+      type="button"
+      class="work-toggle work-toggle-bottom"
+      :aria-expanded="true"
+      @click="toggleWork(true)"
+    >
+      <AppIcon class="chev" name="chevron-up" :size="12" />
+      <span class="work-label">{{ t('chat.hideWork') }}</span>
+    </button>
   </div>
 </template>
 
@@ -196,6 +215,9 @@ function summaryLabel(): string {
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
 }
+.work-toggle-bottom {
+  margin: 8px 0 0;
+}
 .work-toggle:hover {
   color: var(--text-secondary);
   background: color-mix(in srgb, var(--text-muted) 10%, transparent);
@@ -206,6 +228,9 @@ function summaryLabel(): string {
 }
 .work-toggle[aria-expanded='true'] .chev {
   transform: rotate(90deg);
+}
+.work-toggle-bottom[aria-expanded='true'] .chev {
+  transform: none;
 }
 .work-label {
   font-weight: 560;

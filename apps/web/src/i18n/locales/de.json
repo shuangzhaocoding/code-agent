@@ -197,6 +197,7 @@
     "sshPathPlaceholder": "Remote-Pfad",
     "sshConnect": "Verbinden & browsen",
     "sshBrowse": "Remote-Ordner",
+    "sshInotifyMissing": "Auf dem Remote-Host fehlen inotify-tools (Auto-Install fehlgeschlagen: meist root oder passwortloses sudo nötig). Dateibaum pollt. Bitte ausführen:\nsudo apt-get install -y inotify-tools\nsudo dnf install -y inotify-tools\nsudo apk add inotify-tools",
     "switching": "Arbeitsbereich wird gewechselt…",
     "panel": {
       "title": "Arbeitsbereiche",
@@ -592,6 +593,7 @@
     "toolCount": "{n} Tools",
     "fileCount": "{n} Dateiänderungen",
     "stepCount": "{n} Schritte",
+    "approvalCount": "{n} Bestätigungen",
     "planTitle": "Aufgabenliste",
     "planCount": "{n} Einträge",
     "needsConfirm": "Diese Aktion muss bestätigt werden",

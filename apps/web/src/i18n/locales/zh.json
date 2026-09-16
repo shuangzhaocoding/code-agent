@@ -222,6 +222,7 @@
     "sshConnect": "连接并浏览",
     "sshBrowse": "远程目录",
     "sshLead": "通过 SSH 连接远程主机并选择目录作为工作空间。",
+    "sshInotifyMissing": "远程主机缺少 inotify-tools（自动安装失败：通常需要 root 或免密 sudo）。文件树暂用轮询。请在 SSH 主机执行其一：\nsudo apt-get install -y inotify-tools\nsudo dnf install -y inotify-tools\nsudo apk add inotify-tools",
     "switching": "正在切换工作空间…",
     "panel": {
       "title": "工作空间",
@@ -821,6 +822,7 @@
     "toolCount": "{n} 次工具",
     "fileCount": "{n} 处变更",
     "stepCount": "{n} 步",
+    "approvalCount": "{n} 次确认",
     "planTitle": "任务列表",
     "planCount": "{n} 项",
     "needsConfirm": "需要确认这次操作",

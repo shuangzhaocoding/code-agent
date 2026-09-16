@@ -42,6 +42,7 @@ const log = ref<GitLog | null>(null)
 const message = ref('')
 const error = ref('')
 const busy = ref(false)
+const refreshing = ref(false)
 const selected = ref<Set<string>>(new Set())
 const tab = ref<'changes' | 'history'>('changes')
 const selectedCommit = ref<GitCommit | null>(null)
@@ -157,8 +158,29 @@ function toggleTreeDir(path: string) {
 
 let pollTimer = 0
 let debounceTimer = 0
+let errorClearTimer = 0
 let inflight = false
 let queued = false
+let spinnerHold = 0
+
+function clearError() {
+  window.clearTimeout(errorClearTimer)
+  errorClearTimer = 0
+  error.value = ''
+}
+
+/** Show a transient error; auto-clears so a one-off failure does not stick forever. */
+function setError(msg: string, ttlMs = 8000) {
+  window.clearTimeout(errorClearTimer)
+  errorClearTimer = 0
+  error.value = msg
+  if (!msg || ttlMs <= 0) return
+  const snapshot = msg
+  errorClearTimer = window.setTimeout(() => {
+    if (error.value === snapshot) error.value = ''
+    errorClearTimer = 0
+  }, ttlMs)
+}
 
 function statusKey(data: GitStatus | null) {
   if (!data) return ''
@@ -183,6 +205,13 @@ async function refreshStatus() {
   if (!store.workspaceId) return
   const prevActive = files.value.find((file) => file.path === activePath.value)
   const data = await api<GitStatus>(`/api/workspaces/${store.workspaceId}/git/status`)
+  // Clear sticky banners even when payload is unchanged (e.g. after a failed poll).
+  if (data?.ok) clearError()
+  else {
+    const msg = notRepoError(data?.error)
+    if (msg) setError(msg, 0)
+    else clearError()
+  }
   if (statusKey(data) === statusKey(status.value)) return
   status.value = data
   const valid = new Set((data.files || []).map((file) => file.path))
@@ -195,8 +224,6 @@ async function refreshStatus() {
   } else if (showPanelDiff.value && activePath.value && fileSig(prevActive) !== fileSig(nextActive)) {
     void loadChangeDiff(activePath.value, true)
   }
-  if (data && !data.ok) error.value = notRepoError(data.error)
-  else error.value = ''
 }
 
 function notRepoError(raw?: string) {
@@ -212,8 +239,13 @@ async function refreshLog() {
   log.value = data
 }
 
-async function refresh(all = false) {
+async function refresh(all = false, manual = false) {
   if (!store.workspaceId) return
+  if (manual) {
+    spinnerHold += 1
+    refreshing.value = true
+    clearError()
+  }
   if (inflight) {
     queued = true
     return
@@ -227,10 +259,18 @@ async function refresh(all = false) {
       if (all || tab.value === 'history') await refreshLog()
     } while (queued)
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    setError(err instanceof Error ? err.message : String(err))
   } finally {
     inflight = false
+    if (spinnerHold > 0) {
+      spinnerHold = 0
+      refreshing.value = false
+    }
   }
+}
+
+function onRefreshClick() {
+  void refresh(true, true)
 }
 
 function scheduleRefresh() {
@@ -294,6 +334,7 @@ onUnmounted(() => {
   window.removeEventListener('ca-git-commit-draft', onCommitDraft as EventListener)
   window.clearInterval(pollTimer)
   window.clearTimeout(debounceTimer)
+  window.clearTimeout(errorClearTimer)
   document.removeEventListener('visibilitychange', onVisibility)
   document.removeEventListener('click', onDocClick)
 })
@@ -463,7 +504,7 @@ async function onCtxSelect(id: string) {
 async function runFileAction(id: string, path: string, kind: 'file' | 'dir' = 'file') {
   if (!store.workspaceId || !path) return
   try {
-    error.value = ''
+    clearError()
     if (id === 'open-changes') {
       const target = firstFileUnder(path, kind)
       if (target) showChange(target, 'panel')
@@ -531,7 +572,7 @@ async function runFileAction(id: string, path: string, kind: 'file' | 'dir' = 'f
       await store.revealInTree(path)
     }
   } catch (err) {
-    error.value = err instanceof Error ? err.message : String(err)
+    setError(err instanceof Error ? err.message : String(err))
   }
 }
 
@@ -562,16 +603,17 @@ async function run(label: string, fn: () => Promise<void>, danger = true) {
   })
   if (!ok) return false
   busy.value = true
-  error.value = ''
+  clearError()
   try {
     await fn()
     await refresh(true)
     return true
   } catch (err) {
-    error.value = gitErrorText(err)
-    if (/overwritten|local changes|uncommitted|would be overwritten|未提交/i.test(error.value)) {
-      error.value = `${error.value}\n${t('git.stashHint')}`
+    let text = gitErrorText(err)
+    if (/overwritten|local changes|uncommitted|would be overwritten|未提交/i.test(text)) {
+      text = `${text}\n${t('git.stashHint')}`
     }
+    setError(text)
     return false
   } finally {
     busy.value = false
@@ -581,7 +623,7 @@ async function run(label: string, fn: () => Promise<void>, danger = true) {
 async function generateCommitMessage() {
   if (!canGenerate.value || !store.workspaceId) return
   generating.value = true
-  error.value = ''
+  clearError()
   try {
     const data = await api<{ message: string }>(`/api/workspaces/${store.workspaceId}/git/commit-message`, {
       method: 'POST',
@@ -607,7 +649,7 @@ async function generateCommitMessage() {
       window.dispatchEvent(new Event('ca-open-models'))
       return
     }
-    error.value = gitErrorText(err)
+    setError(gitErrorText(err))
   } finally {
     generating.value = false
   }
@@ -926,8 +968,23 @@ function openCommit(row: GitCommit) {
           <AppIcon name="file" :size="16" :stroke-width="1.75" />
         </button>
       </template>
-      <button type="button" class="ghost-icon-btn" :title="t('common.refresh')" @click="refresh(true)">
-        <AppIcon name="refresh" :size="16" :stroke-width="1.75" />
+      <button
+        type="button"
+        class="ghost-icon-btn"
+        :class="{ 'is-refreshing': refreshing }"
+        :disabled="refreshing"
+        :title="t('common.refresh')"
+        :aria-busy="refreshing"
+        :aria-label="t('common.refresh')"
+        @click="onRefreshClick"
+      >
+        <AppIcon
+          class="git-refresh-icon"
+          :class="{ spin: refreshing }"
+          name="refresh"
+          :size="16"
+          :stroke-width="1.75"
+        />
       </button>
     </div>
     <p v-if="error" class="err">{{ error }}</p>
@@ -1455,6 +1512,13 @@ function openCommit(row: GitCommit) {
   padding: 8px 12px;
   color: var(--danger);
   font-size: 12px;
+  white-space: pre-wrap;
+}
+.git-refresh-icon.spin {
+  animation: git-refresh-spin 0.8s linear infinite;
+}
+@keyframes git-refresh-spin {
+  to { transform: rotate(360deg); }
 }
 .files,
 .history {

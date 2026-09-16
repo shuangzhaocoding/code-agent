@@ -222,6 +222,7 @@
     "sshConnect": "Connect & browse",
     "sshBrowse": "Remote folders",
     "sshLead": "Connect over SSH and pick a remote folder as the workspace.",
+    "sshInotifyMissing": "Remote host is missing inotify-tools (auto-install failed: usually needs root or passwordless sudo). File tree is polling. On the SSH host run one of:\nsudo apt-get install -y inotify-tools\nsudo dnf install -y inotify-tools\nsudo apk add inotify-tools",
     "switching": "Switching workspace…",
     "panel": {
       "title": "Workspaces",
@@ -812,6 +813,7 @@
     "toolCount": "{n} tools",
     "fileCount": "{n} file changes",
     "stepCount": "{n} steps",
+    "approvalCount": "{n} approvals",
     "planTitle": "Task list",
     "planCount": "{n} items",
     "needsConfirm": "This action needs confirmation",

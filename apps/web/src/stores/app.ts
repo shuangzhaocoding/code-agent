@@ -277,6 +277,8 @@ export const useAppStore = defineStore('app', () => {
   let gitRefreshFollowUpTimer: ReturnType<typeof setTimeout> | null = null
   let stopWorkspaceFsWatch: (() => void) | null = null
   let workspaceFsWatchId: string | null = null
+  let lastInotifyHintWs: string | null = null
+  let inotifyToastId: string | null = null
 
   const workspace = computed(() => workspaces.value.find((w) => w.id === workspaceId.value) || null)
 
@@ -301,13 +303,31 @@ export const useAppStore = defineStore('app', () => {
     workspaceFsWatchId = null
   }
 
-  function startWorkspaceFsEvents(id: string) {
+  function startWorkspaceFsEvents(id: string, opts?: { force?: boolean }) {
     if (!id) return
-    if (workspaceFsWatchId === id && stopWorkspaceFsWatch) return
+    if (!opts?.force && workspaceFsWatchId === id && stopWorkspaceFsWatch) return
     stopWorkspaceFsEvents()
     workspaceFsWatchId = id
     stopWorkspaceFsWatch = subscribeWorkspaceEvents(id, (event) => {
       if (workspaceId.value !== id) return
+      if (event.type === 'fs.ready') {
+        if (event.mode === 'ssh-watch') {
+          if (inotifyToastId) {
+            toast.dismiss(inotifyToastId)
+            inotifyToastId = null
+          }
+          lastInotifyHintWs = null
+          return
+        }
+        if (event.hint_code === 'install_inotify_tools') {
+          if (lastInotifyHintWs !== id || !inotifyToastId) {
+            lastInotifyHintWs = id
+            if (inotifyToastId) toast.dismiss(inotifyToastId)
+            inotifyToastId = toast.warning(t('workspace.sshInotifyMissing'), 0) || null
+          }
+        }
+        return
+      }
       if (event.type !== 'fs.changed') return
       const paths = Array.isArray(event.paths) ? event.paths.filter(Boolean) : []
       if (!paths.length || event.truncated) {
@@ -705,6 +725,12 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function refreshTree() {
+    const id = workspaceId.value
+    // Soft UI refresh does not recreate SSE; force reconnect so SSH poll can
+    // immediately re-probe inotifywait after the user installs tools.
+    if (id && workspace.value?.kind === 'ssh') {
+      startWorkspaceFsEvents(id, { force: true })
+    }
     const open = [...expanded.value].sort((a, b) => depthOf(a) - depthOf(b) || a.localeCompare(b))
     await Promise.all([loadTree(''), loadGitChangedPaths()])
     const kept = new Set<string>()
