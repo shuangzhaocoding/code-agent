@@ -49,12 +49,7 @@ class LocalWorkspaceBackend:
 
     async def write_text(self, rel: str, content: str) -> None:
         path = path_tools.resolve_in_workspace(self.root_path, rel)
-
-        def _write() -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-
-        await run_sync(_write)
+        await run_sync(path_tools.write_text_file, path, content)
 
     async def write_bytes(self, rel: str, content: bytes) -> None:
         path = path_tools.resolve_in_workspace(self.root_path, rel)
@@ -71,12 +66,7 @@ class LocalWorkspaceBackend:
 
     async def create_file(self, rel: str) -> None:
         path = path_tools.resolve_in_workspace(self.root_path, rel)
-
-        def _create() -> None:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("", encoding="utf-8")
-
-        await run_sync(_create)
+        await run_sync(path_tools.write_text_file, path, "")
 
     async def rename(self, src: str, dest: str) -> None:
         sp = path_tools.resolve_in_workspace(self.root_path, src)
@@ -175,6 +165,9 @@ class LocalWorkspaceBackend:
             work = Path(self.root_path)
 
         def _run() -> tuple[int, str, str]:
+            from code_agent.runtime.python_env import merge_python_env, resolve_python_env
+
+            pyenv = resolve_python_env(workspace_root=self.root_path)
             proc = subprocess.run(
                 command,
                 shell=True,
@@ -182,7 +175,7 @@ class LocalWorkspaceBackend:
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                env=os.environ.copy(),
+                env=merge_python_env(os.environ, pyenv),
             )
             return proc.returncode, proc.stdout or "", proc.stderr or ""
 

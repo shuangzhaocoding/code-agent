@@ -150,7 +150,7 @@ const sideViewTitle = computed(() => {
         <button
           type="button"
           class="dbg-btn dbg-btn--stop"
-          :disabled="!debug.sessionId"
+          :disabled="!debug.active || debug.busy"
           :title="t('debug.stop')"
           @click="debug.callControl('stop')"
         >
@@ -440,6 +440,11 @@ const sideViewTitle = computed(() => {
 }
 .session-tab[data-state='error'] .session-tab-title {
   color: #f14c4c;
+}
+.session-tab[data-state='terminated'] .session-tab-title,
+.session-tab[data-state='stopped'] .session-tab-title {
+  color: var(--text-secondary);
+  opacity: 0.85;
 }
 .session-tab-title {
   overflow: hidden;

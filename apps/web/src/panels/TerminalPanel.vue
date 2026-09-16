@@ -36,6 +36,42 @@ interface TermEntry {
   ws: WebSocket | null
   observer: ResizeObserver | null
   el: HTMLDivElement | null
+  /** Current interactive shell input line (for git refresh heuristics). */
+  inputLine: string
+  /** After a git command, refresh when terminal output settles (covers vim commit, hooks). */
+  gitWatchUntil: number
+}
+
+const GIT_TERMINAL_CMD = /\bgit(?:\s|$)/
+
+function noteTerminalInput(entry: TermEntry, data: string) {
+  for (const ch of data) {
+    if (ch === '\r' || ch === '\n') {
+      const line = entry.inputLine.trim()
+      entry.inputLine = ''
+      if (GIT_TERMINAL_CMD.test(line)) {
+        entry.gitWatchUntil = Date.now() + 120_000
+        // Git hooks / editors may finish after the first prompt return.
+        store.scheduleGitRefresh(800, 2500)
+      }
+      continue
+    }
+    if (ch === '\u007f' || ch === '\u0008') {
+      entry.inputLine = entry.inputLine.slice(0, -1)
+      continue
+    }
+    if (ch === '\u0015') {
+      entry.inputLine = ''
+      continue
+    }
+    if (ch === '\u0003') {
+      entry.inputLine = ''
+      continue
+    }
+    if (ch.charCodeAt(0) >= 32 || ch === '\t') {
+      entry.inputLine += ch
+    }
+  }
 }
 
 const tabs = reactive<TermEntry[]>([])
@@ -316,6 +352,7 @@ function createAndMount(entry: TermEntry) {
   })
 
   term.onData((data) => {
+    noteTerminalInput(entry, data)
     if (entry.ws?.readyState === WebSocket.OPEN) {
       entry.ws.send(JSON.stringify({ type: 'input', data }))
     }
@@ -358,10 +395,27 @@ async function connectEntry(entry: TermEntry) {
     }
   })
   socket.onmessage = (ev) => {
-    if (typeof ev.data === 'string') return
+    if (typeof ev.data === 'string') {
+      try {
+        const msg = JSON.parse(ev.data) as { type?: string }
+        if (msg?.type === 'exit') {
+          entry.alive = false
+          store.scheduleGitRefresh(300)
+        }
+      } catch {
+        /* ignore non-json text frames */
+      }
+      return
+    }
     entry.term?.write(new Uint8Array(ev.data as ArrayBuffer))
+    if (entry.gitWatchUntil > Date.now()) {
+      store.scheduleGitRefresh(1200, 4000)
+    }
   }
-  socket.onclose = () => { entry.alive = false }
+  socket.onclose = () => {
+    entry.alive = false
+    store.scheduleGitRefresh(400)
+  }
   try {
     await opened
   } catch {
@@ -459,6 +513,8 @@ async function addTerminal(cwd?: string) {
     ws: null,
     observer: null,
     el: null,
+    inputLine: '',
+    gitWatchUntil: 0,
   }
   tabs.push(entry)
   await nextTick()
@@ -527,6 +583,8 @@ async function loadExisting() {
       ws: null,
       observer: null,
       el: null,
+      inputLine: '',
+      gitWatchUntil: 0,
     }
     tabs.push(entry)
   }

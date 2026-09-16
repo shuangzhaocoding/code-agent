@@ -6,12 +6,65 @@ import json
 import os
 import re
 import socket
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 
 _VAR_RE = re.compile(r"\$\{([^}]+)\}")
+
+# launch.json / defaults often say "python3"; on Windows that is frequently a Store stub.
+_GENERIC_PYTHON_NAMES = frozenset({"python", "python3", "python3.11", "python3.12", "py"})
+
+
+def resolve_debug_python(
+    configured: str | None,
+    *,
+    is_ssh: bool = False,
+    workspace_root: str | None = None,
+) -> str:
+    """Pick the interpreter used to launch debugpy.
+
+    Preference for local generic names (``python3`` / ``python``):
+    1. Settings ``python.interpreter`` (workspace venv)
+    2. ``sys.executable`` (desktop bundled CPython with debugpy)
+    3. Platform default
+
+    Remote SSH keeps a remote ``python3`` default unless a concrete path is set.
+    """
+    raw = (configured or "").strip()
+    name = Path(raw).name.lower() if raw else ""
+    # Strip .exe on Windows for comparison.
+    if name.endswith(".exe"):
+        name = name[:-4]
+    generic = (not raw) or (name in _GENERIC_PYTHON_NAMES and ("/" not in raw.replace("\\", "/")))
+    if is_ssh:
+        if raw and not generic:
+            return raw
+        try:
+            from code_agent.runtime.python_env import resolve_python_env
+
+            pyenv = resolve_python_env(workspace_root=workspace_root)
+            if pyenv.python:
+                return pyenv.python
+        except Exception:
+            pass
+        return "python3"
+    if raw and not generic:
+        return raw
+    try:
+        from code_agent.runtime.python_env import resolve_python_env
+
+        pyenv = resolve_python_env(workspace_root=workspace_root)
+        if pyenv.python:
+            return pyenv.python
+    except Exception:
+        pass
+    exe = (sys.executable or "").strip()
+    if exe:
+        return exe
+    return "python" if os.name == "nt" else "python3"
 
 
 @dataclass

@@ -409,9 +409,13 @@ class SshWorkspaceBackend:
     async def run_command(
         self, command: str, *, cwd: str = ".", timeout: int = 90
     ) -> tuple[int, str, str]:
+        from code_agent.runtime.python_env import resolve_python_env, shell_export_prefix
+
         conn = await self._conn()
         work = await self._abs(cwd)
-        remote = f"cd {shlex.quote(work)} && {command}"
+        pyenv = resolve_python_env(workspace_root=self.root_path)
+        activate = shell_export_prefix(pyenv, windows=False)
+        remote = f"cd {shlex.quote(work)} && {activate}{command}"
         try:
             result = await asyncio.wait_for(conn.run(remote, check=False), timeout=timeout)
         except TimeoutError:

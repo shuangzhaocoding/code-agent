@@ -116,7 +116,7 @@ uv pip install \
 python3.11 - <<PY
 from pathlib import Path
 root = Path("$SITE")
-need = ["fastapi", "uvicorn", "langgraph", "langchain_core", "tortoise", "httpx", "yaml", "cryptography", "tzdata", "asyncssh"]
+need = ["fastapi", "uvicorn", "langgraph", "langchain_core", "tortoise", "httpx", "yaml", "cryptography", "tzdata", "asyncssh", "debugpy"]
 missing = [n for n in need if not any(root.glob(n + "*"))]
 if missing:
     raise SystemExit(f"missing packages in {PLATFORM} bundle: {missing}")

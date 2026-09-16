@@ -209,6 +209,7 @@ function setBreakpointHint(line: number) {
       options: {
         isWholeLine: false,
         glyphMarginClassName: 'ca-bp-hint',
+        glyphMargin: { position: monacoMod.editor.GlyphMarginLane.Left },
         glyphMarginHoverMessage: { value: t('debug.addBreakpointHint') },
       },
     },
@@ -226,6 +227,7 @@ function refreshBreakpointDecorations() {
       options: {
         isWholeLine: false,
         glyphMarginClassName: bp.condition ? 'ca-bp-glyph ca-bp-conditional' : 'ca-bp-glyph',
+        glyphMargin: { position: monacoMod!.editor.GlyphMarginLane.Left },
         glyphMarginHoverMessage: {
           value: bp.condition ? `${t('debug.breakpoint')} · ${bp.condition}` : t('debug.breakpoint'),
         },
@@ -255,8 +257,9 @@ function refreshDebugLineDecoration() {
               isWholeLine: true,
               className: 'ca-debug-line',
               lineNumberClassName: 'ca-debug-line-num',
-              glyphMarginClassName: 'ca-debug-ip',
-              glyphMarginHoverMessage: { value: t('debug.currentLineHint', { line }) },
+              // Right of line numbers (between gutter numbers and code).
+              linesDecorationsClassName: 'ca-debug-ip',
+              hoverMessage: { value: t('debug.currentLineHint', { line }) },
             },
           },
         ]
@@ -428,6 +431,7 @@ function ensureOrigModel(path: string, content: string) {
 const editorOptions = {
   automaticLayout: true,
   glyphMargin: true,
+  lineDecorationsWidth: 16,
   minimap: { enabled: false },
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 13,
@@ -3001,6 +3005,7 @@ function bindEditorContextMenu(ed: import('monaco-editor').editor.IStandaloneCod
 }
 .ca-debug-ip {
   position: relative;
+  width: 14px !important;
 }
 .ca-debug-ip::before {
   content: '▶';

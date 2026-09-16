@@ -1587,12 +1587,6 @@ function openContextUsageDialog() {
           </template>
         </div>
       </Transition>
-      <!-- @ mention chips -->
-      <div v-if="running()" class="bg-run-tip">
-        <AppIcon name="zap" :size="14" />
-        <span>{{ t('chat.backgroundTip') }}</span>
-        <button type="button" class="bg-run-btn" @click="store.newChat()">{{ t('chat.newChatBackground') }}</button>
-      </div>
       <div v-if="queuedMessages.length" class="send-queue" :class="{ collapsed: !queueExpanded }">
         <div class="send-queue-head">
           <button type="button" class="queue-toggle" :aria-expanded="queueExpanded" @click="toggleQueueExpanded">
@@ -2225,36 +2219,6 @@ html[data-theme='dark'] .agent-sender-wrap {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
-}
-.bg-run-tip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--primary-soft, #f59e0b22) 55%, transparent);
-  font-size: 12px;
-  color: var(--text-secondary);
-}
-.bg-run-tip span {
-  flex: 1;
-  min-width: 0;
-  line-height: 1.4;
-}
-.bg-run-btn {
-  flex-shrink: 0;
-  border: 1px solid var(--border);
-  background: var(--panel-bg);
-  color: var(--text-h);
-  border-radius: 8px;
-  padding: 4px 10px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.bg-run-btn:hover {
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
 }
 .send-queue-head {
   display: flex;

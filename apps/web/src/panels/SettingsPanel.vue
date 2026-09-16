@@ -20,6 +20,15 @@ import {
   type WallpaperId,
 } from '@/utils/desktopDecor'
 import { getPortsNotifyNew, setPortsNotifyNew } from '@/composables/usePortsWatch'
+import { api } from '@/api/http'
+import { getDesktopBridge } from '@/utils/desktop'
+
+type PythonInterpreterItem = {
+  path: string
+  label: string
+  version?: string | null
+  kind?: string
+}
 
 type SchemaSpec = {
   title?: string
@@ -31,6 +40,7 @@ type SchemaSpec = {
   default?: unknown
   requires_restart?: boolean
   example?: string
+  scope?: 'user' | 'workspace' | string
 }
 
 const { t, te } = useI18n()
@@ -39,6 +49,11 @@ const toast = useToast()
 const { diffTarget, setDiffTarget } = useGitDiffTarget()
 const { brandMark, setBrandMark } = useBrandMark()
 const portsNotifyNew = ref(getPortsNotifyNew())
+const settingsScope = ref<'user' | 'workspace'>('user')
+const localWorkspace = reactive<Record<string, unknown>>({})
+const baselineWorkspace = ref<Record<string, unknown>>({})
+const pythonInterpreters = ref<PythonInterpreterItem[]>([])
+const pythonInterpretersLoading = ref(false)
 
 function onPortsNotifyToggle(enabled: boolean) {
   portsNotifyNew.value = enabled
@@ -346,12 +361,25 @@ function petPreviewUrl(petItem: (typeof customPets.value)[number]) {
 
 const schema = computed(() => (store.settings?.schema?.properties || {}) as Record<string, SchemaSpec>)
 
+const workspaceKeys = computed(() => {
+  const fromApi = (store.settings as { workspace_keys?: string[] } | null)?.workspace_keys
+  if (Array.isArray(fromApi) && fromApi.length) return new Set(fromApi)
+  return new Set(
+    Object.entries(schema.value)
+      .filter(([, spec]) => spec.scope === 'workspace')
+      .map(([key]) => key),
+  )
+})
+
+const hasWorkspace = computed(() => Boolean(store.workspaceId))
+
 const groups = computed(() => {
   const map = new Map<string, { id: string; title: string; icon: string; keys: string[] }>()
   const defs: Record<string, { titleKey: string; icon: string }> = {
     agent: { titleKey: 'settings.groups.agent', icon: 'atom' },
     policy: { titleKey: 'settings.groups.policy', icon: 'shield' },
     terminal: { titleKey: 'settings.groups.terminal', icon: 'terminal' },
+    python: { titleKey: 'settings.groups.python', icon: 'chip' },
     llm: { titleKey: 'settings.groups.llm', icon: 'chip' },
     ui: { titleKey: 'settings.groups.ui', icon: 'sliders' },
     uploads: { titleKey: 'settings.groups.uploads', icon: 'folder' },
@@ -359,6 +387,8 @@ const groups = computed(() => {
     server: { titleKey: 'settings.groups.server', icon: 'shield' },
   }
   for (const key of Object.keys(schema.value)) {
+    const isWs = workspaceKeys.value.has(key)
+    if (settingsScope.value === 'workspace' ? !isWs : isWs) continue
     const prefix = key.split('.')[0] || 'other'
     const def = defs[prefix] || { titleKey: '', icon: 'gear' }
     const title = def.titleKey ? t(def.titleKey) : prefix
@@ -371,21 +401,39 @@ const groups = computed(() => {
 })
 
 watch(groups, (list) => {
-  if (activeGroup.value === 'appearance') return
+  if (settingsScope.value === 'user' && activeGroup.value === 'appearance') return
   if (list.length && !list.some((g) => g.id === activeGroup.value)) {
-    activeGroup.value = 'appearance'
+    activeGroup.value = settingsScope.value === 'user' ? 'appearance' : (list[0]?.id || 'appearance')
   }
 }, { immediate: true })
 
+watch(settingsScope, (scope) => {
+  if (scope === 'user') {
+    activeGroup.value = 'appearance'
+  } else {
+    activeGroup.value = groups.value[0]?.id || 'python'
+    void loadPythonInterpreters()
+  }
+})
+
 onMounted(async () => {
   await store.loadSettings()
-  applySettingsValues(store.settings?.values || {})
+  applySettingsValues(store.settings)
+  if (settingsScope.value === 'workspace') void loadPythonInterpreters()
 })
 
 watch(
   () => store.settings,
   (s) => {
-    if (s) applySettingsValues(s.values)
+    if (s) applySettingsValues(s)
+  },
+)
+
+watch(
+  () => store.workspaceId,
+  async () => {
+    await store.loadSettings()
+    if (settingsScope.value === 'workspace') void loadPythonInterpreters()
   },
 )
 
@@ -433,6 +481,7 @@ const OMIT_EMPTY_KEYS = new Set([
   ...STORAGE_URL_KEYS,
   'terminal.shell',
   'uploads.dir',
+  'python.interpreter',
 ])
 
 const accessPasswordSet = computed(
@@ -443,23 +492,41 @@ const accessPasswordOn = computed(() => Boolean(local['server.access_password_en
 
 const baseline = ref<Record<string, unknown>>({})
 
-function applySettingsValues(values: Record<string, unknown>) {
-  Object.assign(local, values)
+function applySettingsValues(payload: Record<string, unknown> | null | undefined) {
+  if (!payload) return
+  const userValues = (payload.user_values as Record<string, unknown> | undefined)
+    || (payload.values as Record<string, unknown> | undefined)
+    || {}
+  const wsValues = (payload.workspace_values as Record<string, unknown> | undefined) || {}
+  Object.assign(local, userValues)
   if (local['server.access_password_enabled'] == null) {
     local['server.access_password_enabled'] = false
   }
-  baseline.value = { ...values, 'server.access_password_enabled': local['server.access_password_enabled'] }
+  baseline.value = { ...userValues, 'server.access_password_enabled': local['server.access_password_enabled'] }
+
+  for (const key of Object.keys(localWorkspace)) {
+    delete localWorkspace[key]
+  }
+  Object.assign(localWorkspace, wsValues)
+  if (localWorkspace['python.interpreter'] == null) {
+    localWorkspace['python.interpreter'] = ''
+  }
+  baselineWorkspace.value = { ...wsValues }
 }
 
-function buildSettingsPatch() {
+function buildSettingsPatch(scope: 'user' | 'workspace') {
   const patch: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(local)) {
+  const source = scope === 'workspace' ? localWorkspace : local
+  const base = scope === 'workspace' ? baselineWorkspace.value : baseline.value
+  for (const [key, value] of Object.entries(source)) {
+    if (scope === 'user' && workspaceKeys.value.has(key)) continue
+    if (scope === 'workspace' && !workspaceKeys.value.has(key)) continue
     // Access password: empty means "unchanged" (never leak/clear accidentally).
     if (key === 'server.access_password' && (value === '' || value == null)) {
       continue
     }
     if (OMIT_EMPTY_KEYS.has(key) && (value === '' || value == null)) {
-      const prev = baseline.value[key]
+      const prev = base[key]
       // Clearing a previously set optional field must PATCH "" so the server drops it.
       if (prev !== '' && prev != null) patch[key] = ''
       continue
@@ -476,7 +543,7 @@ async function clearAccessPassword() {
     await store.saveSettings({
       'server.access_password': '',
       'server.access_password_enabled': false,
-    })
+    }, 'user')
     local['server.access_password'] = ''
     local['server.access_password_enabled'] = false
     baseline.value = {
@@ -484,8 +551,7 @@ async function clearAccessPassword() {
       'server.access_password': '',
       'server.access_password_enabled': false,
     }
-    const values = (store.settings as { values?: Record<string, unknown> } | null)?.values
-    if (values) applySettingsValues(values)
+    applySettingsValues(store.settings as Record<string, unknown> | null)
     toast.success(t('accessGate.cleared'))
   } catch (err) {
     toast.error(err instanceof Error ? err.message : String(err))
@@ -503,6 +569,76 @@ const isDesktop = Boolean(
     .codeAgentDesktop?.isDesktop,
 )
 
+function fieldModel(key: string) {
+  return settingsScope.value === 'workspace' ? localWorkspace : local
+}
+
+function pythonInterpreterOptionLabel(item: PythonInterpreterItem) {
+  if (item.kind === 'system') {
+    return item.version
+      ? t('settings.python.systemWithVersion', { path: item.path, version: item.version })
+      : t('settings.python.systemPath', { path: item.path })
+  }
+  return item.label || item.path
+}
+
+const pythonInterpreterSelectOptions = computed(() => {
+  const opts: { value: string; label: string }[] = [
+    { value: '', label: t('settings.python.autoDetect') },
+    ...pythonInterpreters.value.map((item) => ({
+      value: item.path,
+      label: pythonInterpreterOptionLabel(item),
+    })),
+  ]
+  const current = String(localWorkspace['python.interpreter'] ?? '')
+  if (current && !opts.some((o) => o.value === current)) {
+    opts.push({ value: current, label: t('settings.python.customPath', { path: current }) })
+  }
+  return opts
+})
+
+const canPickPythonFolder = computed(
+  () => isDesktop && store.workspace?.kind !== 'ssh' && Boolean(store.workspace?.root_path),
+)
+
+function pathRelativeToWorkspace(absPath: string, wsRoot: string): string {
+  const normalized = absPath.replace(/\\/g, '/').replace(/\/+$/, '')
+  const root = wsRoot.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (normalized === root) return '.'
+  const prefix = `${root}/`
+  if (normalized.startsWith(prefix)) return normalized.slice(prefix.length)
+  return absPath
+}
+
+async function loadPythonInterpreters() {
+  if (!store.workspaceId) {
+    pythonInterpreters.value = []
+    return
+  }
+  pythonInterpretersLoading.value = true
+  try {
+    const res = await api(`/api/workspaces/${store.workspaceId}/python/interpreters`)
+    pythonInterpreters.value = Array.isArray(res?.items) ? res.items : []
+  } catch {
+    pythonInterpreters.value = []
+  } finally {
+    pythonInterpretersLoading.value = false
+  }
+}
+
+async function pickPythonInterpreter() {
+  const desktop = getDesktopBridge()
+  const wsRoot = store.workspace?.root_path
+  if (!desktop?.pickDirectory || !wsRoot) return
+  try {
+    const chosen = await desktop.pickDirectory()
+    if (!chosen) return
+    localWorkspace['python.interpreter'] = pathRelativeToWorkspace(chosen, wsRoot)
+  } catch {
+    /* ignore cancel / picker errors */
+  }
+}
+
 async function pickDirectory(key: string) {
   const desktop = (
     window as Window & { codeAgentDesktop?: { pickDirectory?: () => Promise<string | null> } }
@@ -511,7 +647,7 @@ async function pickDirectory(key: string) {
   try {
     const chosen = await desktop.pickDirectory()
     if (!chosen) return
-    local[key] = chosen
+    fieldModel(key)[key] = chosen
   } catch {
     /* ignore cancel / picker errors */
   }
@@ -519,16 +655,22 @@ async function pickDirectory(key: string) {
 
 async function save() {
   if (saving.value) return
-  const enabling = Boolean(local['server.access_password_enabled'])
-  const typed = String(local['server.access_password'] || '').trim()
-  if (enabling && !accessPasswordSet.value && !typed) {
-    toast.error(t('accessGate.needPassword'))
+  if (settingsScope.value === 'workspace' && !hasWorkspace.value) {
+    toast.error(t('settings.workspaceRequired'))
     return
+  }
+  if (settingsScope.value === 'user') {
+    const enabling = Boolean(local['server.access_password_enabled'])
+    const typed = String(local['server.access_password'] || '').trim()
+    if (enabling && !accessPasswordSet.value && !typed) {
+      toast.error(t('accessGate.needPassword'))
+      return
+    }
   }
   saving.value = true
   try {
-    await store.saveSettings(buildSettingsPatch())
-    if (store.settings?.values) applySettingsValues(store.settings.values)
+    await store.saveSettings(buildSettingsPatch(settingsScope.value), settingsScope.value)
+    applySettingsValues(store.settings as Record<string, unknown> | null)
     saved.value = true
     toast.success(t('common.saved'))
     setTimeout(() => { saved.value = false }, 2000)
@@ -546,13 +688,37 @@ async function save() {
       <header class="page-head">
         <div>
           <h1 class="page-title">{{ t('settings.title') }}</h1>
-          <p class="page-lead">{{ t('settings.lead') }}</p>
+          <p class="page-lead">
+            {{ settingsScope === 'workspace' ? t('settings.leadWorkspace') : t('settings.leadUser') }}
+          </p>
+          <div class="settings-scope" role="tablist" :aria-label="t('settings.scopeLabel')">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="settingsScope === 'user'"
+              :class="{ active: settingsScope === 'user' }"
+              @click="settingsScope = 'user'"
+            >
+              {{ t('settings.scopeUser') }}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="settingsScope === 'workspace'"
+              :class="{ active: settingsScope === 'workspace' }"
+              :disabled="!hasWorkspace"
+              :title="hasWorkspace ? undefined : t('settings.workspaceRequired')"
+              @click="settingsScope = 'workspace'"
+            >
+              {{ t('settings.scopeWorkspace') }}
+            </button>
+          </div>
         </div>
         <button
           type="button"
           class="btn btn-primary btn-save"
           :class="{ saved }"
-          :disabled="saving"
+          :disabled="saving || (settingsScope === 'workspace' && !hasWorkspace)"
           @click="save"
         >
           <AppIcon :name="saved ? 'check' : 'save'" :size="13" :stroke-width="1.75" />
@@ -563,6 +729,7 @@ async function save() {
       <div class="settings-layout">
         <nav class="settings-toc" :aria-label="t('settings.toc')">
           <button
+            v-if="settingsScope === 'user'"
             type="button"
             :class="{ active: activeGroup === 'appearance' }"
             @click="jump('appearance')"
@@ -582,7 +749,10 @@ async function save() {
           </button>
         </nav>
         <div class="settings-main">
-          <section id="settings-appearance" class="settings-group">
+          <p v-if="settingsScope === 'workspace' && !hasWorkspace" class="workspace-needed">
+            {{ t('settings.workspaceRequired') }}
+          </p>
+          <section v-if="settingsScope === 'user'" id="settings-appearance" class="settings-group">
             <div class="group-head">
               <span class="group-icon"><AppIcon name="sliders" :size="18" /></span>
               <h2>{{ t('settings.groups.appearance') }}</h2>
@@ -903,7 +1073,7 @@ async function save() {
             <FormSelect
               v-if="specFor(key).enum"
               :id="key"
-              v-model="local[key] as string"
+              v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key] as string"
               class="setting-select"
               :options="enumOptions(key)"
             />
@@ -911,20 +1081,20 @@ async function save() {
             <textarea
               v-else-if="specFor(key).format === 'textarea'"
               :id="key"
-              v-model="local[key] as string"
+              v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key] as string"
               class="field-control setting-input"
               rows="4"
             />
 
             <label v-else-if="specFor(key).type === 'boolean'" class="toggle">
-              <input :id="key" v-model="local[key]" type="checkbox" />
+              <input :id="key" v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key]" type="checkbox" />
               <span class="toggle-track" />
             </label>
 
             <input
               v-else-if="specFor(key).type === 'integer' || specFor(key).type === 'number'"
               :id="key"
-              v-model.number="local[key]"
+              v-model.number="(settingsScope === 'workspace' ? localWorkspace : local)[key]"
               class="field-control setting-input"
               type="number"
               :min="specFor(key).minimum"
@@ -936,7 +1106,7 @@ async function save() {
               <div class="password-field">
                 <input
                   :id="key"
-                  v-model="local[key]"
+                  v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key]"
                   class="field-control setting-input"
                   type="password"
                   autocomplete="off"
@@ -968,10 +1138,41 @@ async function save() {
               </div>
             </template>
 
+            <div v-else-if="key === 'python.interpreter'" class="python-interpreter-field">
+              <FormSelect
+                :id="key"
+                v-model="localWorkspace['python.interpreter'] as string"
+                class="setting-select python-interpreter-select"
+                :disabled="pythonInterpretersLoading"
+                :options="pythonInterpreterSelectOptions"
+                :placeholder="t('settings.python.autoDetect')"
+              />
+              <div class="setting-path python-interpreter-path">
+                <input
+                  :id="`${key}-path`"
+                  v-model="localWorkspace['python.interpreter'] as string"
+                  class="field-control setting-input"
+                  type="text"
+                  :placeholder="fieldPlaceholder(key)"
+                />
+                <button
+                  v-if="canPickPythonFolder"
+                  type="button"
+                  class="btn setting-browse"
+                  @click="pickPythonInterpreter"
+                >
+                  <AppIcon name="folder" :size="14" :stroke-width="1.75" />
+                  {{ t('settings.python.browse') }}
+                </button>
+              </div>
+              <p v-if="pythonInterpretersLoading" class="setting-hint">{{ t('settings.python.scanning') }}</p>
+              <p v-else-if="!pythonInterpreters.length" class="setting-hint">{{ t('settings.python.noneFound') }}</p>
+            </div>
+
             <div v-else-if="specFor(key).format === 'directory'" class="setting-path">
               <input
                 :id="key"
-                v-model="local[key] as string"
+                v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key] as string"
                 class="field-control setting-input"
                 type="text"
                 :placeholder="fieldPlaceholder(key)"
@@ -987,7 +1188,13 @@ async function save() {
               </button>
             </div>
 
-            <input v-else :id="key" v-model="local[key]" class="field-control setting-input" :placeholder="fieldPlaceholder(key)" />
+            <input
+              v-else
+              :id="key"
+              v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key]"
+              class="field-control setting-input"
+              :placeholder="fieldPlaceholder(key)"
+            />
           </div>
           <p v-if="group.id === 'uploads'" class="storage-note">
             {{ t('settings.uploads.hint') }}
@@ -1044,6 +1251,45 @@ async function save() {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.5;
+}
+.settings-scope {
+  display: inline-flex;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+.settings-scope button {
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.settings-scope button:hover:not(:disabled) {
+  color: var(--text-h);
+}
+.settings-scope button.active {
+  background: var(--panel-bg);
+  color: var(--primary);
+  font-weight: 600;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
+}
+.settings-scope button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.workspace-needed {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
 }
 .page-head .btn-save {
   display: inline-flex;
@@ -1599,6 +1845,25 @@ async function save() {
 }
 .setting-select {
   max-width: 360px;
+}
+.python-interpreter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.python-interpreter-select {
+  max-width: none;
+}
+.python-interpreter-path {
+  width: 100%;
+}
+.setting-hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
 }
 .setting-input.field-control {
   min-height: 30px;

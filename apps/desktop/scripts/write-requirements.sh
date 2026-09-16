@@ -26,6 +26,7 @@ deps = [
     "websockets>=13.0",
     "tzdata>=2024.1",
     "asyncssh>=2.14.0",
+    "debugpy>=1.8.0",
 ]
 if target == "win":
     # ConPTY / winpty for in-app terminal on Windows.

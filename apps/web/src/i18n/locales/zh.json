@@ -354,13 +354,20 @@
   },
   "settings": {
     "title": "设置",
-    "lead": "覆盖工作区配置。优先级：default.yaml → 用户配置 → 工作区 .code-agent/config.yaml → 本页。",
+    "lead": "用户设置全局生效；工作空间设置写入当前项目的 .code-agent/config.yaml。",
+    "leadUser": "用户设置全局生效，适用于所有工作空间。",
+    "leadWorkspace": "工作空间设置仅作用于当前项目，写入 .code-agent/config.yaml。若未配置 Python 解释器，检测到 .venv / venv 时打开终端会自动 source activate。",
+    "scopeLabel": "设置范围",
+    "scopeUser": "用户设置",
+    "scopeWorkspace": "工作空间设置",
+    "workspaceRequired": "请先打开一个工作空间后再编辑工作空间设置。",
     "save": "保存设置",
     "toc": "设置分组",
     "groups": {
       "agent": "Agent",
       "policy": "策略与安全",
       "terminal": "终端",
+      "python": "Python",
       "llm": "模型",
       "ui": "界面",
       "appearance": "外观",
@@ -390,11 +397,21 @@
       "activeEvents": "当前事件总线",
       "activeCheckpoint": "当前 Checkpoint"
     },
+    "python": {
+      "autoDetect": "自动检测 (.venv / venv)",
+      "browse": "选择文件夹",
+      "scanning": "正在扫描工作区内的 Python 环境…",
+      "noneFound": "未发现常见虚拟环境；可手动输入路径或选择文件夹。",
+      "customPath": "当前：{path}",
+      "systemPath": "系统 · {path}",
+      "systemWithVersion": "系统 · {version} ({path})"
+    },
     "placeholders": {
       "storage.postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent",
       "storage.redis_url": "redis://127.0.0.1:6379/0",
       "storage.checkpoint_postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints",
-      "uploads.dir": "auto"
+      "uploads.dir": "auto",
+      "python.interpreter": ".venv 或 .venv/bin/python"
     },
     "fields": {
       "agent": {
@@ -413,6 +430,9 @@
       },
       "terminal": {
         "shell": "终端 Shell"
+      },
+      "python": {
+        "interpreter": "Python 解释器"
       },
       "llm": {
         "default_temperature": "默认 temperature"
@@ -601,7 +621,7 @@
     "setValueNeedPause": "请先暂停调试后再设置变量",
     "needWorkspace": "请先打开工作区",
     "needPythonFile": "请打开 .py 文件或选择 launch 配置",
-    "needDebugpy": "未安装 debugpy，请执行：python3 -m pip install debugpy",
+    "needDebugpy": "未安装 debugpy；将尝试自动安装，也可手动执行：python3 -m pip install debugpy",
     "startFailed": "启动调试失败",
     "controlFailed": "调试操作失败",
     "state": {
@@ -726,8 +746,6 @@
     "rollbackFailed": "回退失败",
     "queued": "排队中 · {n}",
     "clearQueue": "清空队列",
-    "backgroundTip": "当前任务在后台运行。可开新对话继续提问，或在轨迹面板管理多个 Run。",
-    "newChatBackground": "开新对话",
     "sendNow": "立即发送",
     "uploadImage": "上传图片",
     "voiceInput": "语音输入",

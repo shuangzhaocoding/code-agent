@@ -519,8 +519,14 @@ export const useDebugStore = defineStore('debug', () => {
       if (!next) return
       if (next === 'terminated' || next === 'stopped') {
         disconnectWs(id)
+        patchSession(id, {
+          state: next,
+          busy: false,
+          currentLine: null,
+          stopReason: sess.stopReason || next,
+        })
         window.dispatchEvent(new CustomEvent('ca-debug-ended', { detail: { sessionId: id } }))
-        removeSessionLocal(id)
+        // Keep the tab so console / restart stay visible after a no-breakpoint run.
         return
       }
       // Do not clobber a live pause with a stale "running" session event.
@@ -572,8 +578,12 @@ export const useDebugStore = defineStore('debug', () => {
     }
     if (type === 'exited' || type === 'terminated') {
       disconnectWs(id)
+      patchSession(id, {
+        state: 'terminated',
+        busy: false,
+        currentLine: null,
+      })
       window.dispatchEvent(new CustomEvent('ca-debug-ended', { detail: { sessionId: id } }))
-      removeSessionLocal(id)
       return
     }
   }
@@ -601,6 +611,15 @@ export const useDebugStore = defineStore('debug', () => {
       activeSessionId.value = existing.id
       await restart(existing.id)
       return
+    }
+
+    // Drop finished tabs for the same program so a new run reuses a clean slot.
+    if (program) {
+      const norm = program.replace(/\\/g, '/')
+      for (const s of [...sessions.value]) {
+        if (isLiveState(s.state)) continue
+        if ((s.program || '').replace(/\\/g, '/') === norm) removeSessionLocal(s.id)
+      }
     }
 
     const title = basename(program || opts?.module || 'debug')
@@ -682,9 +701,15 @@ export const useDebugStore = defineStore('debug', () => {
         try {
           await api(`/api/debug/sessions/${sid}/stop`, { method: 'POST' })
         } catch {
-          /* still clear locally */
+          /* still mark locally */
         }
-        removeSessionLocal(sid)
+        disconnectWs(sid)
+        patchSession(sid, {
+          state: 'terminated',
+          busy: false,
+          currentLine: null,
+        })
+        window.dispatchEvent(new CustomEvent('ca-debug-ended', { detail: { sessionId: sid } }))
         return
       }
       await api(`/api/debug/sessions/${sid}/${action}`, { method: 'POST' })
@@ -712,7 +737,15 @@ export const useDebugStore = defineStore('debug', () => {
     const sess = getSession(sid)
     if (!sid || !sess?.lastStartOpts) return
     const opts = { ...sess.lastStartOpts }
-    await callControl('stop', sid)
+    if (isLiveState(sess.state)) {
+      try {
+        await api(`/api/debug/sessions/${sid}/stop`, { method: 'POST' })
+      } catch {
+        /* ignore */
+      }
+      disconnectWs(sid)
+    }
+    removeSessionLocal(sid)
     await start(opts)
   }
 
@@ -720,10 +753,15 @@ export const useDebugStore = defineStore('debug', () => {
     const sess = getSession(id)
     if (!sess) return
     if (isLiveState(sess.state)) {
-      await callControl('stop', id)
-    } else {
-      removeSessionLocal(id)
+      try {
+        await api(`/api/debug/sessions/${id}/stop`, { method: 'POST' })
+      } catch {
+        /* ignore */
+      }
+      disconnectWs(id)
     }
+    window.dispatchEvent(new CustomEvent('ca-debug-ended', { detail: { sessionId: id } }))
+    removeSessionLocal(id)
   }
 
   async function loadScopes(frameId: number, id?: string) {

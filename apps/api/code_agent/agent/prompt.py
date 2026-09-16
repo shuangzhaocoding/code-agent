@@ -41,6 +41,20 @@ def build_system_prompt(
         f"- {s['name']}: {s['description']}" for s in skills if not s.get("invalid_reason")
     ) or "(none)"
     extra = settings.get("agent.system_prompt_extra") or ""
+    python_hint = ""
+    try:
+        from code_agent.runtime.python_env import resolve_python_env
+
+        pyenv = resolve_python_env(workspace_root=str(workspace.root_path or ""))
+        if pyenv.python:
+            tag = pyenv.label or "venv"
+            python_hint = (
+                f"- Workspace Python interpreter ({tag}): `{pyenv.python}`. "
+                "Shell tools already activate it (PATH / VIRTUAL_ENV). Prefer `python` / `pip` "
+                "without absolute paths unless the user asks otherwise.\n"
+            )
+    except Exception:
+        python_hint = ""
     prompt = f"""You are Code Agent, a coding assistant working on a real workspace.
 
 Workspace root: {workspace.root_path}
@@ -61,7 +75,7 @@ Rules:
 - Be concise. Show your work via tools rather than dumping huge code in chat.
 - After edits, mention which files changed.
 - Follow workspace rules below when they do not conflict with the user.
-{thinking_prompt(thinking_level)}
+{python_hint}{thinking_prompt(thinking_level)}
 {plan_format_rules(mode)}
 
 Instruction priority (highest first):

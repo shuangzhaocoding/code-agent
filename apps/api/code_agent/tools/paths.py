@@ -95,6 +95,17 @@ def read_text_file(path: Path, max_bytes: int | None = None) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def write_text_file(path: Path, content: str) -> None:
+    """Write UTF-8 text without newline translation.
+
+    ``Path.write_text`` uses text mode (newline=None). On Windows that turns
+    every ``\\n`` into ``\\r\\n``, so an already-CRLF string becomes ``\\r\\r\\n``
+    and editors show blank lines between every line. Match SSH ``write_bytes``.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content.encode("utf-8"))
+
+
 def list_dir(root: str, rel: str = "", extra_ignores: list[str] | None = None) -> list[dict]:
     """List one directory for the explorer tree.
 
@@ -482,7 +493,7 @@ def replace_file_contents(
         if not count or next_text == text:
             continue
         try:
-            path.write_text(next_text, encoding="utf-8")
+            write_text_file(path, next_text)
         except OSError as err:
             skipped.append({"path": rel, "reason": str(err)})
             continue

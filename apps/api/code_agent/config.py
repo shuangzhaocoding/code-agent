@@ -273,6 +273,68 @@ STORAGE_SETTING_KEYS = frozenset(
 
 UPLOADS_SETTING_KEYS = frozenset({"uploads.dir"})
 
+# Settings that live in <workspace>/.code-agent/config.yaml (not the global DB).
+WORKSPACE_SETTING_KEYS = frozenset({"python.interpreter"})
+
+WORKSPACE_CONFIG_REL = ".code-agent/config.yaml"
+
+
+def workspace_config_path(workspace_root: str | Path) -> Path:
+    return Path(workspace_root).expanduser() / ".code-agent" / "config.yaml"
+
+
+def load_workspace_config(workspace_root: str | Path) -> dict[str, Any]:
+    return _load_yaml(workspace_config_path(workspace_root))
+
+
+def get_workspace_setting(workspace_root: str | Path, dotted: str, default: Any = None) -> Any:
+    """Read a dotted key from workspace ``.code-agent/config.yaml``."""
+    cur: Any = load_workspace_config(workspace_root)
+    for part in dotted.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+def merge_workspace_config(
+    workspace_root: str | Path,
+    values: dict[str, Any],
+) -> Path:
+    """Merge dotted setting keys into ``<workspace>/.code-agent/config.yaml``."""
+    path = workspace_config_path(workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _load_yaml(path)
+    for dotted, value in values.items():
+        parts = [p for p in dotted.split(".") if p]
+        if not parts:
+            continue
+        cur: dict[str, Any] = existing
+        for part in parts[:-1]:
+            nxt = cur.get(part)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cur[part] = nxt
+            cur = nxt
+        if value is None or value == "":
+            cur.pop(parts[-1], None)
+        else:
+            cur[parts[-1]] = value
+    with path.open("w", encoding="utf-8") as fh:
+        yaml.safe_dump(existing, fh, allow_unicode=True, sort_keys=False, default_flow_style=False)
+    return path
+
+
+def workspace_setting_values(workspace_root: str | Path) -> dict[str, Any]:
+    """Return workspace-scoped setting values (missing keys omitted)."""
+    out: dict[str, Any] = {}
+    for key in WORKSPACE_SETTING_KEYS:
+        val = get_workspace_setting(workspace_root, key)
+        if val is not None and val != "":
+            out[key] = val
+    return out
+
+
 SETTINGS_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -336,6 +398,14 @@ SETTINGS_SCHEMA: dict[str, Any] = {
             "type": "string",
             "title": "终端 Shell",
             "default": "/bin/bash",
+        },
+        "python.interpreter": {
+            "type": "string",
+            "title": "Python 解释器",
+            "default": "",
+            "example": ".venv/bin/python",
+            "scope": "workspace",
+            "description": "当前工作空间的 Python / 虚拟环境路径（如 .venv 或 .venv/bin/python）。留空时若工作区存在 .venv / venv 会自动激活。打开终端时执行 source activate，Agent 命令默认使用此解释器。写入 .code-agent/config.yaml。",
         },
         "llm.default_temperature": {
             "type": "number",

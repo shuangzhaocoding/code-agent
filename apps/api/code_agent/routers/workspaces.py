@@ -373,6 +373,42 @@ async def workspace_status(workspace_id: str):
     return {**_ws(row), **status}
 
 
+@router.get("/{workspace_id}/python/interpreters")
+async def list_python_interpreters(workspace_id: str):
+    """Discover Python venvs in the workspace for the settings dropdown."""
+    from code_agent.runtime.python_env import (
+        discover_python_interpreters_local,
+        discover_python_interpreters_remote,
+    )
+
+    row = await _get_ws(workspace_id)
+    configured: str | None = None
+    if workspace_is_ssh(row):
+        backend = await get_workspace_backend(row)
+        try:
+            import yaml
+
+            try:
+                text = await backend.read_text(".code-agent/config.yaml")
+                cfg = yaml.safe_load(text) if text.strip() else {}
+                python_cfg = (cfg or {}).get("python") if isinstance(cfg, dict) else None
+                raw = python_cfg.get("interpreter") if isinstance(python_cfg, dict) else None
+                if raw and str(raw).strip():
+                    configured = str(raw).strip()
+            except Exception:
+                configured = None
+            items = await discover_python_interpreters_remote(
+                backend,
+                row.root_path,
+                configured=configured,
+            )
+        finally:
+            await backend.close()
+    else:
+        items = discover_python_interpreters_local(row.root_path)
+    return {"items": items}
+
+
 @router.post("/{workspace_id}/plugins/reload")
 async def reload_workspace_plugins(workspace_id: str):
     row = await _get_ws(workspace_id)

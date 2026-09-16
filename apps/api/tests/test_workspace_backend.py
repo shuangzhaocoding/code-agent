@@ -54,3 +54,24 @@ def test_list_dir_marks_gitignore(tmp_path: Path):
         assert nested[0]["ignored"] is True
 
     asyncio.run(_run())
+
+
+def test_local_write_text_preserves_crlf(tmp_path: Path):
+    """Windows CRLF must round-trip; Path.write_text would turn \\r\\n into \\r\\r\\n."""
+    rel = "main.py"
+    original = b"print(1)\r\nprint(2)\r\n"
+    (tmp_path / rel).write_bytes(original)
+    ws = _Ws()
+    ws.root_path = str(tmp_path)
+    backend = LocalWorkspaceBackend(ws)  # type: ignore[arg-type]
+
+    async def _run():
+        text = await backend.read_text(rel)
+        assert text == "print(1)\r\nprint(2)\r\n"
+        await backend.write_text(rel, text)
+        assert (tmp_path / rel).read_bytes() == original
+        # Simulate editor save of CRLF content again — must not stack CRs.
+        await backend.write_text(rel, text)
+        assert (tmp_path / rel).read_bytes() == original
+
+    asyncio.run(_run())

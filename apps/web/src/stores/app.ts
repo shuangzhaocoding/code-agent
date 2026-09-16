@@ -272,6 +272,8 @@ export const useAppStore = defineStore('app', () => {
   const ackedTreeMarks = ref<Record<string, true>>({})
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   const pendingTreePaths = new Set<string>()
+  let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
+  let gitRefreshFollowUpTimer: ReturnType<typeof setTimeout> | null = null
 
   const workspace = computed(() => workspaces.value.find((w) => w.id === workspaceId.value) || null)
 
@@ -770,6 +772,23 @@ export const useAppStore = defineStore('app', () => {
     } catch {
       gitChangedPaths.value = {}
       gitRepoOk.value = false
+    }
+  }
+
+  /** Debounced git status refresh (e.g. after terminal git commands). */
+  function scheduleGitRefresh(delayMs = 600, followUpMs?: number) {
+    if (!workspaceId.value) return
+    if (gitRefreshTimer) clearTimeout(gitRefreshTimer)
+    gitRefreshTimer = setTimeout(() => {
+      gitRefreshTimer = null
+      void loadGitChangedPaths()
+    }, delayMs)
+    if (followUpMs != null && followUpMs > delayMs) {
+      if (gitRefreshFollowUpTimer) clearTimeout(gitRefreshFollowUpTimer)
+      gitRefreshFollowUpTimer = setTimeout(() => {
+        gitRefreshFollowUpTimer = null
+        void loadGitChangedPaths()
+      }, followUpMs)
     }
   }
 
@@ -2857,11 +2876,17 @@ export const useAppStore = defineStore('app', () => {
   }
 
   async function loadSettings() {
-    settings.value = await api('/api/settings')
+    const q = workspaceId.value ? `?workspace_id=${encodeURIComponent(workspaceId.value)}` : ''
+    settings.value = await api(`/api/settings${q}`)
   }
 
-  async function saveSettings(patch: Record<string, unknown>) {
-    settings.value = await api('/api/settings', { method: 'PATCH', body: JSON.stringify(patch) })
+  async function saveSettings(patch: Record<string, unknown>, scope: 'user' | 'workspace' = 'user') {
+    const body: Record<string, unknown> = { ...patch, scope }
+    if (scope === 'workspace' && workspaceId.value) {
+      body.workspace_id = workspaceId.value
+    }
+    const q = workspaceId.value ? `?workspace_id=${encodeURIComponent(workspaceId.value)}` : ''
+    settings.value = await api(`/api/settings${q}`, { method: 'PATCH', body: JSON.stringify(body) })
   }
 
   function isFileDirty(path: string) {
@@ -3053,6 +3078,7 @@ export const useAppStore = defineStore('app', () => {
     gitRepoOk,
     gitCommitDraft,
     loadGitChangedPaths,
+    scheduleGitRefresh,
     gitChangedPaths,
     loadConversations,
     searchConversations,

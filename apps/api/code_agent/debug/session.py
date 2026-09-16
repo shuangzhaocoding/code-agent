@@ -17,6 +17,7 @@ from code_agent.debug.launch import (
     build_debugpy_argv,
     build_remote_shell_command,
     free_port,
+    resolve_debug_python,
 )
 from code_agent.db.models import Workspace
 from code_agent.tools.paths import resolve_in_workspace
@@ -169,39 +170,109 @@ class DebugSession:
             await self.stop()
             raise
 
-    async def _ensure_debugpy(self, python: str) -> None:
+    async def _debugpy_import_ok(self, python: str) -> tuple[bool, str]:
+        """Return (ok, detail). detail is version on success or error text on failure."""
         if self._ssh:
             from code_agent.workspace.ssh import SshWorkspaceBackend
 
             backend = await SshWorkspaceBackend.open(self.workspace)
-            code, out, err = await backend.run_command(
-                f"{shlex.quote(python)} -c \"import debugpy; print(debugpy.__version__)\"",
-                cwd=".",
-                timeout=30,
-            )
-            await backend.close()
-            if code != 0:
-                raise RuntimeError(
-                    "Remote Python missing debugpy. Install with: "
-                    f"{python} -m pip install debugpy\n{err or out}"
+            try:
+                code, out, err = await backend.run_command(
+                    f"{shlex.quote(python)} -c \"import debugpy; print(debugpy.__version__)\"",
+                    cwd=".",
+                    timeout=30,
                 )
-            return
-        code = await asyncio.create_subprocess_exec(
+            finally:
+                await backend.close()
+            if code == 0:
+                return True, (out or "").strip()
+            return False, (err or out or "").strip()
+        proc = await asyncio.create_subprocess_exec(
             python,
             "-c",
-            "import debugpy",
+            "import debugpy; print(debugpy.__version__)",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        _out, err = await code.communicate()
-        if code.returncode != 0:
-            raise RuntimeError(
-                "Python missing debugpy. Install with: "
-                f"{python} -m pip install debugpy\n{(err or b'').decode()}"
+        out_b, err_b = await proc.communicate()
+        out = (out_b or b"").decode(errors="replace").strip()
+        err = (err_b or b"").decode(errors="replace").strip()
+        if proc.returncode == 0:
+            return True, out
+        return False, err or out
+
+    async def _install_debugpy(self, python: str) -> tuple[bool, str]:
+        """Try `python -m pip install debugpy`. Returns (ok, log)."""
+        pip_cmd = [
+            python,
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "debugpy",
+        ]
+        if self._ssh:
+            from code_agent.workspace.ssh import SshWorkspaceBackend
+
+            backend = await SshWorkspaceBackend.open(self.workspace)
+            try:
+                code, out, err = await backend.run_command(
+                    " ".join(shlex.quote(p) for p in pip_cmd),
+                    cwd=".",
+                    timeout=180,
+                )
+            finally:
+                await backend.close()
+            detail = "\n".join(x for x in [(out or "").strip(), (err or "").strip()] if x)
+            return code == 0, detail
+        proc = await asyncio.create_subprocess_exec(
+            *pip_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        out_b, err_b = await proc.communicate()
+        detail = "\n".join(
+            x
+            for x in [
+                (out_b or b"").decode(errors="replace").strip(),
+                (err_b or b"").decode(errors="replace").strip(),
+            ]
+            if x
+        )
+        return proc.returncode == 0, detail
+
+    async def _ensure_debugpy(self, python: str) -> None:
+        ok, detail = await self._debugpy_import_ok(python)
+        if ok:
+            return
+        where = "remote" if self._ssh else "local"
+        await self._emit(
+            "output",
+            {
+                "category": "console",
+                "output": f"debugpy not found in {where} Python ({python}); installing…\n",
+            },
+        )
+        installed, install_log = await self._install_debugpy(python)
+        ok2, detail2 = await self._debugpy_import_ok(python)
+        if installed and ok2:
+            await self._emit(
+                "output",
+                {
+                    "category": "console",
+                    "output": f"debugpy {detail2 or 'installed'} ready.\n",
+                },
             )
+            return
+        bits = [x for x in [detail, install_log, detail2] if x]
+        raise RuntimeError(
+            f"{'Remote ' if self._ssh else ''}Python missing debugpy and auto-install failed. "
+            f"Install with: {python} -m pip install debugpy\n" + "\n".join(bits)
+        )
 
     async def _start_local(self) -> None:
-        python = self.config.python or "python3"
+        python = resolve_debug_python(self.config.python, is_ssh=False, workspace_root=self._root)
+        self.config.python = python
         await self._ensure_debugpy(python)
         self._local_port = free_port()
         cwd_path = resolve_in_workspace(self._root, self.config.cwd or ".")
@@ -241,7 +312,8 @@ class DebugSession:
         from code_agent.workspace.ssh import SshWorkspaceBackend
         from code_agent.workspace.ssh_pool import ssh_pool
 
-        python = self.config.python or "python3"
+        python = resolve_debug_python(self.config.python, is_ssh=True, workspace_root=self._root)
+        self.config.python = python
         await self._ensure_debugpy(python)
         backend = await SshWorkspaceBackend.open(self.workspace)
         self._ssh_conn = await backend._conn()  # noqa: SLF001 — reuse pooled connection

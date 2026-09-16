@@ -50,7 +50,7 @@ EOF
 python3.11 - <<PY
 from pathlib import Path
 root = Path("$RUNTIME") / "Lib" / "site-packages"
-need = ["fastapi", "uvicorn", "langgraph", "langchain_core", "tortoise", "httpx", "yaml", "cryptography", "tzdata", "winpty"]
+need = ["fastapi", "uvicorn", "langgraph", "langchain_core", "tortoise", "httpx", "yaml", "cryptography", "tzdata", "winpty", "debugpy"]
 missing = [n for n in need if not any(root.glob(n + "*"))]
 if missing:
     raise SystemExit(f"missing packages in windows bundle: {missing}")

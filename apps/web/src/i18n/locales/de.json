@@ -276,6 +276,15 @@
       "hint": "auto (Standard: uploads unter dem SQLite-Datenverzeichnis), relativer oder absoluter Pfad. Speichern wirkt sofort ohne Neustart. Desktop kann Ordner wählen.",
       "resolved": "Aktueller Pfad: {path}"
     },
+    "python": {
+      "autoDetect": "Automatisch (.venv / venv)",
+      "browse": "Ordner wählen",
+      "scanning": "Python-Umgebungen im Arbeitsbereich werden gesucht…",
+      "noneFound": "Keine übliche Virtualenv gefunden. Pfad manuell eingeben oder Ordner wählen.",
+      "customPath": "Aktuell: {path}",
+      "systemPath": "System · {path}",
+      "systemWithVersion": "System · {version} ({path})"
+    },
     "fields": {
       "agent": {
         "max_steps": "Max. Agent-Schritte",

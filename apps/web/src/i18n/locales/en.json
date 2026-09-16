@@ -354,13 +354,20 @@
   },
   "settings": {
     "title": "Settings",
-    "lead": "Override workspace config. Priority: default.yaml → user config → workspace .code-agent/config.yaml → this page.",
+    "lead": "User settings apply globally; workspace settings are stored in the project’s .code-agent/config.yaml.",
+    "leadUser": "User settings apply to every workspace.",
+    "leadWorkspace": "Workspace settings apply only to the current project (.code-agent/config.yaml). When Python interpreter is unset, opening a terminal auto-runs source activate if .venv or venv is found.",
+    "scopeLabel": "Settings scope",
+    "scopeUser": "User",
+    "scopeWorkspace": "Workspace",
+    "workspaceRequired": "Open a workspace before editing workspace settings.",
     "save": "Save settings",
     "toc": "Setting groups",
     "groups": {
       "agent": "Agent",
       "policy": "Policy & security",
       "terminal": "Terminal",
+      "python": "Python",
       "llm": "Models",
       "ui": "Interface",
       "appearance": "Appearance",
@@ -390,11 +397,21 @@
       "activeEvents": "Active events",
       "activeCheckpoint": "Active checkpoint"
     },
+    "python": {
+      "autoDetect": "Auto-detect (.venv / venv)",
+      "browse": "Choose folder",
+      "scanning": "Scanning workspace for Python environments…",
+      "noneFound": "No common virtualenv found. Enter a path manually or choose a folder.",
+      "customPath": "Current: {path}",
+      "systemPath": "System · {path}",
+      "systemWithVersion": "System · {version} ({path})"
+    },
     "placeholders": {
       "storage.postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent",
       "storage.redis_url": "redis://127.0.0.1:6379/0",
       "storage.checkpoint_postgres_url": "postgres://user:pass@127.0.0.1:5432/code_agent_checkpoints",
-      "uploads.dir": "auto"
+      "uploads.dir": "auto",
+      "python.interpreter": ".venv or .venv/bin/python"
     },
     "fields": {
       "agent": {
@@ -413,6 +430,9 @@
       },
       "terminal": {
         "shell": "Terminal shell"
+      },
+      "python": {
+        "interpreter": "Python interpreter"
       },
       "llm": {
         "default_temperature": "Default temperature"
@@ -601,7 +621,7 @@
     "setValueNeedPause": "Pause the debugger before setting a variable",
     "needWorkspace": "Open a workspace first",
     "needPythonFile": "Open a .py file or pick a launch config",
-    "needDebugpy": "debugpy is missing. Install with: python3 -m pip install debugpy",
+    "needDebugpy": "debugpy is missing; Code Agent will try to install it, or run: python3 -m pip install debugpy",
     "startFailed": "Failed to start debugging",
     "controlFailed": "Debug action failed",
     "state": {
@@ -726,8 +746,6 @@
     "rollbackFailed": "Rollback failed",
     "queued": "Queued · {n}",
     "clearQueue": "Clear queue",
-    "backgroundTip": "This run continues in the background. Open a new chat to keep working, or manage runs in Trajectory.",
-    "newChatBackground": "New chat",
     "sendNow": "Send now",
     "uploadImage": "Upload image",
     "voiceInput": "Voice input",
