@@ -221,6 +221,8 @@ def _start_process(
     log_path.write_text("", encoding="utf-8")
     print(f"→ starting {name} …")
     proc_env = os.environ.copy()
+    proc_env.setdefault("PYTHONUTF8", "1")
+    proc_env.setdefault("PYTHONIOENCODING", "utf-8")
     if env:
         proc_env.update(env)
     with log_path.open("a", encoding="utf-8") as log:
@@ -255,7 +257,7 @@ def _start_process(
 
 
 def _python_cmd(*args: str) -> list[str]:
-    return [sys.executable, "-m", "code_agent", *args]
+    return [sys.executable, "-X", "utf8", "-m", "code_agent", *args]
 
 
 def _ensure_frontend_built(*, force: bool = False) -> None:

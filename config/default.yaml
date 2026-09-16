@@ -179,6 +179,9 @@ ssh:
   login_timeout: 20
   # null = accept unknown hosts (local-first UX); true/"auto" = OpenSSH defaults; or path to known_hosts file
   known_hosts: null
+  # OpenSSH config is skipped by default. asyncssh reads ~/.ssh/config with the
+  # Windows locale (GBK), which raises UnicodeDecodeError on UTF-8 comments.
+  config: null
   keepalive_interval: 30
   # Reuse mirrored plugins/skills between workspace switches (seconds). 0 = always resync.
   mirror_ttl_sec: 1800

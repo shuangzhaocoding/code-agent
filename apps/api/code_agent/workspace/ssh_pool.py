@@ -3,12 +3,76 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import asyncssh
 
 from code_agent.config import settings
 from code_agent.crypto import decrypt_secret, encrypt_secret
+
+_DEFAULT_KNOWN_HOSTS = ("~/.ssh/known_hosts", "~/.ssh/known_hosts2")
+
+
+def _read_utf8(path: str) -> str | None:
+    try:
+        return Path(path).expanduser().read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _known_hosts_arg(value: Any) -> bytes | None:
+    """Load known_hosts as UTF-8 bytes so Windows GBK locale cannot decode the file."""
+    if value in (None, "", False, "null"):
+        return None
+    paths: tuple[str, ...]
+    if value is True or value == "auto":
+        paths = _DEFAULT_KNOWN_HOSTS
+    else:
+        paths = (str(value),)
+    blobs = [text for rel in paths if (text := _read_utf8(rel))]
+    return "\n".join(blobs).encode("utf-8") if blobs else None
+
+
+def connect_kwargs(auth: SshAuth) -> dict[str, Any]:
+    """asyncssh.connect kwargs that stay encoding-safe on Windows (GBK locale).
+
+    asyncssh opens ``~/.ssh/config`` and known_hosts in text mode without an
+    encoding, so a UTF-8 comment/path raises::
+
+        UnicodeDecodeError: 'gbk' codec can't decode byte 0xac ...
+    """
+    kwargs: dict[str, Any] = {
+        "host": auth.host,
+        "port": auth.port,
+        "username": auth.username,
+        "login_timeout": int(settings.get("ssh.login_timeout") or 20),
+        "encoding": "utf-8",
+        "errors": "replace",
+        # Do not parse OpenSSH config: `open(path)` uses locale encoding.
+        "config": None,
+        "known_hosts": _known_hosts_arg(settings.get("ssh.known_hosts")),
+    }
+    cfg = settings.get("ssh.config")
+    if cfg not in (None, "", False, "null"):
+        kwargs["config"] = str(cfg)
+    keepalive = settings.get("ssh.keepalive_interval")
+    if keepalive not in (None, "", False):
+        kwargs["keepalive_interval"] = int(keepalive)
+    if auth.private_key:
+        kwargs["client_keys"] = [
+            asyncssh.import_private_key(auth.private_key, passphrase=auth.passphrase)
+        ]
+        kwargs["agent_path"] = None
+    elif auth.password:
+        # None (not []) disables default ~/.ssh/id_* and ssh-agent.
+        kwargs["client_keys"] = None
+        kwargs["agent_path"] = None
+    else:
+        kwargs["agent_forwarding"] = False
+    if auth.password:
+        kwargs["password"] = auth.password
+    return kwargs
 
 
 @dataclass
@@ -82,34 +146,7 @@ class SshPool:
             except Exception:
                 await self._drop_unlocked(key)
 
-        kwargs: dict[str, Any] = {
-            "host": auth.host,
-            "port": auth.port,
-            "username": auth.username,
-            "login_timeout": int(settings.get("ssh.login_timeout") or 20),
-        }
-        known_hosts = settings.get("ssh.known_hosts")
-        if known_hosts in (None, "", False, "null"):
-            kwargs["known_hosts"] = None
-        elif known_hosts is True or known_hosts == "auto":
-            # Use default OpenSSH known_hosts files
-            pass
-        else:
-            kwargs["known_hosts"] = str(known_hosts)
-        keepalive = settings.get("ssh.keepalive_interval")
-        if keepalive not in (None, "", False):
-            kwargs["keepalive_interval"] = int(keepalive)
-        if auth.private_key:
-            kwargs["client_keys"] = [
-                asyncssh.import_private_key(auth.private_key, passphrase=auth.passphrase)
-            ]
-        if auth.password:
-            kwargs["password"] = auth.password
-        if not auth.private_key and not auth.password:
-            # try agent / default keys
-            kwargs["agent_forwarding"] = False
-
-        conn = await asyncssh.connect(**kwargs)
+        conn = await asyncssh.connect(**connect_kwargs(auth))
         self._conns[key] = conn
         return conn
 
