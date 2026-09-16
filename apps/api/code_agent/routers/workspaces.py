@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
@@ -371,6 +371,26 @@ async def workspace_status(workspace_id: str):
     row = await _get_ws(workspace_id)
     status = await _workspace_root_status(row)
     return {**_ws(row), **status}
+
+
+@router.get("/{workspace_id}/events")
+async def workspace_events(workspace_id: str, request: Request):
+    """SSE stream of workspace filesystem changes (local watch / SSH poll)."""
+    import json
+
+    from sse_starlette.sse import EventSourceResponse
+
+    from code_agent.workspace.watcher import workspace_watch_hub
+
+    row = await _get_ws(workspace_id)
+
+    async def gen():
+        async for event in workspace_watch_hub.subscribe(row):
+            if await request.is_disconnected():
+                break
+            yield {"data": json.dumps(event, ensure_ascii=False)}
+
+    return EventSourceResponse(gen(), ping=20)
 
 
 @router.get("/{workspace_id}/python/interpreters")

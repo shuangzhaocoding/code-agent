@@ -290,7 +290,8 @@ function createAndMount(entry: TermEntry) {
   const term = new Terminal({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 13,
-    lineHeight: 1.25,
+    lineHeight: 1.2,
+    scrollback: 5000,
     theme: termTheme(currentTheme()),
     convertEol: true,
     allowProposedApi: false,
@@ -325,10 +326,16 @@ function createAndMount(entry: TermEntry) {
   fit.fit()
 
   const observer = new ResizeObserver(() => {
-    fit.fit()
-    if (entry.ws?.readyState === WebSocket.OPEN) {
-      entry.ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
-    }
+    // Dockview bottom splits often settle one frame later; double-rAF avoids a short clip.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!entry.fit || !entry.term) return
+        entry.fit.fit()
+        if (entry.ws?.readyState === WebSocket.OPEN) {
+          entry.ws.send(JSON.stringify({ type: 'resize', cols: entry.term.cols, rows: entry.term.rows }))
+        }
+      })
+    })
   })
   observer.observe(div)
 
@@ -783,13 +790,27 @@ onBeforeUnmount(() => {
 /* each child div injected by createAndMount() */
 .term-hosts :deep(.term-instance) {
   position: absolute;
-  inset: 0;
-  padding: 8px;
+  /* Use inset (not padding) so FitAddon measures the real content box;
+     padding on the open() element makes the last row clip under the panel edge. */
+  inset: 8px;
+  padding: 0;
+  overflow: hidden;
   background: var(--panel-bg);
+}
+.term-hosts :deep(.xterm) {
+  height: 100%;
 }
 .term-hosts :deep(.xterm),
 .term-hosts :deep(.xterm-viewport) {
   background: transparent;
+}
+.term-hosts :deep(.xterm-viewport) {
+  /* Avoid the last painted row sitting under a fractional scrollbar gutter. */
+  overflow-y: auto !important;
+}
+.term-hosts :deep(.xterm-screen) {
+  /* Keep glyph rows inside the fitted viewport */
+  padding-bottom: 0;
 }
 .term-hosts :deep(.ca-term-link-tip) {
   position: absolute;

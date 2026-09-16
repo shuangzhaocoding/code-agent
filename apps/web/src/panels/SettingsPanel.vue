@@ -569,7 +569,7 @@ const isDesktop = Boolean(
     .codeAgentDesktop?.isDesktop,
 )
 
-function fieldModel(key: string) {
+function fieldModel(_key?: string) {
   return settingsScope.value === 'workspace' ? localWorkspace : local
 }
 
@@ -617,7 +617,9 @@ async function loadPythonInterpreters() {
   }
   pythonInterpretersLoading.value = true
   try {
-    const res = await api(`/api/workspaces/${store.workspaceId}/python/interpreters`)
+    const res = await api<{ items?: PythonInterpreterItem[] }>(
+      `/api/workspaces/${store.workspaceId}/python/interpreters`,
+    )
     pythonInterpreters.value = Array.isArray(res?.items) ? res.items : []
   } catch {
     pythonInterpreters.value = []

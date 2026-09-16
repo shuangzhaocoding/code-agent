@@ -121,10 +121,7 @@ class SshWorkspaceBackend:
         git_ignores = await self._git_ignore_patterns()
         max_children = int(settings.get("workspace.tree_max_children") or 400)
         items: list[dict] = []
-        for entry in sorted(
-            entries,
-            key=lambda e: (str(getattr(e, "filename", "")).startswith("."), str(getattr(e, "filename", "")).lower()),
-        ):
+        for entry in entries:
             name_s = str(getattr(entry, "filename", "") or "")
             if name_s in {".", ".."}:
                 continue
@@ -161,8 +158,10 @@ class SshWorkspaceBackend:
                     "ignored": bool(git_ignores) and matches_ignore(rel_child, git_ignores),
                 }
             )
-            if len(items) >= max_children:
-                break
+        # Match local tree: directories first, then case-insensitive name.
+        items.sort(key=lambda it: (not bool(it.get("is_dir")), str(it.get("name") or "").lower()))
+        if len(items) > max_children:
+            items = items[:max_children]
         return items
 
     async def read_bytes(self, rel: str, max_bytes: int | None = None) -> bytes:

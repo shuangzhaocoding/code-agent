@@ -167,3 +167,39 @@ export function subscribeRun(
     // Do not emit 'closed' on intentional teardown — attachRun/detachRun own that.
   }
 }
+
+export type WorkspaceFsEvent = {
+  type: string
+  workspace_id?: string
+  paths?: string[]
+  kinds?: string[]
+  truncated?: boolean
+  reason?: string
+  mode?: string
+  message?: string
+}
+
+/** Subscribe to workspace filesystem change events (local watch / SSH poll). */
+export function subscribeWorkspaceEvents(
+  workspaceId: string,
+  onEvent: (event: WorkspaceFsEvent) => void,
+): () => void {
+  const url = new URL(`/api/workspaces/${workspaceId}/events`, window.location.origin)
+  const es = new EventSource(url.toString())
+  let intentionalClose = false
+
+  es.onmessage = (ev) => {
+    if (intentionalClose) return
+    try {
+      const data = JSON.parse(ev.data) as WorkspaceFsEvent
+      onEvent(data)
+    } catch {
+      /* ignore malformed frames */
+    }
+  }
+
+  return () => {
+    intentionalClose = true
+    es.close()
+  }
+}

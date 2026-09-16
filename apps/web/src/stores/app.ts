@@ -4,6 +4,7 @@ import {
   api,
   isPathNotFoundError,
   subscribeRun,
+  subscribeWorkspaceEvents,
   type StreamConnectionState,
   type StreamEnvelope,
 } from '@/api/http'
@@ -274,6 +275,8 @@ export const useAppStore = defineStore('app', () => {
   const pendingTreePaths = new Set<string>()
   let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
   let gitRefreshFollowUpTimer: ReturnType<typeof setTimeout> | null = null
+  let stopWorkspaceFsWatch: (() => void) | null = null
+  let workspaceFsWatchId: string | null = null
 
   const workspace = computed(() => workspaces.value.find((w) => w.id === workspaceId.value) || null)
 
@@ -290,6 +293,33 @@ export const useAppStore = defineStore('app', () => {
       clearInterval(workspaceStatusTimer)
       workspaceStatusTimer = null
     }
+  }
+
+  function stopWorkspaceFsEvents() {
+    stopWorkspaceFsWatch?.()
+    stopWorkspaceFsWatch = null
+    workspaceFsWatchId = null
+  }
+
+  function startWorkspaceFsEvents(id: string) {
+    if (!id) return
+    if (workspaceFsWatchId === id && stopWorkspaceFsWatch) return
+    stopWorkspaceFsEvents()
+    workspaceFsWatchId = id
+    stopWorkspaceFsWatch = subscribeWorkspaceEvents(id, (event) => {
+      if (workspaceId.value !== id) return
+      if (event.type !== 'fs.changed') return
+      const paths = Array.isArray(event.paths) ? event.paths.filter(Boolean) : []
+      if (!paths.length || event.truncated) {
+        scheduleTreeRefresh()
+      } else {
+        // Cap fan-out — too many paths becomes a full refresh.
+        const slice = paths.slice(0, 24)
+        if (paths.length > slice.length) scheduleTreeRefresh()
+        else for (const path of slice) scheduleTreeRefresh(path)
+      }
+      scheduleGitRefresh(500, 1800)
+    })
   }
 
   function patchWorkspaceStatus(id: string, missing: boolean) {
@@ -404,6 +434,7 @@ export const useAppStore = defineStore('app', () => {
 
   function clearWorkspace() {
     stopWorkspaceStatusWatch()
+    stopWorkspaceFsEvents()
     workspaceRootMissing.value = false
     detachRun()
     workspaceId.value = null
@@ -523,6 +554,7 @@ export const useAppStore = defineStore('app', () => {
   ) {
     const gen = ++switchLoadGen
     switchLoading.value = t('workspace.switching')
+    stopWorkspaceFsEvents()
     try {
       const opened = await api<Workspace & { root_missing?: boolean; plugins?: unknown }>(
         `/api/workspaces/${id}/open`,
@@ -592,6 +624,7 @@ export const useAppStore = defineStore('app', () => {
         patchWorkspaceStatus(id, missingOnOpen)
       })
       startWorkspaceStatusWatch()
+      startWorkspaceFsEvents(id)
     } finally {
       if (gen === switchLoadGen) switchLoading.value = null
     }
@@ -3079,6 +3112,7 @@ export const useAppStore = defineStore('app', () => {
     gitCommitDraft,
     loadGitChangedPaths,
     scheduleGitRefresh,
+    scheduleTreeRefresh,
     gitChangedPaths,
     loadConversations,
     searchConversations,
