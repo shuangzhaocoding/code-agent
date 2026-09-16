@@ -409,7 +409,7 @@ const menus = computed(() => {
       label: t('menu.items.about'),
       icon: 'help',
       run: () => {
-        toast.info(t('menu.aboutBody', { name: 'Code Agent', version: '1.0.8' }))
+        toast.info(t('menu.aboutBody', { name: 'Code Agent', version: '1.0.10' }))
       },
     },
   ]
