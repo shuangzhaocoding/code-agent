@@ -377,6 +377,9 @@
       "server": "Server security"
     },
     "languageLead": "Switch the UI language. Takes effect immediately.",
+    "editorTheme": "Editor code theme",
+    "editorThemeLead": "Monaco syntax highlighting theme, independent of app light/dark. Default follows the UI.",
+    "editorThemeAuto": "Follow UI (default)",
     "portsNotify": "New port toast",
     "portsNotifyLead": "Show a bottom-right toast when a new listening port appears. Off by default.",
     "logo": "App icon",

@@ -264,6 +264,9 @@
       "storage": "ストレージ"
     },
     "languageLead": "UI 言語を切り替えます。すぐに反映されます。",
+    "editorTheme": "エディタのコードテーマ",
+    "editorThemeLead": "Monaco のシンタックスハイライト。UI の明暗とは独立。既定は UI に追従。",
+    "editorThemeAuto": "UI に合わせる（既定）",
     "logo": "アプリアイコン",
     "logoLead": "クリックして比較。タイトルバーとタブアイコンにすぐ反映されます。",
     "logos": {

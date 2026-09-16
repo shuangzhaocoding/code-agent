@@ -2,6 +2,11 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme } from '@/theme'
+import {
+  EDITOR_THEME_EVENT,
+  applyMonacoEditorTheme,
+  monacoThemeNameForCreate,
+} from '@/utils/editorTheme'
 import FileTreeIcon from '@/components/FileTreeIcon.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import DebugActionIcon from '@/components/DebugActionIcon.vue'
@@ -335,7 +340,7 @@ function cssColor(name: string, fallback: string) {
   return `#${hex}`
 }
 
-function applyEditorTheme() {
+function defineAutoEditorTheme() {
   if (!monacoMod) return
   const dark = currentTheme() === 'dark'
   // Monaco can't resolve CSS color-mix(); use wallpaper-aware glass hex instead.
@@ -354,6 +359,11 @@ function applyEditorTheme() {
     },
   })
   monacoMod.editor.setTheme('ca-editor')
+}
+
+async function applyEditorTheme() {
+  if (!monacoMod) return
+  await applyMonacoEditorTheme(monacoMod, defineAutoEditorTheme)
 }
 
 function fileName(path: string) {
@@ -551,7 +561,7 @@ async function ensureSecondaryEditor() {
   secondaryEditor = monacoMod.editor.create(secondaryHost.value, {
     value: '',
     language: 'plaintext',
-    theme: 'ca-editor',
+    theme: monacoThemeNameForCreate(),
     ...editorOptions,
   })
   bindEditorContextMenu(secondaryEditor)
@@ -966,7 +976,7 @@ function showDiff(path: string, before: string, after: string, opts?: { readOnly
   if (!diffEditor) {
     diffEditor = monacoMod.editor.createDiffEditor(diffHost.value, {
       ...editorOptions,
-      theme: 'ca-editor',
+      theme: monacoThemeNameForCreate(),
       readOnly,
       originalEditable: false,
       renderSideBySide: true,
@@ -1610,12 +1620,12 @@ onMounted(async () => {
     getWorker: () => new editorWorker(),
   }
   if (!host.value) return
-  applyEditorTheme()
+  await applyEditorTheme()
   installMonacoFindHoverGuard()
   editor = monacoMod.editor.create(host.value, {
     value: '',
     language: 'plaintext',
-    theme: 'ca-editor',
+    theme: monacoThemeNameForCreate(),
     ...editorOptions,
   })
   bindEditorContextMenu(editor)
@@ -1631,6 +1641,7 @@ onMounted(async () => {
   refreshDebugLineDecoration()
   window.addEventListener('ca-theme', onTheme as EventListener)
   window.addEventListener('ca-wallpaper', onTheme as EventListener)
+  window.addEventListener(EDITOR_THEME_EVENT, onTheme as EventListener)
   window.addEventListener('ca-file-reload', onReload as EventListener)
   window.addEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.addEventListener('ca-editor-save', onEditorSaveEvent as EventListener)
@@ -1699,7 +1710,7 @@ function onReviewKey(e: KeyboardEvent) {
 }
 
 function onTheme() {
-  applyEditorTheme()
+  void applyEditorTheme()
 }
 
 function onReload(e: Event) {
@@ -1830,6 +1841,7 @@ onBeforeUnmount(() => {
   host.value?.removeEventListener('copy', onEditorCopy)
   window.removeEventListener('ca-theme', onTheme as EventListener)
   window.removeEventListener('ca-wallpaper', onTheme as EventListener)
+  window.removeEventListener(EDITOR_THEME_EVENT, onTheme as EventListener)
   window.removeEventListener('ca-file-reload', onReload as EventListener)
   window.removeEventListener('ca-focus-editor', onFocusEditor as EventListener)
   window.removeEventListener('ca-editor-save', onEditorSaveEvent as EventListener)

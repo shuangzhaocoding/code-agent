@@ -264,6 +264,9 @@
       "storage": "Speicher"
     },
     "languageLead": "Oberflächensprache wechseln. Wirkt sofort.",
+    "editorTheme": "Editor-Code-Theme",
+    "editorThemeLead": "Monaco-Syntax-Highlighting, unabhängig von Hell/Dunkel der Oberfläche. Standard folgt der UI.",
+    "editorThemeAuto": "UI folgen (Standard)",
     "logo": "App-Symbol",
     "logoLead": "Zum Vergleichen klicken. Wirkt sofort in Titelleiste und Tab-Symbol.",
     "logos": {

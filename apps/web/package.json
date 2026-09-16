@@ -23,6 +23,7 @@
     "jszip": "^3.10.1",
     "marked": "^18.0.10",
     "monaco-editor": "^0.56.0",
+    "monaco-themes": "^0.4.8",
     "pinia": "^4.0.3",
     "prettier": "^3.9.6",
     "vue": "^3.5.40",

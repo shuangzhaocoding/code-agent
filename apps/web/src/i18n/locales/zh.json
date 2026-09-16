@@ -377,6 +377,9 @@
       "server": "服务安全"
     },
     "languageLead": "切换界面语言，立即生效。",
+    "editorTheme": "编辑器代码主题",
+    "editorThemeLead": "选择 Monaco 语法高亮主题，与界面明暗独立。默认跟随界面。",
+    "editorThemeAuto": "跟随界面（默认）",
     "portsNotify": "新端口弹窗提示",
     "portsNotifyLead": "发现新的监听端口时在右下角弹出提示。默认关闭。",
     "logo": "应用图标",

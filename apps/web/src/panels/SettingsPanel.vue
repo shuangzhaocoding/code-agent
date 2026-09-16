@@ -20,6 +20,11 @@ import {
   type WallpaperId,
 } from '@/utils/desktopDecor'
 import { getPortsNotifyNew, setPortsNotifyNew } from '@/composables/usePortsWatch'
+import {
+  getEditorThemeId,
+  listEditorThemeOptions,
+  setEditorThemeId,
+} from '@/utils/editorTheme'
 import { api } from '@/api/http'
 import { getDesktopBridge } from '@/utils/desktop'
 
@@ -49,6 +54,13 @@ const toast = useToast()
 const { diffTarget, setDiffTarget } = useGitDiffTarget()
 const { brandMark, setBrandMark } = useBrandMark()
 const portsNotifyNew = ref(getPortsNotifyNew())
+const editorThemeId = ref(getEditorThemeId())
+const editorThemeOptions = computed(() =>
+  listEditorThemeOptions(t('settings.editorThemeAuto')).map((o) => ({
+    value: o.id,
+    label: o.label,
+  })),
+)
 const settingsScope = ref<'user' | 'workspace'>('user')
 const localWorkspace = reactive<Record<string, unknown>>({})
 const baselineWorkspace = ref<Record<string, unknown>>({})
@@ -58,6 +70,10 @@ const pythonInterpretersLoading = ref(false)
 function onPortsNotifyToggle(enabled: boolean) {
   portsNotifyNew.value = enabled
   setPortsNotifyNew(enabled)
+}
+
+function onEditorThemeChange(id: string) {
+  editorThemeId.value = setEditorThemeId(id)
 }
 const {
   wallpaper,
@@ -765,6 +781,19 @@ async function save() {
                 <p class="setting-key">{{ t('settings.languageLead') }}</p>
               </div>
               <LanguageSelect :show-label="false" />
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy">
+                <label for="editor-theme">{{ t('settings.editorTheme') }}</label>
+                <p class="setting-key">{{ t('settings.editorThemeLead') }}</p>
+              </div>
+              <FormSelect
+                id="editor-theme"
+                class="setting-select"
+                :model-value="editorThemeId"
+                :options="editorThemeOptions"
+                @update:model-value="onEditorThemeChange"
+              />
             </div>
             <div class="setting-row">
               <div class="setting-copy">
