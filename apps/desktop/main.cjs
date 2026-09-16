@@ -46,10 +46,10 @@ function persistChromeTheme(theme) {
 }
 
 const SPLIT_SERVICES = [
-  { name: 'api', args: ['-m', 'code_agent', 'api'] },
-  { name: 'worker', args: ['-m', 'code_agent', 'worker'] },
-  { name: 'terminal', args: ['-m', 'code_agent', 'terminal'] },
-  { name: 'preview', args: ['-m', 'code_agent', 'preview'] },
+  { name: 'api', args: ['-X', 'utf8', '-m', 'code_agent', 'api'] },
+  { name: 'worker', args: ['-X', 'utf8', '-m', 'code_agent', 'worker'] },
+  { name: 'terminal', args: ['-X', 'utf8', '-m', 'code_agent', 'terminal'] },
+  { name: 'preview', args: ['-X', 'utf8', '-m', 'code_agent', 'preview'] },
 ]
 
 /** @type {Set<import('electron').BrowserWindow>} */
@@ -566,6 +566,9 @@ function startBackend() {
     CODE_AGENT_TERMINAL_MODE: 'standalone',
     CODE_AGENT_PREVIEW_MODE: 'standalone',
     PYTHONUNBUFFERED: '1',
+    // Chinese Windows defaults to GBK; asyncssh/open() then fail on UTF-8 SSH files.
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
     // Still set for non-embeddable interpreters; embeddable relies on ._pth above.
     PYTHONPATH: [cwd, process.env.PYTHONPATH || ''].filter(Boolean).join(path.delimiter),
   }
