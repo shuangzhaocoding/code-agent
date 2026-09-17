@@ -25,6 +25,10 @@ const emit = defineEmits<{
   dragleave: [path: string, e: DragEvent]
   drop: [path: string, e: DragEvent]
 }>()
+
+defineSlots<{
+  default(props: { folderPath: string }): unknown
+}>()
 </script>
 
 <template>
@@ -75,8 +79,8 @@ const emit = defineEmits<{
         @dragleave="(p, e) => emit('dragleave', p, e)"
         @drop="(p, e) => emit('drop', p, e)"
       >
-        <template #default="slotProps">
-          <slot v-bind="slotProps" />
+        <template #default="{ folderPath }">
+          <slot :folder-path="folderPath" />
         </template>
       </WorkspaceFolderNode>
 
