@@ -11,6 +11,7 @@ import TopMenuBar from '@/components/TopMenuBar.vue'
 import DesktopTitleBar from '@/components/DesktopTitleBar.vue'
 import PanelTab from '@/components/PanelTab.vue'
 import ConfirmCard from '@/components/ConfirmCard.vue'
+import PromptCard from '@/components/PromptCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AppToastHost from '@/components/AppToastHost.vue'
@@ -645,6 +646,19 @@ const dockThemeClass = computed(() =>
       :danger="store.confirmDialog.danger !== false"
       @confirm="store.closeConfirm(true)"
       @cancel="store.closeConfirm(false)"
+    />
+    <PromptCard
+      v-if="store.promptDialog"
+      :title="store.promptDialog.title"
+      :summary="store.promptDialog.summary"
+      :label="store.promptDialog.label"
+      :default-value="store.promptDialog.defaultValue"
+      :placeholder="store.promptDialog.placeholder"
+      :confirm-label="store.promptDialog.confirmLabel"
+      :cancel-label="store.promptDialog.cancelLabel"
+      :danger="store.promptDialog.danger === true"
+      @confirm="store.closePrompt($event)"
+      @cancel="store.closePrompt(null)"
     />
     <PortNotifyToast />
     <AppToastHost />

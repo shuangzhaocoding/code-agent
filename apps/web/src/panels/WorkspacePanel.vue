@@ -7,9 +7,30 @@ import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceSwitch from '@/components/WorkspaceSwitch.vue'
 import type { WorkspaceSwitchPrefill } from '@/components/WorkspaceSwitch.vue'
 import WorkspaceEditDialog from '@/components/WorkspaceEditDialog.vue'
+import WorkspaceFolderNode from '@/components/WorkspaceFolderNode.vue'
+import WorkspaceHostBlock from '@/components/WorkspaceHostBlock.vue'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import { useSessionPins } from '@/composables/useSessionPins'
 import { useToast } from '@/composables/useToast'
 import { formatRelativeTime, formatWorkspaceOpenedAt } from '@/utils/relativeTime'
+import {
+  buildFolderForest,
+  childFolderPath,
+  collectAllFolderPaths,
+  copyExtraHostSubtree,
+  folderLeafName,
+  forgetHostGroup,
+  isSameOrDescendant,
+  isUnderFolder,
+  loadExtraHostGroups,
+  normalizeFolderPath,
+  parentFolderPath,
+  rememberHostGroup,
+  rewriteExtraHostGroups,
+  rewriteFolderPrefix,
+  sanitizeFolderName,
+  uniqueSiblingPath,
+} from '@/utils/sshHostGroups'
 
 const PREVIEW_LIMIT = 5
 
@@ -17,6 +38,7 @@ type WorkspaceHostGroup = {
   key: string
   label: string
   kind: 'local' | 'ssh'
+  groupName: string
   workspaces: Workspace[]
 }
 
@@ -39,6 +61,7 @@ const removingId = ref<string | null>(null)
 const editingId = ref<string | null>(null)
 const editingTitle = ref('')
 const pinTick = ref(0)
+const extraGroups = ref<string[]>(loadExtraHostGroups())
 
 const hoverId = ref<string | null>(null)
 const hoverHostKey = ref<string | null>(null)
@@ -50,7 +73,6 @@ let tipRaf = 0
 
 onMounted(async () => {
   await store.loadWorkspaces()
-  if (store.workspaceId) await setExpanded(store.workspaceId, true)
 })
 
 onBeforeUnmount(() => {
@@ -114,6 +136,7 @@ const workspaceGroups = computed<WorkspaceHostGroup[]>(() => {
         key,
         label: hostLabel(ws),
         kind: isSsh(ws) ? 'ssh' : 'local',
+        groupName: isSsh(ws) ? normalizeFolderPath(ws.ssh_group || '') : '',
         workspaces: [],
       }
       map.set(key, group)
@@ -122,6 +145,8 @@ const workspaceGroups = computed<WorkspaceHostGroup[]>(() => {
     if (isSsh(ws)) {
       const custom = (ws.ssh_display_name || '').trim()
       if (custom) group.label = custom
+      const g = normalizeFolderPath(ws.ssh_group || '')
+      if (g) group.groupName = g
     }
   }
   // Local first, then SSH hosts alphabetically
@@ -131,18 +156,489 @@ const workspaceGroups = computed<WorkspaceHostGroup[]>(() => {
   })
 })
 
-const collapsedHosts = ref<Set<string>>(new Set())
+const localHostGroups = computed(() => workspaceGroups.value.filter((g) => g.kind === 'local'))
+const sshHostGroups = computed(() => workspaceGroups.value.filter((g) => g.kind === 'ssh'))
+
+const knownGroupNames = computed(() =>
+  collectAllFolderPaths(
+    extraGroups.value,
+    sshHostGroups.value.map((g) => g.groupName),
+  ),
+)
+
+const folderForest = computed(() => buildFolderForest(knownGroupNames.value))
+
+const rootSshHosts = computed(() =>
+  sshHostGroups.value.filter((g) => !normalizeFolderPath(g.groupName)),
+)
+
+function hostsInFolder(path: string) {
+  const p = normalizeFolderPath(path)
+  return sshHostGroups.value.filter((g) => normalizeFolderPath(g.groupName) === p)
+}
+
+function hostCountUnder(path: string) {
+  const p = normalizeFolderPath(path)
+  if (!p) return rootSshHosts.value.length
+  return sshHostGroups.value.filter((g) => isUnderFolder(g.groupName, p)).length
+}
+
+const EXPANDED_HOSTS_KEY = 'ca.sshExpandedHosts'
+const EXPANDED_FOLDERS_KEY = 'ca.sshExpandedFolders'
+
+function loadExpandedSet(storageKey: string): Set<string> {
+  if (typeof localStorage === 'undefined') return new Set()
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.map((x) => String(x || '')).filter(Boolean))
+  } catch {
+    return new Set()
+  }
+}
+
+function saveExpandedSet(storageKey: string, set: Set<string>) {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(storageKey, JSON.stringify([...set]))
+}
+
+/** Expanded = open. Empty set means all hosts/folders start collapsed. */
+const expandedHosts = ref<Set<string>>(loadExpandedSet(EXPANDED_HOSTS_KEY))
+const expandedFolders = ref<Set<string>>(loadExpandedSet(EXPANDED_FOLDERS_KEY))
+
+const HOST_DRAG_MIME = 'application/x-code-agent-ssh-host'
+const FOLDER_DRAG_MIME = 'application/x-code-agent-ssh-folder'
+const dragHostKey = ref<string | null>(null)
+const dragFolderPath = ref<string | null>(null)
+const dropFolderPath = ref<string | null>(null)
+const moving = ref(false)
+
+const folderMenu = ref<{ x: number; y: number; path: string } | null>(null)
+
+function persistExpandedHosts() {
+  saveExpandedSet(EXPANDED_HOSTS_KEY, expandedHosts.value)
+}
+
+function persistExpandedFolders() {
+  saveExpandedSet(EXPANDED_FOLDERS_KEY, expandedFolders.value)
+}
 
 function isHostOpen(key: string) {
-  return !collapsedHosts.value.has(key)
+  return expandedHosts.value.has(key)
+}
+
+function isFolderOpen(path: string) {
+  return expandedFolders.value.has(path)
+}
+
+function toggleFolder(path: string) {
+  const next = new Set(expandedFolders.value)
+  if (next.has(path)) next.delete(path)
+  else next.add(path)
+  expandedFolders.value = next
+  persistExpandedFolders()
+}
+
+function openFolder(path: string) {
+  if (!path) return
+  if (expandedFolders.value.has(path)) return
+  expandedFolders.value = new Set([...expandedFolders.value, path])
+  persistExpandedFolders()
+}
+
+function rewriteExpandedFolderPaths(from: string, to: string) {
+  const f = normalizeFolderPath(from)
+  if (!f) return
+  const next = new Set<string>()
+  for (const p of expandedFolders.value) {
+    const rewritten = rewriteFolderPrefix(p, f, to)
+    if (rewritten) next.add(rewritten)
+  }
+  expandedFolders.value = next
+  persistExpandedFolders()
+}
+
+function forgetExpandedFolderPaths(folder: string) {
+  const f = normalizeFolderPath(folder)
+  if (!f) return
+  expandedFolders.value = new Set(
+    [...expandedFolders.value].filter((p) => !isUnderFolder(p, f)),
+  )
+  persistExpandedFolders()
+}
+
+function refreshExtraGroups() {
+  extraGroups.value = loadExtraHostGroups()
+}
+
+async function patchHostGroup(workspaces: Workspace[], group: string) {
+  await Promise.all(
+    workspaces.map((ws) =>
+      api(`/api/workspaces/${ws.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ssh_group: group }),
+      }),
+    ),
+  )
+}
+
+async function rewriteWorkspaceGroups(from: string, to: string) {
+  const f = normalizeFolderPath(from)
+  if (!f) return
+  const targets = store.recentWorkspaces.filter(
+    (ws) => (ws.kind || 'local') === 'ssh' && isUnderFolder(ws.ssh_group || '', f),
+  )
+  await Promise.all(
+    targets.map((ws) =>
+      api(`/api/workspaces/${ws.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ssh_group: rewriteFolderPrefix(ws.ssh_group || '', f, to),
+        }),
+      }),
+    ),
+  )
+}
+
+async function moveHostToFolder(host: WorkspaceHostGroup, folderPath: string) {
+  if (host.kind !== 'ssh' || !host.workspaces.length) return
+  const next = normalizeFolderPath(folderPath)
+  if (normalizeFolderPath(host.groupName) === next) return
+  if (moving.value) return
+  moving.value = true
+  try {
+    await patchHostGroup(host.workspaces, next)
+    await store.loadWorkspaces()
+    if (next) rememberHostGroup(next)
+    refreshExtraGroups()
+    openFolder(next)
+    toast.info(
+      next
+        ? t('workspace.panel.movedToFolder', { host: host.label, folder: next })
+        : t('workspace.panel.movedToUngrouped', { host: host.label }),
+    )
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    toast.error(raw || t('workspace.panel.moveFailed'))
+  } finally {
+    moving.value = false
+  }
+}
+
+async function moveFolderToParent(fromPath: string, destParent: string) {
+  const from = normalizeFolderPath(fromPath)
+  if (!from) return
+  const leaf = folderLeafName(from)
+  const dest = normalizeFolderPath(destParent)
+  if (isSameOrDescendant(from, dest)) {
+    toast.warning(t('workspace.panel.cannotMoveIntoSelf'))
+    return
+  }
+  const to = childFolderPath(dest, leaf)
+  if (to === from) return
+  if (knownGroupNames.value.includes(to) && to !== from) {
+    toast.warning(t('workspace.panel.newGroupExists'))
+    return
+  }
+  if (moving.value) return
+  moving.value = true
+  try {
+    await rewriteWorkspaceGroups(from, to)
+    rewriteExtraHostGroups(from, to)
+    rewriteExpandedFolderPaths(from, to)
+    rememberHostGroup(to)
+    await store.loadWorkspaces()
+    refreshExtraGroups()
+    openFolder(to)
+    if (dest) openFolder(dest)
+    toast.info(t('workspace.panel.movedFolder', { from, to }))
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    toast.error(raw || t('workspace.panel.moveFailed'))
+  } finally {
+    moving.value = false
+  }
+}
+
+function hasTreeDrag(e: DragEvent) {
+  const types = e.dataTransfer?.types
+  return (
+    Boolean(dragHostKey.value) ||
+    Boolean(dragFolderPath.value) ||
+    (types != null && ([...types].includes(HOST_DRAG_MIME) || [...types].includes(FOLDER_DRAG_MIME)))
+  )
+}
+
+function onHostDragStart(group: WorkspaceHostGroup, e: DragEvent) {
+  if (group.kind !== 'ssh') {
+    e.preventDefault()
+    return
+  }
+  // setData must stay sync; defer reactive UI so the drag source is not re-rendered mid-dragstart
+  if (e.dataTransfer) {
+    e.dataTransfer.setData(HOST_DRAG_MIME, group.key)
+    e.dataTransfer.setData('text/plain', group.key)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  requestAnimationFrame(() => {
+    clearTip()
+    dragHostKey.value = group.key
+    dragFolderPath.value = null
+    dropFolderPath.value = null
+  })
+}
+
+function onHostDragEnd() {
+  dragHostKey.value = null
+  dropFolderPath.value = null
+}
+
+function onFolderDragStart(path: string, e: DragEvent) {
+  if (e.dataTransfer) {
+    e.dataTransfer.setData(FOLDER_DRAG_MIME, path)
+    e.dataTransfer.setData('text/plain', path)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  requestAnimationFrame(() => {
+    clearTip()
+    folderMenu.value = null
+    dragFolderPath.value = path
+    dragHostKey.value = null
+    dropFolderPath.value = null
+  })
+}
+
+function onFolderDragEnd() {
+  dragFolderPath.value = null
+  dropFolderPath.value = null
+}
+
+function onFolderDragOver(path: string, e: DragEvent) {
+  if (!hasTreeDrag(e)) return
+  if (dragFolderPath.value && isSameOrDescendant(dragFolderPath.value, path)) {
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none'
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropFolderPath.value = path
+  openFolder(path)
+}
+
+function onFolderDragLeave(path: string, e: DragEvent) {
+  const related = e.relatedTarget as Node | null
+  const current = e.currentTarget as HTMLElement | null
+  if (current && related && current.contains(related)) return
+  if (dropFolderPath.value === path) dropFolderPath.value = null
+}
+
+async function onFolderDrop(path: string, e: DragEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const hostKey = e.dataTransfer?.getData(HOST_DRAG_MIME) || dragHostKey.value
+  const folderKey = e.dataTransfer?.getData(FOLDER_DRAG_MIME) || dragFolderPath.value
+  dropFolderPath.value = null
+  dragHostKey.value = null
+  dragFolderPath.value = null
+  const dest = normalizeFolderPath(path)
+  if (folderKey) {
+    await moveFolderToParent(folderKey, dest)
+    return
+  }
+  if (hostKey) {
+    const host = workspaceGroups.value.find((g) => g.key === hostKey && g.kind === 'ssh')
+    if (host) await moveHostToFolder(host, dest)
+  }
+}
+
+async function onRootDrop(e: DragEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  const hostKey = e.dataTransfer?.getData(HOST_DRAG_MIME) || dragHostKey.value
+  const folderKey = e.dataTransfer?.getData(FOLDER_DRAG_MIME) || dragFolderPath.value
+  dropFolderPath.value = null
+  dragHostKey.value = null
+  dragFolderPath.value = null
+  if (folderKey) {
+    await moveFolderToParent(folderKey, '')
+    return
+  }
+  if (hostKey) {
+    const host = workspaceGroups.value.find((g) => g.key === hostKey && g.kind === 'ssh')
+    if (host) await moveHostToFolder(host, '')
+  }
+}
+
+function onRootDragOver(e: DragEvent) {
+  if (!hasTreeDrag(e)) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  dropFolderPath.value = ''
+}
+
+async function createHostGroup(parentPath = '') {
+  const raw = await store.askPrompt({
+    title: parentPath ? t('workspace.panel.ctxNewSubfolder') : t('workspace.panel.newGroup'),
+    summary: parentPath ? t('workspace.panel.newSubfolderPrompt') : t('workspace.panel.newGroupPrompt'),
+    label: t('workspace.panel.folderName'),
+    placeholder: t('workspace.panel.folderNamePlaceholder'),
+    confirmLabel: t('common.create'),
+  })
+  if (raw == null) return
+  const name = sanitizeFolderName(raw)
+  if (!name) return
+  const full = childFolderPath(parentPath, name)
+  if (knownGroupNames.value.includes(full)) {
+    toast.info(t('workspace.panel.newGroupExists'))
+    openFolder(full)
+    return
+  }
+  rememberHostGroup(full)
+  refreshExtraGroups()
+  openFolder(full)
+  if (parentPath) openFolder(parentPath)
+}
+
+async function renameFolder(path: string) {
+  const from = normalizeFolderPath(path)
+  if (!from) return
+  const raw = await store.askPrompt({
+    title: t('workspace.panel.ctxRename'),
+    summary: t('workspace.panel.renameFolderPrompt'),
+    label: t('workspace.panel.folderName'),
+    defaultValue: folderLeafName(from),
+    confirmLabel: t('common.rename'),
+  })
+  if (raw == null) return
+  const name = sanitizeFolderName(raw)
+  if (!name) return
+  const to = childFolderPath(parentFolderPath(from), name)
+  if (to === from) return
+  if (knownGroupNames.value.includes(to)) {
+    toast.warning(t('workspace.panel.newGroupExists'))
+    return
+  }
+  if (moving.value) return
+  moving.value = true
+  try {
+    await rewriteWorkspaceGroups(from, to)
+    rewriteExtraHostGroups(from, to)
+    rewriteExpandedFolderPaths(from, to)
+    rememberHostGroup(to)
+    await store.loadWorkspaces()
+    refreshExtraGroups()
+    openFolder(to)
+    toast.info(t('workspace.panel.renamedFolder', { from, to }))
+  } catch (err) {
+    const rawErr = err instanceof Error ? err.message : String(err)
+    toast.error(rawErr || t('workspace.panel.moveFailed'))
+  } finally {
+    moving.value = false
+  }
+}
+
+function copyFolder(path: string) {
+  const from = normalizeFolderPath(path)
+  if (!from) return
+  const parent = parentFolderPath(from)
+  const copyName = `${folderLeafName(from)} ${t('workspace.panel.copySuffix')}`
+  const to = uniqueSiblingPath(parent, copyName, knownGroupNames.value)
+  copyExtraHostSubtree(from, to)
+  refreshExtraGroups()
+  openFolder(to)
+  if (parent) openFolder(parent)
+  toast.info(t('workspace.panel.copiedFolder', { from, to }))
+}
+
+async function deleteFolder(path: string) {
+  const from = normalizeFolderPath(path)
+  if (!from) return
+  const hosts = sshHostGroups.value.filter((g) => isUnderFolder(g.groupName, from))
+  const parent = parentFolderPath(from)
+  const ok = await store.askConfirm({
+    title: t('workspace.panel.ctxDelete'),
+    summary: hosts.length
+      ? t('workspace.panel.deleteFolderConfirmHosts', { folder: from, n: hosts.length })
+      : t('workspace.panel.deleteFolderConfirm', { folder: from }),
+    confirmLabel: t('common.delete'),
+    danger: true,
+  })
+  if (!ok) return
+  if (moving.value) return
+  moving.value = true
+  try {
+    if (hosts.length) {
+      await Promise.all(hosts.map((h) => patchHostGroup(h.workspaces, parent)))
+      await store.loadWorkspaces()
+    }
+    forgetHostGroup(from)
+    forgetExpandedFolderPaths(from)
+    refreshExtraGroups()
+    if (parent) openFolder(parent)
+    toast.info(t('workspace.panel.deletedFolder', { folder: from }))
+  } catch (err) {
+    const raw = err instanceof Error ? err.message : String(err)
+    toast.error(raw || t('workspace.panel.moveFailed'))
+  } finally {
+    moving.value = false
+  }
+}
+
+function startAddInFolder(folderPath: string) {
+  openPrefill.value = {
+    mode: 'ssh',
+    lockMode: false,
+    ssh_group: normalizeFolderPath(folderPath) || undefined,
+  }
+  showOpen.value = true
+}
+
+function openFolderMenu(path: string, e: MouseEvent) {
+  folderMenu.value = { x: e.clientX, y: e.clientY, path }
+}
+
+const folderMenuItems = computed((): ContextMenuItem[] => {
+  if (!folderMenu.value) return []
+  return [
+    { id: 'new-session', label: t('workspace.panel.ctxNewSession'), icon: 'plus' },
+    { id: 'new-subfolder', label: t('workspace.panel.ctxNewSubfolder'), icon: 'folder-plus' },
+    { id: 'sep1', separator: true },
+    { id: 'rename', label: t('workspace.panel.ctxRename'), icon: 'pencil' },
+    { id: 'copy', label: t('workspace.panel.ctxCopy'), icon: 'copy' },
+    { id: 'sep2', separator: true },
+    { id: 'delete', label: t('workspace.panel.ctxDelete'), icon: 'trash', danger: true },
+  ]
+})
+
+function onFolderMenuSelect(id: string) {
+  const path = folderMenu.value?.path
+  folderMenu.value = null
+  if (!path) return
+  if (id === 'new-session') startAddInFolder(path)
+  else if (id === 'new-subfolder') void createHostGroup(path)
+  else if (id === 'rename') void renameFolder(path)
+  else if (id === 'copy') copyFolder(path)
+  else if (id === 'delete') void deleteFolder(path)
+}
+
+function onHostEdited() {
+  editingHost.value = null
+  for (const g of workspaceGroups.value) {
+    if (g.groupName) rememberHostGroup(g.groupName)
+  }
+  refreshExtraGroups()
 }
 
 function toggleHost(key: string) {
-  const next = new Set(collapsedHosts.value)
-  const collapsing = !next.has(key)
-  if (collapsing) {
+  const next = new Set(expandedHosts.value)
+  const opening = !next.has(key)
+  if (opening) {
     next.add(key)
-    // Collapse sessions under this host when folding the host
+  } else {
+    next.delete(key)
     const group = workspaceGroups.value.find((g) => g.key === key)
     if (group?.workspaces.length) {
       const expanded = new Set(expandedIds.value)
@@ -154,14 +650,40 @@ function toggleHost(key: string) {
       expandedIds.value = expanded
       showAllIds.value = showAll
     }
-  } else {
-    next.delete(key)
   }
-  collapsedHosts.value = next
+  expandedHosts.value = next
+  persistExpandedHosts()
 }
 
 function isHostActive(group: WorkspaceHostGroup) {
   return group.workspaces.some((ws) => ws.id === store.workspaceId)
+}
+
+function hostBlockProps(group: WorkspaceHostGroup, nested = false) {
+  return {
+    group,
+    open: isHostOpen(group.key),
+    active: isHostActive(group),
+    draggableHost: group.kind === 'ssh',
+    nested,
+    creatingId: creatingId.value,
+    switchingId: switchingId.value,
+    removingId: removingId.value,
+    openingId: openingId.value,
+    editingId: editingId.value,
+    editingTitle: editingTitle.value,
+    previewLimit: PREVIEW_LIMIT,
+    isExpanded,
+    showsAll,
+    sortedConvs,
+    visibleConvs,
+    hiddenCount,
+    loading,
+    errors,
+    statusByKey: statusByKey.value,
+    isPinned: (wsId: string, id: string) => pins.isPinnedIn(wsId, id),
+    turnCount,
+  }
 }
 
 const hoverWorkspace = computed(() =>
@@ -291,16 +813,19 @@ async function toggleExpand(id: string) {
 }
 
 async function expandAllSessions() {
-  // Open all host groups so workspaces underneath are visible
-  collapsedHosts.value = new Set()
-  // Expand the workspace that owns the current session
+  expandedFolders.value = new Set(knownGroupNames.value)
+  expandedHosts.value = new Set(workspaceGroups.value.map((g) => g.key))
+  persistExpandedFolders()
+  persistExpandedHosts()
   const currentId = store.workspaceId
   if (currentId) await setExpanded(currentId, true)
 }
 
 function collapseAllSessions() {
-  // Fold every host so workspaces underneath are hidden
-  collapsedHosts.value = new Set(workspaceGroups.value.map((g) => g.key))
+  expandedFolders.value = new Set()
+  expandedHosts.value = new Set()
+  persistExpandedFolders()
+  persistExpandedHosts()
   expandedIds.value = new Set()
   showAllIds.value = new Set()
 }
@@ -372,6 +897,7 @@ function startAddWorkspace(group: WorkspaceHostGroup, e: MouseEvent) {
       mode: 'ssh',
       lockMode: true,
       ssh_display_name: (sample?.ssh_display_name || '').trim() || undefined,
+      ssh_group: (sample?.ssh_group || group.groupName || '').trim() || undefined,
       ssh_host: sample?.ssh_host || '',
       ssh_port: sample?.ssh_port || 22,
       ssh_user: sample?.ssh_user || '',
@@ -601,7 +1127,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
           type="button"
           class="ws-head-btn icon"
           :title="t('workspace.panel.collapseHosts')"
-          :disabled="!store.recentWorkspaces.length || collapsedHosts.size >= workspaceGroups.length"
+          :disabled="!store.recentWorkspaces.length && !extraGroups.length"
           @click="collapseAllSessions"
         >
           <AppIcon name="collapse-all" :size="14" :stroke-width="1.75" />
@@ -610,10 +1136,18 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
           type="button"
           class="ws-head-btn icon"
           :title="t('workspace.panel.expandHosts')"
-          :disabled="!store.recentWorkspaces.length"
+          :disabled="!store.recentWorkspaces.length && !extraGroups.length"
           @click="expandAllSessions"
         >
           <AppIcon name="expand-all" :size="14" :stroke-width="1.75" />
+        </button>
+        <button
+          type="button"
+          class="ws-head-btn icon"
+          :title="t('workspace.panel.newGroup')"
+          @click="createHostGroup()"
+        >
+          <AppIcon name="folder-plus" :size="14" :stroke-width="1.75" />
         </button>
         <button
           type="button"
@@ -627,237 +1161,137 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       </div>
     </header>
 
-    <div class="workspace-body">
-      <p v-if="!store.recentWorkspaces.length" class="empty">{{ t('workspace.panel.empty') }}</p>
+    <div
+      class="workspace-body"
+      :class="{ 'drop-root': dropFolderPath === '' && (dragHostKey || dragFolderPath) }"
+      @dragover="onRootDragOver"
+      @drop="onRootDrop"
+    >
+      <p v-if="!store.recentWorkspaces.length && !extraGroups.length" class="empty">{{ t('workspace.panel.empty') }}</p>
 
-      <div
-        v-for="group in workspaceGroups"
+      <WorkspaceHostBlock
+        v-for="group in localHostGroups"
         :key="group.key"
-        class="host-block"
-        :class="{ current: isHostActive(group) }"
-      >
-        <div
-          class="host-row"
-          @mouseenter="showHostTip(group, $event)"
-          @mouseleave="scheduleHideTip"
+        v-bind="hostBlockProps(group)"
+        @toggle-host="toggleHost(group.key)"
+        @edit-host="startEditHost(group, $event)"
+        @add-workspace="startAddWorkspace(group, $event)"
+        @host-tip="showHostTip(group, $event)"
+        @host-tip-hide="scheduleHideTip"
+        @ws-tip="(ws, e) => showTip(ws, e)"
+        @ws-tip-hide="scheduleHideTip"
+        @toggle-expand="toggleExpand"
+        @new-session="(ws, e) => newSession(ws, e)"
+        @open-workspace="(ws, e) => openWorkspace(ws, e)"
+        @remove-workspace="(ws, e) => removeWorkspace(ws, e)"
+        @retry-convs="(id) => loadConvs(id, true)"
+        @open-conv="(ws, conv) => openConv(ws, conv)"
+        @update:editing-title="editingTitle = $event"
+        @rename-keydown="(wsId, id, e) => onRenameKeydown(wsId, id, e)"
+        @rename-blur="(wsId, id) => commitRename(wsId, id)"
+        @start-rename="(conv, e) => startRename(conv, e)"
+        @toggle-pin="(wsId, id, e) => onTogglePin(wsId, id, e)"
+        @archive="(wsId, conv, e) => onArchive(wsId, conv, e)"
+        @delete-conv="(wsId, id, e) => onDelete(wsId, id, e)"
+        @toggle-show-all="toggleShowAll"
+      />
+
+      <div v-if="folderForest.length || rootSshHosts.length" class="folder-tree">
+        <WorkspaceFolderNode
+          v-for="node in folderForest"
+          :key="node.path"
+          :node="node"
+          :open="isFolderOpen(node.path)"
+          :drop-over="dropFolderPath === node.path"
+          :dragging="dragFolderPath === node.path"
+          :host-count="hostCountUnder(node.path)"
+          :child-open="isFolderOpen"
+          :child-drop-over="(p) => dropFolderPath === p"
+          :child-dragging="(p) => dragFolderPath === p"
+          :host-count-of="hostCountUnder"
+          @toggle="toggleFolder"
+          @contextmenu="openFolderMenu"
+          @dragstart="onFolderDragStart"
+          @dragend="onFolderDragEnd"
+          @dragover="onFolderDragOver"
+          @dragleave="onFolderDragLeave"
+          @drop="onFolderDrop"
         >
-          <button type="button" class="host-main" @click="toggleHost(group.key)">
-            <AppIcon
-              class="host-chev"
-              :name="isHostOpen(group.key) ? 'chevron-down' : 'chevron-right'"
-              :size="11"
-              :stroke-width="2"
-            />
-            <AppIcon
-              class="host-icon"
-              :class="{ 'is-ssh': group.kind === 'ssh' }"
-              :name="group.kind === 'ssh' ? 'globe' : 'folder'"
-              :size="13"
-              :stroke-width="1.75"
-            />
-            <span class="host-label">{{ group.label }}</span>
-            <span v-if="group.kind === 'ssh'" class="host-ssh-mark" title="SSH">SSH</span>
-          </button>
-          <div class="host-end">
-            <span class="host-count">{{ group.workspaces.length }}</span>
-            <div class="host-tools">
-              <button
-                v-if="group.kind === 'ssh'"
-                type="button"
-                class="host-tool"
-                :title="t('workspace.panel.editHost')"
-                @click="startEditHost(group, $event)"
-              >
-                <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
-              </button>
-              <button
-                type="button"
-                class="host-tool"
-                :title="group.kind === 'ssh' ? t('workspace.panel.addRemoteWorkspace') : t('workspace.panel.addLocalWorkspace')"
-                @click="startAddWorkspace(group, $event)"
-              >
-                <AppIcon name="plus" :size="13" :stroke-width="1.75" />
-              </button>
-            </div>
-            <span v-if="isHostActive(group)" class="host-dot" :title="t('workspace.panel.currentHost')" />
-          </div>
-        </div>
-
-        <ul v-if="isHostOpen(group.key)" class="ws-list">
-          <li
-            v-for="ws in group.workspaces"
-            :key="ws.id"
-            class="ws-group"
-            :class="{ current: ws.id === store.workspaceId, open: isExpanded(ws.id) }"
-          >
-            <div
-              class="ws-row"
-              @mouseenter="showTip(ws, $event)"
-              @mouseleave="scheduleHideTip"
+          <template #default="{ folderPath }">
+            <p
+              v-if="!hostsInFolder(folderPath).length && (dragHostKey || dragFolderPath)"
+              class="hint group-empty"
             >
-              <button type="button" class="ws-main" @click="toggleExpand(ws.id)">
-                <AppIcon
-                  class="ws-chev"
-                  :name="isExpanded(ws.id) ? 'chevron-down' : 'chevron-right'"
-                  :size="12"
-                  :stroke-width="2"
-                />
-                <AppIcon class="ws-icon" name="folder" :size="14" :stroke-width="1.75" />
-                <span class="ws-copy">
-                  <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
-                  <span
-                    v-if="ws.id === store.workspaceId && store.workspaceRootMissing"
-                    class="ws-missing-badge"
-                  >{{ t('workspace.panel.rootMissingBadge') }}</span>
-                </span>
-              </button>
-              <div class="ws-end">
-                <div class="ws-tools">
-                  <button
-                    type="button"
-                    class="ws-tool"
-                    :title="t('workspace.panel.newSession')"
-                    :disabled="creatingId === ws.id"
-                    @click="newSession(ws, $event)"
-                  >
-                    <AppIcon name="plus" :size="13" :stroke-width="1.75" />
-                  </button>
-                  <button
-                    v-if="ws.id !== store.workspaceId"
-                    type="button"
-                    class="ws-tool text"
-                    :disabled="switchingId === ws.id"
-                    @click="openWorkspace(ws, $event)"
-                  >
-                    {{ t('workspace.panel.open') }}
-                  </button>
-                  <button
-                    type="button"
-                    class="ws-tool danger"
-                    :title="t('workspace.panel.removeWorkspace')"
-                    :disabled="removingId === ws.id"
-                    @click="removeWorkspace(ws, $event)"
-                  >
-                    <AppIcon name="trash" :size="13" :stroke-width="1.75" />
-                  </button>
-                </div>
-                <span v-if="ws.id === store.workspaceId" class="ws-dot" :title="t('workspace.panel.currentWorkspace')" />
-              </div>
-            </div>
+              {{ t('workspace.panel.dropHostHere') }}
+            </p>
+            <WorkspaceHostBlock
+              v-for="group in hostsInFolder(folderPath)"
+              :key="group.key"
+              v-bind="hostBlockProps(group, true)"
+              @toggle-host="toggleHost(group.key)"
+              @edit-host="startEditHost(group, $event)"
+              @add-workspace="startAddWorkspace(group, $event)"
+              @dragstart="onHostDragStart(group, $event)"
+              @dragend="onHostDragEnd"
+              @host-tip="showHostTip(group, $event)"
+              @host-tip-hide="scheduleHideTip"
+              @ws-tip="(ws, e) => showTip(ws, e)"
+              @ws-tip-hide="scheduleHideTip"
+              @toggle-expand="toggleExpand"
+              @new-session="(ws, e) => newSession(ws, e)"
+              @open-workspace="(ws, e) => openWorkspace(ws, e)"
+              @remove-workspace="(ws, e) => removeWorkspace(ws, e)"
+              @retry-convs="(id) => loadConvs(id, true)"
+              @open-conv="(ws, conv) => openConv(ws, conv)"
+              @update:editing-title="editingTitle = $event"
+              @rename-keydown="(wsId, id, e) => onRenameKeydown(wsId, id, e)"
+              @rename-blur="(wsId, id) => commitRename(wsId, id)"
+              @start-rename="(conv, e) => startRename(conv, e)"
+              @toggle-pin="(wsId, id, e) => onTogglePin(wsId, id, e)"
+              @archive="(wsId, conv, e) => onArchive(wsId, conv, e)"
+              @delete-conv="(wsId, id, e) => onDelete(wsId, id, e)"
+              @toggle-show-all="toggleShowAll"
+            />
+          </template>
+        </WorkspaceFolderNode>
 
-            <div v-if="isExpanded(ws.id)" class="ws-sessions">
-              <p v-if="loading[ws.id]" class="hint">{{ t('workspace.panel.loading') }}</p>
-              <p v-else-if="errors[ws.id]" class="hint err">
-                <span>{{ errors[ws.id] }}</span>
-                <button type="button" class="hint-retry" @click="loadConvs(ws.id, true)">
-                  {{ t('workspace.panel.retry') }}
-                </button>
-              </p>
-              <p v-else-if="!sortedConvs(ws.id).length" class="hint">{{ t('workspace.panel.noSessions') }}</p>
-
-              <div
-                v-for="conv in visibleConvs(ws.id)"
-                :key="conv.id"
-                class="conv-row"
-                :class="{
-                  active: conv.id === store.conversationId && ws.id === store.workspaceId,
-                  pinned: pins.isPinnedIn(ws.id, conv.id),
-                  opening: openingId === conv.id,
-                }"
-                :aria-busy="openingId === conv.id"
-                @click="openConv(ws, conv)"
-              >
-                <span class="conv-status-slot">
-                  <span
-                    v-if="openingId === conv.id"
-                    class="conv-status opening"
-                    :title="t('workspace.panel.opening')"
-                    :aria-label="t('workspace.panel.opening')"
-                  >
-                    <AppIcon class="spin" name="loader" :size="12" :stroke-width="1.75" />
-                  </span>
-                  <template v-else v-for="st in [statusByKey.get(`${ws.id}:${conv.id}`)]" :key="`${conv.id}-status`">
-                    <span
-                      v-if="st"
-                      class="conv-status"
-                      :class="st.tone"
-                      :title="st.label"
-                      :aria-label="st.label"
-                    >
-                      <AppIcon :name="st.icon" :size="12" :stroke-width="1.75" />
-                    </span>
-                  </template>
-                </span>
-
-                <span class="conv-copy">
-                  <input
-                    v-if="editingId === conv.id"
-                    v-model="editingTitle"
-                    class="conv-rename-input"
-                    type="text"
-                    maxlength="300"
-                    :aria-label="t('workspace.panel.rename')"
-                    @click.stop
-                    @keydown="onRenameKeydown(ws.id, conv.id, $event)"
-                    @blur="commitRename(ws.id, conv.id)"
-                  />
-                  <span v-else class="conv-title" :title="conv.title">{{ conv.title }}</span>
-                </span>
-
-                <span class="conv-meta">
-                  <span v-if="!editingId" class="conv-time">
-                    {{ formatRelativeTime(conv.updated_at || conv.created_at) }}
-                  </span>
-                </span>
-
-                <span class="conv-actions">
-                  <button type="button" class="conv-action" :title="t('workspace.panel.rename')" @click="startRename(conv, $event)">
-                    <AppIcon name="pencil" :size="13" :stroke-width="1.75" />
-                  </button>
-                  <button
-                    type="button"
-                    class="conv-action"
-                    :class="{ on: pins.isPinnedIn(ws.id, conv.id) }"
-                    :title="pins.isPinnedIn(ws.id, conv.id) ? t('workspace.panel.unpin') : t('workspace.panel.pin')"
-                    @click="onTogglePin(ws.id, conv.id, $event)"
-                  >
-                    <AppIcon name="pin" :size="13" :stroke-width="1.75" />
-                  </button>
-                  <button
-                    type="button"
-                    class="conv-action"
-                    :title="conv.archived ? t('workspace.panel.unarchive') : t('workspace.panel.archive')"
-                    @click="onArchive(ws.id, conv, $event)"
-                  >
-                    <AppIcon name="inbox" :size="13" :stroke-width="1.75" />
-                  </button>
-                  <button type="button" class="conv-action danger" :title="t('workspace.panel.deleteSession')" @click="onDelete(ws.id, conv.id, $event)">
-                    <AppIcon name="trash" :size="13" :stroke-width="1.75" />
-                  </button>
-                </span>
-
-                <span class="conv-turns">{{ t('workspace.panel.turns', { n: turnCount(ws.id, conv) }) }}</span>
-              </div>
-
-              <button
-                v-if="hiddenCount(ws.id)"
-                type="button"
-                class="show-more"
-                @click="toggleShowAll(ws.id)"
-              >
-                {{ t('workspace.panel.showMore', { n: hiddenCount(ws.id) }) }}
-              </button>
-              <button
-                v-else-if="showsAll(ws.id) && sortedConvs(ws.id).length > PREVIEW_LIMIT"
-                type="button"
-                class="show-more"
-                @click="toggleShowAll(ws.id)"
-              >
-                {{ t('workspace.panel.showLess') }}
-              </button>
-            </div>
-          </li>
-        </ul>
+        <div
+          v-if="rootSshHosts.length"
+          class="ungrouped-root"
+          :class="{ 'drop-over': dropFolderPath === '' && (dragHostKey || dragFolderPath) }"
+          @dragover="onRootDragOver"
+          @drop="onRootDrop"
+        >
+          <div class="ungrouped-label">{{ t('workspace.panel.ungrouped') }}</div>
+          <WorkspaceHostBlock
+            v-for="group in rootSshHosts"
+            :key="group.key"
+            v-bind="hostBlockProps(group, true)"
+            @toggle-host="toggleHost(group.key)"
+            @edit-host="startEditHost(group, $event)"
+            @add-workspace="startAddWorkspace(group, $event)"
+            @dragstart="onHostDragStart(group, $event)"
+            @dragend="onHostDragEnd"
+            @host-tip="showHostTip(group, $event)"
+            @host-tip-hide="scheduleHideTip"
+            @ws-tip="(ws, e) => showTip(ws, e)"
+            @ws-tip-hide="scheduleHideTip"
+            @toggle-expand="toggleExpand"
+            @new-session="(ws, e) => newSession(ws, e)"
+            @open-workspace="(ws, e) => openWorkspace(ws, e)"
+            @remove-workspace="(ws, e) => removeWorkspace(ws, e)"
+            @retry-convs="(id) => loadConvs(id, true)"
+            @open-conv="(ws, conv) => openConv(ws, conv)"
+            @update:editing-title="editingTitle = $event"
+            @rename-keydown="(wsId, id, e) => onRenameKeydown(wsId, id, e)"
+            @rename-blur="(wsId, id) => commitRename(wsId, id)"
+            @start-rename="(conv, e) => startRename(conv, e)"
+            @toggle-pin="(wsId, id, e) => onTogglePin(wsId, id, e)"
+            @archive="(wsId, conv, e) => onArchive(wsId, conv, e)"
+            @delete-conv="(wsId, id, e) => onDelete(wsId, id, e)"
+            @toggle-show-all="toggleShowAll"
+          />
+        </div>
       </div>
     </div>
 
@@ -964,12 +1398,22 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       v-if="editingHost"
       :workspaces="editingHost.workspaces"
       :label="editingHost.label"
-      @close="editingHost = null"
+      :known-groups="knownGroupNames"
+      @close="onHostEdited"
+    />
+    <ContextMenu
+      v-if="folderMenu"
+      :x="folderMenu.x"
+      :y="folderMenu.y"
+      :items="folderMenuItems"
+      @select="onFolderMenuSelect"
+      @close="folderMenu = null"
     />
   </div>
 </template>
 
 <style scoped>
+
 .workspace-panel {
   background: var(--sidebar-bg);
 }
@@ -1053,231 +1497,43 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   padding: 4px 8px 12px;
 }
 
-.host-block {
-  margin-bottom: 10px;
-  padding: 4px 0 6px;
-  border: var(--border-width) solid var(--border);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--text-h) 3%, var(--sidebar-bg));
-  overflow: hidden;
+
+.workspace-body.drop-root {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+  background: color-mix(in srgb, var(--primary) 4%, transparent);
 }
 
-.host-block.current {
-  border-color: color-mix(in srgb, #22c55e 35%, var(--border));
-  background: color-mix(in srgb, #22c55e 6%, var(--sidebar-bg));
-}
-
-.host-row {
+.folder-tree {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 30px;
-  margin: 0 4px;
-  padding-right: 4px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ungrouped-root {
+  margin-top: 6px;
+  padding: 4px 0 2px;
   border-radius: 8px;
-  color: var(--text-secondary);
+  transition: background 0.12s ease, box-shadow 0.12s ease;
 }
 
-.host-row:hover {
-  background: color-mix(in srgb, var(--text-h) 5%, transparent);
-  color: var(--text-h);
+.ungrouped-root.drop-over {
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 
-.host-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 4px 6px 4px 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-.host-tools {
-  position: absolute;
-  right: 100%;
-  top: 50%;
-  display: flex;
-  align-items: center;
-  gap: 0;
-  margin-right: 2px;
-  padding: 1px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--panel-bg) 88%, transparent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 80%, transparent);
-  opacity: 0;
-  pointer-events: none;
-  transform: translate(4px, -50%);
-  transition: opacity 0.12s ease, transform 0.12s ease;
-}
-
-.host-end {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  min-height: 22px;
-  min-width: 22px;
-  justify-content: flex-end;
-}
-
-.host-row:hover .host-tools,
-.host-row:focus-within .host-tools {
-  opacity: 1;
-  pointer-events: auto;
-  transform: translate(0, -50%);
-}
-
-.host-row:hover .host-count,
-.host-row:focus-within .host-count {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .host-tools {
-    position: static;
-    opacity: 1;
-    pointer-events: auto;
-    transform: none;
-    margin-right: 0;
-    background: transparent;
-    box-shadow: none;
-    padding: 0;
-  }
-}
-
-.host-tool {
-  box-sizing: border-box;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.host-tool :deep(.app-icon) {
-  display: block;
-}
-
-.host-tool:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
-}
-
-.host-chev,
-.host-icon {
-  flex-shrink: 0;
-  opacity: 0.95;
-  color: var(--text-h);
-}
-
-.host-block.current .host-icon {
-  color: #16a34a;
-}
-
-.host-icon.is-ssh {
-  color: #0284c7;
-}
-
-.host-block.current .host-icon.is-ssh {
-  color: #0284c7;
-}
-
-.host-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
+.ungrouped-label {
+  margin: 2px 8px 6px;
+  font-size: 10px;
   font-weight: 650;
-  letter-spacing: 0.01em;
-  color: var(--text-h);
-}
-
-.host-ssh-mark {
-  flex-shrink: 0;
-  height: 15px;
-  padding: 0 4px;
-  border-radius: 4px;
-  font-size: 9px;
-  font-weight: 700;
   letter-spacing: 0.04em;
-  line-height: 15px;
-  color: #0284c7;
-  background: color-mix(in srgb, #0284c7 14%, transparent);
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
-.ws-badge {
-  flex-shrink: 0;
-  height: 16px;
-  padding: 0 5px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 16px;
-  letter-spacing: 0.02em;
-}
-
-.ws-badge.remote,
-.ws-tip-badge.remote {
-  background: color-mix(in srgb, var(--primary) 16%, transparent);
-  color: var(--primary);
-}
-
-.ws-tip-badge.local {
-  background: color-mix(in srgb, var(--text-muted) 16%, transparent);
-  color: var(--text-secondary);
-}
-
-.host-count {
-  flex-shrink: 0;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
-  border-radius: 999px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-secondary);
-  background: color-mix(in srgb, var(--text-h) 8%, transparent);
-  font-variant-numeric: tabular-nums;
-  opacity: 0.55;
-  transition: opacity 0.12s ease;
-}
-
-.host-dot {
-  width: 6px;
-  height: 6px;
-  margin: 0 8px 0 4px;
-  border-radius: 50%;
-  background: #22c55e;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 25%, transparent);
-  flex-shrink: 0;
-}
-
-.host-block .ws-list {
-  padding: 2px 4px 2px 6px;
+.group-empty {
+  margin: 0 10px 10px;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .empty,
@@ -1311,367 +1567,6 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   background: color-mix(in srgb, var(--primary) 18%, transparent);
 }
 
-.ws-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ws-group {
-  border-radius: 10px;
-}
-
-.ws-row {
-  display: flex;
-  align-items: center;
-  min-height: 30px;
-  padding-right: 6px;
-  border-radius: 10px;
-}
-
-.ws-row:hover {
-  background: color-mix(in srgb, var(--text-h) 4.5%, transparent);
-}
-
-.ws-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 4px 4px 4px 8px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--text-h);
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-
-.ws-chev {
-  flex-shrink: 0;
-  color: var(--text-muted);
-  opacity: 0.85;
-}
-
-.ws-icon {
-  flex-shrink: 0;
-  color: var(--text-secondary);
-}
-
-.ws-group.current .ws-icon {
-  color: var(--primary);
-}
-
-.ws-copy {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0;
-}
-
-.ws-name {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 17px;
-  min-width: 0;
-}
-
-.ws-dot {
-  width: 6px;
-  height: 6px;
-  margin: 0 4px;
-  border-radius: 50%;
-  background: var(--primary);
-  flex-shrink: 0;
-}
-
-.ws-end {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-  min-height: 22px;
-}
-
-.ws-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.12s ease;
-}
-
-.ws-row:hover .ws-tools,
-.ws-row:focus-within .ws-tools {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.ws-tool {
-  height: 22px;
-  min-width: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  display: grid;
-  place-items: center;
-  cursor: pointer;
-}
-
-.ws-tool.text {
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-secondary);
-}
-
-.ws-tool:hover {
-  background: var(--code-bg);
-  color: var(--text-h);
-}
-
-.ws-tool.danger:hover {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 8%, transparent);
-}
-
-.ws-tool:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.ws-sessions {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 1px 0 6px 8px;
-}
-
-.conv-row {
-  position: relative;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 4px 8px;
-  border-radius: 10px;
-  color: var(--text);
-  cursor: pointer;
-}
-
-.conv-row:hover {
-  background: color-mix(in srgb, var(--text-h) 4.5%, transparent);
-  color: var(--text-h);
-}
-
-.conv-row.active {
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  color: var(--text-h);
-}
-
-.conv-row.opening {
-  opacity: 0.78;
-  pointer-events: none;
-}
-
-.conv-row.active .conv-title {
-  color: var(--text-h);
-  font-weight: 600;
-}
-
-.conv-status-slot {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  display: grid;
-  place-items: center;
-}
-
-.conv-status {
-  width: 14px;
-  height: 14px;
-  display: grid;
-  place-items: center;
-  color: var(--text-muted);
-}
-
-.conv-status.running,
-.conv-status.opening {
-  color: var(--primary);
-}
-
-.conv-status.running :deep(svg),
-.conv-status.opening :deep(svg),
-.spin {
-  animation: conv-spin 0.9s linear infinite;
-}
-
-.conv-status.confirm {
-  color: var(--danger);
-}
-
-.conv-status.queued {
-  color: var(--text-muted);
-}
-
-@keyframes conv-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.conv-copy {
-  min-width: 0;
-  flex: 1;
-}
-
-.conv-title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 17px;
-}
-
-.conv-rename-input {
-  width: 100%;
-  min-width: 0;
-  height: 22px;
-  padding: 0 6px;
-  border: var(--border-width) solid color-mix(in srgb, var(--primary) 40%, var(--border));
-  border-radius: 6px;
-  background: var(--panel-bg);
-  color: var(--text-h);
-  font: inherit;
-  font-size: 12px;
-  outline: none;
-}
-
-.conv-meta {
-  display: flex;
-  align-items: center;
-  align-self: center;
-  gap: 8px;
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  line-height: 22px;
-  height: 22px;
-}
-
-.conv-turns {
-  flex-shrink: 0;
-  align-self: center;
-  min-width: 2.5rem;
-  height: 22px;
-  line-height: 22px;
-  text-align: right;
-  font-size: 11px;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.conv-row:hover .conv-time,
-.conv-row:focus-within .conv-time {
-  visibility: hidden;
-}
-
-.conv-actions {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: center;
-  gap: 1px;
-  flex-shrink: 0;
-  height: 22px;
-  opacity: 0;
-  pointer-events: none;
-  width: 0;
-  overflow: hidden;
-}
-
-.conv-row:hover .conv-actions,
-.conv-row:focus-within .conv-actions,
-.conv-row.pinned .conv-actions {
-  opacity: 1;
-  pointer-events: auto;
-  width: auto;
-  overflow: visible;
-}
-
-.conv-action {
-  box-sizing: border-box;
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 0;
-  flex-shrink: 0;
-  cursor: pointer;
-}
-
-.conv-action :deep(.app-icon) {
-  display: block;
-}
-
-.conv-action:hover,
-.conv-action.on {
-  color: var(--primary);
-  background: var(--code-bg);
-}
-
-.conv-action.danger:hover {
-  color: var(--danger);
-}
-
-.conv-action.on {
-  opacity: 1;
-}
-
-.show-more {
-  width: 100%;
-  height: 26px;
-  margin-top: 2px;
-  padding: 0 10px 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.show-more:hover {
-  background: color-mix(in srgb, var(--text-h) 4%, transparent);
-  color: var(--text-secondary);
-}
 </style>
 
 <style scoped>

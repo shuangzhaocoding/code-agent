@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAppStore, type Workspace } from '@/stores/app'
 import AppIcon from '@/components/AppIcon.vue'
+import { loadExtraHostGroups, rememberHostGroup } from '@/utils/sshHostGroups'
 
 const props = defineProps<{
   workspaces: Workspace[]
   label: string
+  knownGroups?: string[]
 }>()
 const emit = defineEmits<{ close: [] }>()
 
+const { t } = useI18n()
 const store = useAppStore()
 const saving = ref(false)
 const error = ref('')
@@ -18,12 +22,24 @@ const hasSecret = props.workspaces.some((w) => w.has_ssh_secret)
 
 const form = reactive({
   ssh_display_name: (sample?.ssh_display_name || '').trim(),
+  ssh_group: (sample?.ssh_group || '').trim(),
   ssh_host: sample?.ssh_host || '',
   ssh_port: sample?.ssh_port || 22,
   ssh_user: sample?.ssh_user || '',
   ssh_password: '',
   ssh_private_key: '',
   ssh_passphrase: '',
+})
+
+const groupOptions = computed(() => {
+  const set = new Set<string>([...(props.knownGroups || []), ...loadExtraHostGroups()])
+  for (const ws of store.recentWorkspaces) {
+    const g = (ws.ssh_group || '').trim()
+    if (g) set.add(g)
+  }
+  const cur = form.ssh_group.trim()
+  if (cur) set.add(cur)
+  return [...set].sort((a, b) => a.localeCompare(b))
 })
 
 const endpointHint = computed(() => {
@@ -45,8 +61,10 @@ async function save() {
   saving.value = true
   error.value = ''
   try {
+    const group = form.ssh_group.trim()
     const payload: Record<string, string | number> = {
       ssh_display_name: form.ssh_display_name.trim(),
+      ssh_group: group,
       ssh_host: host,
       ssh_port: port,
       ssh_user: user,
@@ -58,6 +76,7 @@ async function save() {
     for (const ws of props.workspaces) {
       await store.updateWorkspace(ws.id, payload)
     }
+    if (group) rememberHostGroup(group)
     emit('close')
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err)
@@ -76,25 +95,25 @@ async function save() {
 <template>
   <Teleport to="body">
     <div class="mask" @click.self="emit('close')">
-      <div class="sheet" role="dialog" aria-modal="true" aria-label="编辑主机">
+      <div class="sheet" role="dialog" aria-modal="true" :aria-label="t('workspace.panel.editHost')">
         <header class="sheet-head">
           <div class="sheet-head-copy">
-            <span class="sheet-kicker">SSH 主机</span>
-            <h1 class="sheet-title">编辑主机</h1>
+            <span class="sheet-kicker">SSH</span>
+            <h1 class="sheet-title">{{ t('workspace.panel.editHost') }}</h1>
           </div>
-          <button type="button" class="sheet-close" title="关闭" @click="emit('close')">
+          <button type="button" class="sheet-close" :title="t('common.close')" @click="emit('close')">
             <AppIcon name="close" :size="16" :stroke-width="1.75" />
           </button>
         </header>
 
         <p class="sheet-lead">
-          将同步到该主机下的 <strong>{{ workspaces.length }}</strong> 个工作空间
+          {{ t('workspace.panel.editHostLead', { n: workspaces.length }) }}
         </p>
 
         <section class="section">
-          <h2 class="section-title">显示</h2>
+          <h2 class="section-title">{{ t('workspace.panel.hostDisplay') }}</h2>
           <label class="field">
-            <span>显示名称</span>
+            <span>{{ t('workspace.sshDisplayName') }}</span>
             <input
               v-model="form.ssh_display_name"
               type="text"
@@ -102,49 +121,64 @@ async function save() {
               :placeholder="endpointHint"
               @keydown.enter="save"
             />
-            <span class="hint">侧栏主机分组标题；留空则显示 {{ endpointHint }}</span>
+            <span class="hint">{{ t('workspace.panel.hostDisplayHint', { endpoint: endpointHint }) }}</span>
+          </label>
+          <label class="field">
+            <span>{{ t('workspace.panel.hostGroup') }}</span>
+            <input
+              v-model="form.ssh_group"
+              type="text"
+              maxlength="120"
+              list="ca-host-group-options"
+              :placeholder="t('workspace.panel.hostGroupPlaceholder')"
+              @keydown.enter="save"
+            />
+            <datalist id="ca-host-group-options">
+              <option v-for="name in groupOptions" :key="name" :value="name" />
+            </datalist>
+            <span class="hint">{{ t('workspace.panel.hostGroupHint') }}</span>
           </label>
         </section>
 
         <section class="section">
-          <h2 class="section-title">连接</h2>
+          <h2 class="section-title">{{ t('workspace.panel.hostConnection') }}</h2>
           <div class="ssh-grid">
             <label class="field host">
-              <span>主机</span>
-              <input v-model="form.ssh_host" class="mono" type="text" placeholder="IP / 域名" />
+              <span>{{ t('workspace.sshHost') }}</span>
+              <input v-model="form.ssh_host" class="mono" type="text" placeholder="IP / hostname" />
             </label>
             <label class="field port">
-              <span>端口</span>
+              <span>{{ t('workspace.sshPort') }}</span>
               <input v-model.number="form.ssh_port" class="mono" type="number" min="1" max="65535" />
             </label>
             <label class="field user">
-              <span>用户名</span>
+              <span>{{ t('workspace.sshUser') }}</span>
               <input v-model="form.ssh_user" class="mono" type="text" />
             </label>
             <label class="field pass">
-              <span>密码</span>
+              <span>{{ t('workspace.sshPassword') }}</span>
               <input
                 v-model="form.ssh_password"
                 type="password"
-                :placeholder="hasSecret ? '留空保留' : '密码'"
+                :placeholder="hasSecret ? t('workspace.panel.keepSecret') : t('workspace.sshPassword')"
               />
             </label>
           </div>
           <label class="field">
-            <span>私钥 PEM</span>
+            <span>{{ t('workspace.sshKey') }}</span>
             <textarea
               v-model="form.ssh_private_key"
               class="ssh-key mono"
               rows="3"
-              :placeholder="hasSecret ? '留空则保留原密钥' : '可选'"
+              :placeholder="hasSecret ? t('workspace.panel.keepKey') : t('common.optional')"
             />
           </label>
           <label class="field">
-            <span>私钥口令</span>
+            <span>{{ t('workspace.sshPassphrase') }}</span>
             <input
               v-model="form.ssh_passphrase"
               type="password"
-              :placeholder="hasSecret ? '留空则保留' : '可选'"
+              :placeholder="hasSecret ? t('workspace.panel.keepSecret') : t('common.optional')"
             />
           </label>
         </section>
@@ -152,9 +186,11 @@ async function save() {
         <p v-if="error" class="err">{{ error }}</p>
 
         <footer class="actions">
-          <button type="button" class="btn btn-ghost" :disabled="saving" @click="emit('close')">取消</button>
+          <button type="button" class="btn btn-ghost" :disabled="saving" @click="emit('close')">
+            {{ t('common.cancel') }}
+          </button>
           <button type="button" class="btn btn-primary" :disabled="saving" @click="save">
-            {{ saving ? '保存中…' : '保存' }}
+            {{ saving ? t('common.saving') : t('common.save') }}
           </button>
         </footer>
       </div>

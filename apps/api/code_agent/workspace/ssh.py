@@ -422,4 +422,8 @@ class SshWorkspaceBackend:
         return int(result.exit_status or 0), result.stdout or "", result.stderr or ""
 
     async def close(self) -> None:
-        await ssh_pool.drop(self._conn_key)
+        # Workspace connections stay in the process-wide pool so port-forwards /
+        # debugpy / terminals are not killed by unrelated FS reads that open+close
+        # a backend. Ephemeral browse sessions still drop on close.
+        if str(self._conn_key).startswith("ephemeral:"):
+            await ssh_pool.drop(self._conn_key)

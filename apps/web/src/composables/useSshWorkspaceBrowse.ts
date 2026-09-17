@@ -5,6 +5,7 @@ import type { BrowseItem, BrowseResult } from '@/composables/useWorkspaceBrowse'
 
 export type SshAuthForm = {
   display_name: string
+  group: string
   host: string
   port: number
   username: string
@@ -21,6 +22,7 @@ export function useSshWorkspaceBrowse() {
   const reuseFromWorkspaceId = ref<string | null>(null)
   const auth = ref<SshAuthForm>({
     display_name: '',
+    group: '',
     host: '',
     port: 22,
     username: '',

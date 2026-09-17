@@ -90,6 +90,7 @@ class WorkspaceIn(BaseModel):
     ignore_globs: list[str] = Field(default_factory=list)
     kind: Literal["local", "ssh"] = "local"
     ssh_display_name: str | None = None
+    ssh_group: str | None = None
     ssh_host: str | None = None
     ssh_port: int = 22
     ssh_user: str | None = None
@@ -103,6 +104,7 @@ class WorkspaceUpdateIn(BaseModel):
     name: str | None = None
     root_path: str | None = None
     ssh_display_name: str | None = None
+    ssh_group: str | None = None
     ssh_host: str | None = None
     ssh_port: int | None = None
     ssh_user: str | None = None
@@ -329,12 +331,22 @@ async def _add_ssh_workspace(body: WorkspaceIn):
     key = f"ssh://{user}@{host}:{int(body.ssh_port or 22)}{root}"
     existing = await _find_workspace_by_key(key)
     display_name = (body.ssh_display_name or "").strip()[:120] or None
+    if body.ssh_group is not None:
+        group_name = body.ssh_group.strip()[:120] or None
+    elif reused is not None:
+        group_name = (getattr(reused, "ssh_group", None) or "").strip()[:120] or None
+    else:
+        group_name = None
+    if display_name is None and reused is not None and body.ssh_display_name is None:
+        display_name = (getattr(reused, "ssh_display_name", None) or "").strip()[:120] or None
     if existing and workspace_is_ssh(existing):
         existing.ssh_secret = secret
         existing.root_path = root
         existing.name = body.name or existing.name or posixpath.basename(root.rstrip("/")) or root
         if body.ssh_display_name is not None:
             existing.ssh_display_name = display_name
+        if body.ssh_group is not None or (reused is not None and not getattr(existing, "ssh_group", None)):
+            existing.ssh_group = group_name
         await existing.save()
         return {**_ws(existing), "plugins": []}
 
@@ -348,6 +360,7 @@ async def _add_ssh_workspace(body: WorkspaceIn):
         ssh_user=user,
         ssh_secret=secret,
         ssh_display_name=display_name,
+        ssh_group=group_name,
     )
     # warm connection pool under workspace id
     await get_workspace_backend(row)
@@ -451,6 +464,10 @@ async def update_workspace(workspace_id: str, body: WorkspaceUpdateIn):
         if body.ssh_display_name is not None:
             label = body.ssh_display_name.strip()
             row.ssh_display_name = label[:120] if label else None
+
+        if body.ssh_group is not None:
+            group = body.ssh_group.strip()
+            row.ssh_group = group[:120] if group else None
 
         host = (body.ssh_host if body.ssh_host is not None else row.ssh_host or "").strip()
         user = (body.ssh_user if body.ssh_user is not None else row.ssh_user or "").strip()
@@ -1281,6 +1298,7 @@ def _ws(row: Workspace) -> dict:
         out["ssh_port"] = getattr(row, "ssh_port", None)
         out["ssh_user"] = getattr(row, "ssh_user", None)
         out["ssh_display_name"] = getattr(row, "ssh_display_name", None)
+        out["ssh_group"] = getattr(row, "ssh_group", None)
         out["has_ssh_secret"] = bool(getattr(row, "ssh_secret", None))
         out["display_path"] = f"{row.ssh_user}@{row.ssh_host}:{row.root_path}"
     else:

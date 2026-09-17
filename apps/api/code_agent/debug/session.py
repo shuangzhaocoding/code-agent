@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
+from code_agent.debug.ansi import AnsiStreamFilter, strip_ansi
 from code_agent.debug.dap import DapClient
 from code_agent.debug.launch import (
     LaunchConfig,
@@ -31,6 +32,7 @@ _ADAPTER_NOISE_RE = re.compile(
     r"^\s*(?:ptvsd|debugpy|pydevd)(?:\s|$|/|\\|:)",
     re.IGNORECASE,
 )
+_CONSOLE_HISTORY_LIMIT = 400
 
 
 def _is_debug_adapter_noise(text: str) -> bool:
@@ -70,6 +72,7 @@ class DebugSession:
         self._ssh_proc: Any = None
         self._ssh_listener: Any = None
         self._ssh_conn: Any = None
+        self._ssh_backend: Any = None
         self._stdout_task: asyncio.Task[None] | None = None
         self._stderr_task: asyncio.Task[None] | None = None
         self._wait_task: asyncio.Task[None] | None = None
@@ -77,26 +80,62 @@ class DebugSession:
         self._remote_port = 0
         self._root = str(workspace.root_path)
         self._ssh = workspace_is_ssh(workspace)
-        # Buffer stdout until the first WebSocket client catches up.
-        self._output_buffer: list[dict[str, Any]] = []
-        self._capture_output = True
+        # Ring buffer of console lines for refresh / WS reconnect replay.
+        self._console_history: list[dict[str, Any]] = []
+        self._ansi_stdout = AnsiStreamFilter()
+        self._ansi_stderr = AnsiStreamFilter()
+        self._ansi_dap = AnsiStreamFilter()
+
+    def _append_console(self, text: str, kind: str) -> None:
+        cleaned = strip_ansi(text if text is not None else "")
+        parts = cleaned.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if len(parts) > 1 and parts[-1] == "":
+            parts = parts[:-1]
+        if not parts:
+            parts = [""]
+        for chunk in parts:
+            if _is_debug_adapter_noise(chunk):
+                continue
+            self._console_history.append({"text": chunk, "kind": kind})
+        if len(self._console_history) > _CONSOLE_HISTORY_LIMIT:
+            self._console_history = self._console_history[-_CONSOLE_HISTORY_LIMIT:]
+    def console_history(self) -> list[dict[str, Any]]:
+        return [dict(row) for row in self._console_history]
+
+    def record_repl(self, expression: str, *, result: str | None = None, error: str | None = None) -> None:
+        self._append_console(expression, "in")
+        if error is not None:
+            self._append_console(error, "err")
+        else:
+            self._append_console("" if result is None else str(result), "out")
 
     async def _emit(self, typ: str, payload: dict[str, Any] | None = None) -> None:
-        body = payload or {}
-        if typ == "output" and self._capture_output:
-            self._output_buffer.append(dict(body))
-            if len(self._output_buffer) > 500:
-                self._output_buffer = self._output_buffer[-500:]
+        body = dict(payload or {})
+        if typ == "output":
+            category = str(body.get("category") or "stdout")
+            raw_in = str(body.get("output") or "")
+            if category in {"stderr", "err"}:
+                raw = self._ansi_stderr.feed(raw_in)
+            elif category in {"console", "important"}:
+                raw = self._ansi_dap.feed(raw_in)
+            else:
+                raw = self._ansi_stdout.feed(raw_in)
+            if not raw:
+                return
+            body["output"] = raw
+            kind = "err" if category in {"stderr", "err"} else "stdout"
+            if not _is_debug_adapter_noise(raw):
+                self._append_console(raw, kind)
         if self.broadcast:
             await self.broadcast({"type": typ, "session_id": self.id, "payload": body})
 
     def take_output_buffer(self) -> list[dict[str, Any]]:
-        """Return and clear buffered output; stop buffering (live WS takes over)."""
-        self._capture_output = False
-        rows = [dict(row) for row in self._output_buffer]
-        self._output_buffer.clear()
-        return rows
-
+        """Deprecated alias: return console history as output-shaped rows (no clear)."""
+        return [
+            {"output": row.get("text") or "", "category": "stderr" if row.get("kind") == "err" else "stdout"}
+            for row in self._console_history
+            if row.get("kind") in {"stdout", "err", "out"}
+        ]
     def _abs_local(self, rel: str) -> str:
         return str(resolve_in_workspace(self._root, rel))
 
@@ -296,6 +335,12 @@ class DebugSession:
         env = os.environ.copy()
         env.update(self.config.env)
         env.setdefault("PYTHONUNBUFFERED", "1")
+        # Avoid ANSI color codes in the debug console.
+        env.setdefault("NO_COLOR", "1")
+        env.setdefault("FORCE_COLOR", "0")
+        env.setdefault("CLICOLOR", "0")
+        env.setdefault("TERM", "dumb")
+        env.setdefault("PYTHON_COLORS", "0")
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=str(cwd_path),
@@ -308,23 +353,95 @@ class DebugSession:
         self._wait_task = asyncio.create_task(self._wait_local_proc())
         await self.dap.connect("127.0.0.1", self._local_port, timeout=30.0)
 
+    async def _load_remote_python_interpreter(self) -> str | None:
+        """Read ``python.interpreter`` from remote workspace config (and optional venv discover)."""
+        from code_agent.runtime.python_env import discover_workspace_venv_remote
+        from code_agent.workspace.ssh import SshWorkspaceBackend
+
+        backend = await SshWorkspaceBackend.open(self.workspace)
+        try:
+            import yaml
+
+            try:
+                text = await backend.read_text(".code-agent/config.yaml")
+                cfg = yaml.safe_load(text) if text.strip() else {}
+                python_cfg = (cfg or {}).get("python") if isinstance(cfg, dict) else None
+                raw = python_cfg.get("interpreter") if isinstance(python_cfg, dict) else None
+                if raw and str(raw).strip():
+                    return str(raw).strip()
+            except Exception:
+                pass
+            return await discover_workspace_venv_remote(backend)
+        finally:
+            await backend.close()
+
+    async def _wait_remote_debugpy_listening(
+        self,
+        backend: Any,
+        python: str,
+        port: int,
+        *,
+        timeout: float = 45.0,
+    ) -> None:
+        """Block until something is listening on the remote DAP port.
+
+        Must not TCP-connect to debugpy: ``--wait-for-client`` would treat the
+        probe as the DAP client and then disconnect.
+        """
+        # Bind the same port: EADDRINUSE ⇒ listener is up.
+        probe = (
+            f"{shlex.quote(python)} -c "
+            + shlex.quote(
+                "import socket,sys\n"
+                "s=socket.socket()\n"
+                f"try:\n s.bind(('127.0.0.1',{int(port)}))\nexcept OSError:\n print('ok'); sys.exit(0)\n"
+                "s.close(); sys.exit(1)\n"
+            )
+        )
+        deadline = asyncio.get_running_loop().time() + timeout
+        last_err = ""
+        while asyncio.get_running_loop().time() < deadline:
+            if self._ssh_proc is not None:
+                exit_status = getattr(self._ssh_proc, "exit_status", None)
+                if exit_status is not None:
+                    raise RuntimeError(
+                        f"Remote debugpy exited before DAP was ready (code={exit_status}). "
+                        f"Check the debug console for stderr."
+                    )
+            code, out, err = await backend.run_command(probe, cwd=".", timeout=10)
+            if code == 0 and "ok" in (out or ""):
+                return
+            last_err = (err or out or "").strip()
+            await asyncio.sleep(0.2)
+        raise ConnectionError(
+            f"Remote debugpy did not listen on 127.0.0.1:{port} within {timeout:.0f}s"
+            + (f": {last_err}" if last_err else "")
+        )
+
     async def _start_ssh(self) -> None:
         from code_agent.workspace.ssh import SshWorkspaceBackend
-        from code_agent.workspace.ssh_pool import ssh_pool
 
-        python = resolve_debug_python(self.config.python, is_ssh=True, workspace_root=self._root)
+        settings_interpreter = await self._load_remote_python_interpreter()
+        # Always pass settings_interpreter for SSH ("" if unset) so we never read remote
+        # root_path as a local filesystem path for .code-agent/config.yaml.
+        python = resolve_debug_python(
+            self.config.python,
+            is_ssh=True,
+            workspace_root=self._root,
+            settings_interpreter=settings_interpreter if settings_interpreter is not None else "",
+        )
         self.config.python = python
         await self._ensure_debugpy(python)
         backend = await SshWorkspaceBackend.open(self.workspace)
+        self._ssh_backend = backend
         self._ssh_conn = await backend._conn()  # noqa: SLF001 — reuse pooled connection
-        # Pick a free remote port
+        # Pick a free remote port (use the same interpreter as the debuggee)
         code, out, err = await backend.run_command(
-            "python3 -c \"import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()\"",
+            f"{shlex.quote(python)} -c \"import socket; s=socket.socket(); s.bind(('127.0.0.1',0)); print(s.getsockname()[1]); s.close()\"",
             cwd=".",
             timeout=15,
         )
         if code != 0:
-            await backend.close()
             raise RuntimeError(f"Failed to allocate remote debug port: {err or out}")
         self._remote_port = int((out or "").strip().splitlines()[-1])
         remote_cwd = self._abs_remote(self.config.cwd or ".")
@@ -352,12 +469,26 @@ class DebugSession:
                     if argv[i] == cfg.program:
                         argv[i] = prog_abs
                         break
-        remote_cmd = build_remote_shell_command(argv, cwd=remote_cwd, env={**cfg.env, "PYTHONUNBUFFERED": "1"})
+        remote_cmd = build_remote_shell_command(
+            argv,
+            cwd=remote_cwd,
+            env={
+                **cfg.env,
+                "PYTHONUNBUFFERED": "1",
+                "NO_COLOR": "1",
+                "FORCE_COLOR": "0",
+                "CLICOLOR": "0",
+                "TERM": "dumb",
+                "PYTHON_COLORS": "0",
+            },
+        )
         self._ssh_proc = await self._ssh_conn.create_process(remote_cmd)
         self._stdout_task = asyncio.create_task(self._pump_ssh_stream(self._ssh_proc.stdout, "stdout"))
         self._stderr_task = asyncio.create_task(self._pump_ssh_stream(self._ssh_proc.stderr, "stderr"))
         self._wait_task = asyncio.create_task(self._wait_ssh_proc())
-        # Local forward → remote debugpy
+        # Wait until debugpy is actually accepting before opening the tunnel —
+        # otherwise the local forward can accept then immediately reset (DAP disconnected).
+        await self._wait_remote_debugpy_listening(backend, python, self._remote_port)
         self._local_port = free_port()
         self._ssh_listener = await self._ssh_conn.forward_local_port(
             "127.0.0.1",
@@ -366,8 +497,6 @@ class DebugSession:
             self._remote_port,
         )
         await self.dap.connect("127.0.0.1", self._local_port, timeout=45.0)
-        # keep backend pool connection; do not close backend (would drop pool if last user)
-
     async def _handshake(self) -> None:
         await self.dap.request(
             "initialize",

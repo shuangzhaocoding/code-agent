@@ -59,6 +59,8 @@ async def upgrade_llm_schema() -> None:
             await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_secret TEXT")
         if not await _column_exists("workspaces", "ssh_display_name"):
             await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_display_name VARCHAR(120)")
+        if not await _column_exists("workspaces", "ssh_group"):
+            await conn.execute_script("ALTER TABLE workspaces ADD COLUMN ssh_group VARCHAR(120)")
 
     if not await _table_exists("workspace_memories"):
         await conn.execute_script(

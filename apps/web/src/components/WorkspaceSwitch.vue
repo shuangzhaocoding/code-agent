@@ -6,11 +6,13 @@ import { useSshWorkspaceBrowse } from '@/composables/useSshWorkspaceBrowse'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import WorkspaceMkdirRow from '@/components/WorkspaceMkdirRow.vue'
+import { rememberHostGroup } from '@/utils/sshHostGroups'
 
 export type WorkspaceSwitchPrefill = {
   mode: 'local' | 'ssh'
   lockMode?: boolean
   ssh_display_name?: string
+  ssh_group?: string
   ssh_host?: string
   ssh_port?: number
   ssh_user?: string
@@ -63,6 +65,7 @@ onMounted(async () => {
   if (props.prefill?.mode === 'ssh') {
     mode.value = 'ssh'
     if (props.prefill.ssh_display_name) ssh.auth.display_name = props.prefill.ssh_display_name
+    if (props.prefill.ssh_group) ssh.auth.group = props.prefill.ssh_group
     if (props.prefill.ssh_host) ssh.auth.host = props.prefill.ssh_host
     if (props.prefill.ssh_port) ssh.auth.port = props.prefill.ssh_port
     if (props.prefill.ssh_user) ssh.auth.username = props.prefill.ssh_user
@@ -111,6 +114,7 @@ async function openSsh() {
     const payload: Parameters<typeof store.addSshWorkspace>[0] = {
       root_path: ssh.path,
       ssh_display_name: ssh.auth.display_name.trim() || undefined,
+      ssh_group: ssh.auth.group.trim() || undefined,
       ssh_host: ssh.auth.host.trim(),
       ssh_port: Number(ssh.auth.port) || 22,
       ssh_user: ssh.auth.username.trim(),
@@ -124,6 +128,8 @@ async function openSsh() {
       payload.reuse_ssh_from = ssh.reuseFromWorkspaceId
     }
     await store.addSshWorkspace(payload)
+    const group = ssh.auth.group.trim()
+    if (group) rememberHostGroup(group)
     emit('close')
   } catch (err) {
     ssh.error = ssh.errMessage(err)
@@ -201,6 +207,21 @@ const showCredentialFields = computed(
               maxlength="120"
               :placeholder="t('workspace.sshDisplayName')"
             />
+            <input
+              v-model="ssh.auth.group"
+              class="display-name"
+              type="text"
+              maxlength="120"
+              list="ca-ssh-switch-groups"
+              :placeholder="t('workspace.panel.hostGroupPlaceholder')"
+            />
+            <datalist id="ca-ssh-switch-groups">
+              <option
+                v-for="name in store.recentWorkspaces.map((w) => (w.ssh_group || '').trim()).filter(Boolean)"
+                :key="name"
+                :value="name"
+              />
+            </datalist>
             <div class="ssh-grid" :class="{ 'no-pass': !showCredentialFields }">
               <input v-model="ssh.auth.host" class="mono" :placeholder="t('workspace.sshHost')" />
               <input

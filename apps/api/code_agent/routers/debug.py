@@ -236,7 +236,9 @@ async def evaluate(session_id: str, body: EvaluateIn):
     try:
         result = await session.evaluate(body.expression, body.frameId, body.context)
     except Exception as exc:
+        session.record_repl(body.expression, error=str(exc))
         raise HTTPException(status_code=400, detail={"code": "debug.evaluate_failed", "message": str(exc)}) from exc
+    session.record_repl(body.expression, result=str(result.get("result") if isinstance(result, dict) else result))
     return result
 
 
@@ -257,8 +259,6 @@ async def debug_ws(websocket: WebSocket, session_id: str):
     if not session:
         await websocket.close(code=4404)
         return
-    # Snapshot buffered stdout before live subscribe to avoid duplicates.
-    buffered_output = session.take_output_buffer()
     await debug_manager.subscribe(session_id, websocket)
     snap = await session.snapshot()
     await websocket.send_json(
@@ -268,12 +268,14 @@ async def debug_ws(websocket: WebSocket, session_id: str):
             "payload": {"state": session.state},
         }
     )
-    for row in buffered_output:
+    # Replay console history (stdout + REPL) so refresh keeps prior logs.
+    history = session.console_history()
+    if history:
         await websocket.send_json(
             {
-                "type": "output",
+                "type": "console_history",
                 "session_id": session_id,
-                "payload": row,
+                "payload": {"lines": history},
             }
         )
     if session.state == "paused":

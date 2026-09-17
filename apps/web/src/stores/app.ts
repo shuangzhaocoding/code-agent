@@ -38,6 +38,7 @@ export type Workspace = {
   ssh_port?: number | null
   ssh_user?: string | null
   ssh_display_name?: string | null
+  ssh_group?: string | null
   has_ssh_secret?: boolean
   display_path?: string | null
   created_at?: string | null
@@ -241,6 +242,16 @@ export const useAppStore = defineStore('app', () => {
     cancelLabel?: string
     danger?: boolean
   } | null>(null)
+  const promptDialog = ref<{
+    title: string
+    summary?: string
+    label?: string
+    defaultValue?: string
+    placeholder?: string
+    confirmLabel?: string
+    cancelLabel?: string
+    danger?: boolean
+  } | null>(null)
   const activeRunId = ref<string | null>(null)
   const sendQueue = ref<QueuedSend[]>(loadSendQueue())
   watch(
@@ -254,6 +265,7 @@ export const useAppStore = defineStore('app', () => {
   let suppressQueueFlush = false
   let stopStream: (() => void) | null = null
   let confirmResolver: ((ok: boolean) => void) | null = null
+  let promptResolver: ((value: string | null) => void) | null = null
   /** Coalesce block.delta to one Vue update per animation frame. */
   let pendingDeltas: StreamEnvelope[] = []
   let deltaRaf = 0
@@ -272,7 +284,8 @@ export const useAppStore = defineStore('app', () => {
   const sessionTreeMarks = ref<Record<string, string>>({})
   const ackedTreeMarks = ref<Record<string, true>>({})
   let treeTimer: ReturnType<typeof setTimeout> | null = null
-  const pendingTreePaths = new Set<string>()
+  /** path → last known fs kind (`deleted` / `added` / `modified` / undefined). */
+  const pendingTreePaths = new Map<string, string | undefined>()
   let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
   let gitRefreshFollowUpTimer: ReturnType<typeof setTimeout> | null = null
   let stopWorkspaceFsWatch: (() => void) | null = null
@@ -330,13 +343,18 @@ export const useAppStore = defineStore('app', () => {
       }
       if (event.type !== 'fs.changed') return
       const paths = Array.isArray(event.paths) ? event.paths.filter(Boolean) : []
+      const kinds = Array.isArray(event.kinds) ? event.kinds : []
       if (!paths.length || event.truncated) {
         scheduleTreeRefresh()
       } else {
         // Cap fan-out — too many paths becomes a full refresh.
         const slice = paths.slice(0, 24)
         if (paths.length > slice.length) scheduleTreeRefresh()
-        else for (const path of slice) scheduleTreeRefresh(path)
+        else {
+          for (let i = 0; i < slice.length; i++) {
+            scheduleTreeRefresh(slice[i], kinds[i])
+          }
+        }
       }
       scheduleGitRefresh(500, 1800)
     })
@@ -399,6 +417,7 @@ export const useAppStore = defineStore('app', () => {
     root_path: string
     name?: string
     ssh_display_name?: string
+    ssh_group?: string
     ssh_host: string
     ssh_port?: number
     ssh_user: string
@@ -433,6 +452,7 @@ export const useAppStore = defineStore('app', () => {
       name?: string
       root_path?: string
       ssh_display_name?: string
+      ssh_group?: string
       ssh_host?: string
       ssh_port?: number
       ssh_user?: string
@@ -467,6 +487,7 @@ export const useAppStore = defineStore('app', () => {
     reviews.value = {}
     activeReviewIndex.value = {}
     confirmDialog.value = null
+    promptDialog.value = null
     fileTree.value = []
     childrenMap.value = {}
     expanded.value = new Set()
@@ -866,28 +887,66 @@ export const useAppStore = defineStore('app', () => {
     await loadTree(parentPath(relPath) || '')
   }
 
-  function scheduleTreeRefresh(relPath?: string) {
-    if (relPath) pendingTreePaths.add(relPath)
+  /** Drop cached tree nodes / expand state under a path that no longer exists. */
+  function pruneTreePath(relPath: string) {
+    if (!relPath) return
+    const prefix = `${relPath}/`
+    const nextMap = { ...childrenMap.value }
+    delete nextMap[relPath]
+    for (const key of Object.keys(nextMap)) {
+      if (key.startsWith(prefix)) delete nextMap[key]
+    }
+    const parent = parentPath(relPath) || ''
+    if (nextMap[parent]) {
+      nextMap[parent] = nextMap[parent].filter((item) => item.path !== relPath)
+    }
+    childrenMap.value = nextMap
+    if (!parent) fileTree.value = nextMap[''] || []
+    if ([...expanded.value].some((p) => p === relPath || p.startsWith(prefix))) {
+      setExpanded(new Set([...expanded.value].filter((p) => p !== relPath && !p.startsWith(prefix))))
+    }
+  }
+
+  function scheduleTreeRefresh(relPath?: string, kind?: string) {
+    if (relPath) {
+      // Prefer deleted if any event in the debounce window says so.
+      const prev = pendingTreePaths.get(relPath)
+      pendingTreePaths.set(relPath, prev === 'deleted' || kind === 'deleted' ? 'deleted' : kind || prev)
+    }
     // Trailing debounce: wait until writes settle (tool.call often fires before the file exists)
     if (treeTimer) clearTimeout(treeTimer)
     treeTimer = setTimeout(async () => {
       treeTimer = null
-      const paths = [...pendingTreePaths]
+      const entries = [...pendingTreePaths.entries()]
       pendingTreePaths.clear()
       try {
-        if (!paths.length) {
+        if (!entries.length) {
           await refreshTree()
           return
         }
-        for (const path of paths) {
-          await revealInTree(path)
-          const parent = parentPath(path)
-          if (parent) await loadTree(parent)
+        // Process deletes deepest-first so parents are pruned after children.
+        entries.sort((a, b) => b[0].split('/').length - a[0].split('/').length || a[0].localeCompare(b[0]))
+        for (const [path, kind] of entries) {
+          const parent = parentPath(path) || ''
+          try {
+            if (kind === 'deleted') {
+              pruneTreePath(path)
+              await loadTree(parent).catch(() => undefined)
+            } else {
+              // May 404 if the path was already removed (e.g. SSH marks deletes as modified).
+              await revealInTree(path).catch(() => undefined)
+              if (parent) await loadTree(parent).catch(() => undefined)
+            }
+          } catch (err) {
+            console.error(err)
+            await loadTree(parent).catch(() => undefined)
+          }
         }
-        await loadTree('')
+        await loadTree('').catch(() => undefined)
         await loadGitChangedPaths()
       } catch (err) {
         console.error(err)
+        await loadTree('').catch(() => undefined)
       }
     }, 350)
   }
@@ -2864,6 +2923,35 @@ export const useAppStore = defineStore('app', () => {
     resolver?.(ok)
   }
 
+  function askPrompt(req: {
+    title: string
+    summary?: string
+    label?: string
+    defaultValue?: string
+    placeholder?: string
+    confirmLabel?: string
+    cancelLabel?: string
+    danger?: boolean
+  }): Promise<string | null> {
+    promptResolver?.(null)
+    promptDialog.value = {
+      confirmLabel: t('common.confirm'),
+      cancelLabel: t('common.cancel'),
+      defaultValue: '',
+      ...req,
+    }
+    return new Promise((resolve) => {
+      promptResolver = resolve
+    })
+  }
+
+  function closePrompt(value: string | null) {
+    promptDialog.value = null
+    const resolver = promptResolver
+    promptResolver = null
+    resolver?.(value)
+  }
+
   function decideApproval(approvalId: string, allowed: boolean) {
     const runId = activeRunId.value
     if (!runId) return
@@ -3067,6 +3155,9 @@ export const useAppStore = defineStore('app', () => {
     confirmDialog,
     askConfirm,
     closeConfirm,
+    promptDialog,
+    askPrompt,
+    closePrompt,
     decideApproval,
     pendingApprovals,
     providers,

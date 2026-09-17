@@ -55,6 +55,7 @@ async function openSsh() {
     await store.addSshWorkspace({
       root_path: ssh.path,
       ssh_display_name: ssh.auth.display_name.trim() || undefined,
+      ssh_group: ssh.auth.group.trim() || undefined,
       ssh_host: ssh.auth.host.trim(),
       ssh_port: Number(ssh.auth.port) || 22,
       ssh_user: ssh.auth.username.trim(),
@@ -133,6 +134,13 @@ const activeError = computed(() => (mode.value === 'local' ? local.error : ssh.e
             type="text"
             maxlength="120"
             :placeholder="t('workspace.sshDisplayName')"
+          />
+          <input
+            v-model="ssh.auth.group"
+            class="ssh-display-name"
+            type="text"
+            maxlength="120"
+            :placeholder="t('workspace.panel.hostGroupPlaceholder')"
           />
           <div class="ssh-form">
             <input v-model="ssh.auth.host" :placeholder="t('workspace.sshHost')" />

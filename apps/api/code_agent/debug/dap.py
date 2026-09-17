@@ -37,11 +37,24 @@ class DapClient:
         deadline = asyncio.get_running_loop().time() + timeout
         while asyncio.get_running_loop().time() < deadline:
             try:
-                self._reader, self._writer = await asyncio.wait_for(
+                reader, writer = await asyncio.wait_for(
                     asyncio.open_connection(host, port),
                     timeout=2.0,
                 )
+                # Tunnel may accept then reset if remote wasn't ready yet.
+                await asyncio.sleep(0.05)
+                if reader.at_eof():
+                    writer.close()
+                    try:
+                        await writer.wait_closed()
+                    except Exception:
+                        pass
+                    last_err = ConnectionError("DAP peer closed immediately")
+                    await asyncio.sleep(0.15)
+                    continue
+                self._reader, self._writer = reader, writer
                 self._closed = False
+                self._initialized.clear()
                 self._reader_task = asyncio.create_task(self._read_loop())
                 return
             except Exception as exc:  # noqa: BLE001 — retry until timeout
@@ -138,6 +151,7 @@ class DapClient:
         except (asyncio.CancelledError, asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
         finally:
+            self._closed = True
             for fut in list(self._pending.values()):
                 if not fut.done():
                     fut.set_exception(ConnectionError("DAP disconnected"))

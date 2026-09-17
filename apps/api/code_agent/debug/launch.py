@@ -23,6 +23,7 @@ def resolve_debug_python(
     *,
     is_ssh: bool = False,
     workspace_root: str | None = None,
+    settings_interpreter: str | None = None,
 ) -> str:
     """Pick the interpreter used to launch debugpy.
 
@@ -31,7 +32,9 @@ def resolve_debug_python(
     2. ``sys.executable`` (desktop bundled CPython with debugpy)
     3. Platform default
 
-    Remote SSH keeps a remote ``python3`` default unless a concrete path is set.
+    Remote SSH: use a concrete launch.json path when set; otherwise prefer
+    ``settings_interpreter`` (loaded from the remote ``.code-agent/config.yaml``)
+    via soft path resolve. Do not read the remote path as a local file.
     """
     raw = (configured or "").strip()
     name = Path(raw).name.lower() if raw else ""
@@ -45,7 +48,15 @@ def resolve_debug_python(
         try:
             from code_agent.runtime.python_env import resolve_python_env
 
-            pyenv = resolve_python_env(workspace_root=workspace_root)
+            # settings_interpreter is required for SSH when the setting lives only on the remote.
+            # Pass "" when the caller already checked remote and found nothing (skip local yaml).
+            if settings_interpreter is not None:
+                pyenv = resolve_python_env(
+                    workspace_root=workspace_root,
+                    configured=settings_interpreter.strip(),
+                )
+            else:
+                pyenv = resolve_python_env(workspace_root=workspace_root)
             if pyenv.python:
                 return pyenv.python
         except Exception:
@@ -56,7 +67,13 @@ def resolve_debug_python(
     try:
         from code_agent.runtime.python_env import resolve_python_env
 
-        pyenv = resolve_python_env(workspace_root=workspace_root)
+        if settings_interpreter is not None and str(settings_interpreter).strip():
+            pyenv = resolve_python_env(
+                workspace_root=workspace_root,
+                configured=str(settings_interpreter).strip(),
+            )
+        else:
+            pyenv = resolve_python_env(workspace_root=workspace_root)
         if pyenv.python:
             return pyenv.python
     except Exception:

@@ -103,6 +103,18 @@ def test_resolve_debug_python_ssh_keeps_remote_default(monkeypatch):
         "code_agent.runtime.python_env.settings.get",
         lambda key, default=None: "" if key == "python.interpreter" else default,
     )
-    assert resolve_debug_python("python3", is_ssh=True) == "python3"
-    assert resolve_debug_python(None, is_ssh=True) == "python3"
+    assert resolve_debug_python("python3", is_ssh=True, settings_interpreter="") == "python3"
+    assert resolve_debug_python(None, is_ssh=True, settings_interpreter="") == "python3"
     assert resolve_debug_python("/usr/bin/python3.11", is_ssh=True) == "/usr/bin/python3.11"
+
+
+def test_resolve_debug_python_ssh_uses_settings_interpreter(tmp_path: Path):
+    # Soft-resolve relative interpreter against remote workspace root (path need not exist locally).
+    got = resolve_debug_python(
+        "python3",
+        is_ssh=True,
+        workspace_root="/home/user/proj",
+        settings_interpreter=".venv/bin/python",
+    )
+    assert got.endswith(".venv/bin/python")
+    assert got.startswith("/home/user/proj")

@@ -4,6 +4,7 @@ import { api, getErrorCode } from '@/api/http'
 import { useAppStore } from '@/stores/app'
 import { t } from '@/i18n'
 import { normalizeDebugPath } from '@/utils/debugPath'
+import { stripAnsi, AnsiStreamFilter } from '@/utils/stripAnsi'
 import {
   BREAKPOINTS_FILE_REL,
   parseBreakpointsFile,
@@ -131,7 +132,17 @@ export const useDebugStore = defineStore('debug', () => {
   const watches = ref<WatchItem[]>([])
 
   const sockets = new Map<string, WebSocket>()
+  const ansiFilters = new Map<string, AnsiStreamFilter>()
   let bpFileTimer: ReturnType<typeof setTimeout> | null = null
+
+  function ansiFilterFor(id: string) {
+    let f = ansiFilters.get(id)
+    if (!f) {
+      f = new AnsiStreamFilter()
+      ansiFilters.set(id, f)
+    }
+    return f
+  }
   let bpHydrateGen = 0
   let lastHydratedWorkspaceId: string | null = null
 
@@ -224,8 +235,10 @@ export const useDebugStore = defineStore('debug', () => {
   void hydrateBreakpoints(true)
   watch(
     () => useAppStore().workspaceId,
-    () => {
+    (id) => {
+      reset()
       void hydrateBreakpoints(true)
+      if (id) void restoreSessions()
     },
   )
 
@@ -393,6 +406,7 @@ export const useDebugStore = defineStore('debug', () => {
 
   function removeSessionLocal(id: string) {
     disconnectWs(id)
+    ansiFilters.delete(id)
     sessions.value = sessions.value.filter((s) => s.id !== id)
     if (activeSessionId.value === id) {
       activeSessionId.value = sessions.value[0]?.id ?? null
@@ -419,7 +433,9 @@ export const useDebugStore = defineStore('debug', () => {
       }
     }
     socket.onclose = () => {
-      if (sockets.get(id) === socket) sockets.delete(id)
+      // Intentional replace/disconnect clears the map entry first — ignore those closes.
+      if (sockets.get(id) !== socket) return
+      sockets.delete(id)
       const sess = getSession(id)
       // Boot may have failed before the client subscribed; surface the error instead of spinning.
       if (sess && (sess.state === 'starting' || sess.busy)) {
@@ -429,6 +445,69 @@ export const useDebugStore = defineStore('debug', () => {
           error: sess.error || t('debug.startFailed'),
         })
       }
+    }
+  }
+
+  /** Reattach UI tabs to live backend sessions (survives page refresh). */
+  async function restoreSessions() {
+    const app = useAppStore()
+    if (!app.workspaceId) return
+    try {
+      const data = await api<{
+        sessions: Array<{
+          id: string
+          state: DebugState
+          program?: string | null
+          module?: string | null
+          name?: string | null
+          cwd?: string | null
+        }>
+      }>(`/api/debug/sessions?workspace_id=${encodeURIComponent(app.workspaceId)}`)
+      const remote = data.sessions || []
+      const live = remote.filter((s) => isLiveState(s.state))
+      const liveIds = new Set(live.map((s) => s.id))
+
+      for (const s of [...sessions.value]) {
+        if (!liveIds.has(s.id) && isLiveState(s.state)) removeSessionLocal(s.id)
+      }
+
+      for (const row of live) {
+        const existing = getSession(row.id)
+        if (existing) {
+          patchSession(row.id, {
+            state: row.state,
+            program: row.program ?? existing.program,
+            module: row.module ?? existing.module,
+            busy: row.state === 'starting',
+          })
+          if (!sockets.has(row.id)) connectWs(row.id)
+          continue
+        }
+        const title =
+          basename(row.program || undefined) ||
+          row.module ||
+          row.name ||
+          'debug'
+        sessions.value = [
+          ...sessions.value,
+          emptyTab({
+            id: row.id,
+            title,
+            program: row.program || null,
+            module: row.module || null,
+            state: row.state,
+            busy: row.state === 'starting',
+          }),
+        ]
+        connectWs(row.id)
+      }
+
+      if (!activeSessionId.value || !getSession(activeSessionId.value)) {
+        const paused = live.find((s) => s.state === 'paused')
+        activeSessionId.value = paused?.id || live[0]?.id || null
+      }
+    } catch {
+      /* backend unreachable or empty */
     }
   }
 
@@ -549,8 +628,31 @@ export const useDebugStore = defineStore('debug', () => {
       })
       return
     }
+    if (type === 'console_history') {
+      const rawLines = Array.isArray(payload.lines) ? payload.lines : []
+      const lines: DebugSessionTab['consoleLines'] = []
+      for (const row of rawLines) {
+        if (!row || typeof row !== 'object') continue
+        const text = stripAnsi(String((row as { text?: unknown }).text ?? ''))
+        const kindRaw = String((row as { kind?: unknown }).kind ?? 'stdout')
+        const kind = (
+          kindRaw === 'in' || kindRaw === 'out' || kindRaw === 'err' || kindRaw === 'stdout'
+            ? kindRaw
+            : 'stdout'
+        ) as DebugSessionTab['consoleLines'][number]['kind']
+        if (!text.trim() && !text) continue
+        if (/^(ptvsd|debugpy|pydevd)$/i.test(text.trim())) continue
+        lines.push({ text, kind })
+      }
+      patchSession(id, {
+        consoleLines: lines.slice(-400),
+        output: lines.filter((l) => l.kind === 'stdout' || l.kind === 'err').map((l) => `${l.text}\n`).slice(-400),
+      })
+      return
+    }
     if (type === 'output') {
-      const text = String(payload.output || '')
+      const text = ansiFilterFor(id).feed(String(payload.output || ''))
+      if (!text) return
       const trimmed = text.trimEnd()
       if (!trimmed.trim() || /^(ptvsd|debugpy|pydevd)$/i.test(trimmed.trim())) return
       if (/^\s*(?:ptvsd|debugpy|pydevd)(?:\s|$)/i.test(trimmed.trim())) return
@@ -559,10 +661,12 @@ export const useDebugStore = defineStore('debug', () => {
       const chunks = lineText.split(/\n/)
       const nextLines = [...sess.consoleLines]
       const nextOut = [...sess.output]
+      const category = String(payload.category || 'stdout')
+      const kind = category === 'stderr' || category === 'err' ? 'err' : 'stdout'
       for (const chunk of chunks) {
         if (!chunk.trim() && chunk === '') continue
         nextOut.push(chunk.endsWith('\n') ? chunk : `${chunk}\n`)
-        nextLines.push({ text: chunk, kind: 'stdout' })
+        nextLines.push({ text: chunk, kind })
       }
       if (nextLines.length === sess.consoleLines.length) return
       patchSession(id, {
@@ -838,7 +942,7 @@ export const useDebugStore = defineStore('debug', () => {
     const sess = getSession(sid)
     if (!sid || !sess || !expression.trim()) return
     patchSession(sid, {
-      consoleLines: [...sess.consoleLines, { text: expression, kind: 'in' }],
+      consoleLines: [...sess.consoleLines, { text: stripAnsi(expression), kind: 'in' }],
     })
     try {
       const data = await api<{ result?: string }>(`/api/debug/sessions/${sid}/evaluate`, {
@@ -852,7 +956,7 @@ export const useDebugStore = defineStore('debug', () => {
       const cur = getSession(sid)
       if (!cur) return
       patchSession(sid, {
-        consoleLines: [...cur.consoleLines, { text: String(data.result ?? ''), kind: 'out' }],
+        consoleLines: [...cur.consoleLines, { text: stripAnsi(String(data.result ?? '')), kind: 'out' }],
       })
     } catch (err) {
       const cur = getSession(sid)
@@ -860,7 +964,7 @@ export const useDebugStore = defineStore('debug', () => {
       patchSession(sid, {
         consoleLines: [
           ...cur.consoleLines,
-          { text: err instanceof Error ? err.message : String(err), kind: 'err' },
+          { text: stripAnsi(err instanceof Error ? err.message : String(err)), kind: 'err' },
         ],
       })
     }
@@ -1008,6 +1112,7 @@ export const useDebugStore = defineStore('debug', () => {
     toggleBreakpoint,
     setBreakpointCondition,
     hydrateBreakpoints,
+    restoreSessions,
     loadConfigs,
     start,
     restart,

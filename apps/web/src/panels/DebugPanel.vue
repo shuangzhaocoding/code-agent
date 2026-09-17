@@ -18,21 +18,64 @@ const watchInput = ref('')
 const consoleInput = ref('')
 const consoleEl = ref<HTMLElement | null>(null)
 const consoleInputEl = ref<HTMLInputElement | null>(null)
+const splitEl = ref<HTMLElement | null>(null)
 const conditionPath = ref<string | null>(null)
 const conditionLine = ref<number | null>(null)
 const conditionText = ref('')
 
+const SPLIT_KEY = 'ca.debugConsoleLeftPct'
+const DEFAULT_LEFT_PCT = 50
+
+function loadLeftPct() {
+  if (typeof localStorage === 'undefined') return DEFAULT_LEFT_PCT
+  try {
+    const n = Number(localStorage.getItem(SPLIT_KEY))
+    if (Number.isFinite(n) && n >= 20 && n <= 80) return n
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_LEFT_PCT
+}
+
+const leftPct = ref(loadLeftPct())
+
+function onSplitPointerDown(e: PointerEvent) {
+  e.preventDefault()
+  const root = splitEl.value
+  if (!root) return
+  const rect = root.getBoundingClientRect()
+  if (rect.width < 1) return
+  const target = e.currentTarget as HTMLElement
+  target.setPointerCapture?.(e.pointerId)
+
+  function onMove(ev: PointerEvent) {
+    const pct = ((ev.clientX - rect.left) / rect.width) * 100
+    leftPct.value = Math.round(Math.max(20, Math.min(80, pct)) * 10) / 10
+  }
+  function onUp(ev: PointerEvent) {
+    target.releasePointerCapture?.(ev.pointerId)
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+    try {
+      localStorage.setItem(SPLIT_KEY, String(leftPct.value))
+    } catch {
+      /* ignore */
+    }
+  }
+  window.addEventListener('pointermove', onMove)
+  window.addEventListener('pointerup', onUp)
+}
+
 onMounted(() => {
   void debug.loadConfigs()
   void debug.hydrateBreakpoints(true)
+  void debug.restoreSessions()
 })
 
 watch(
   () => app.workspaceId,
   () => {
     void debug.loadConfigs()
-    void debug.hydrateBreakpoints(true)
-    debug.reset()
     sideView.value = null
   },
 )
@@ -336,15 +379,17 @@ const sideViewTitle = computed(() => {
         </div>
       </section>
 
-      <div class="debug-split">
-        <div class="debug-col debug-col--left">
+      <div ref="splitEl" class="debug-split">
+        <div class="debug-col debug-col--left" :style="{ flexBasis: leftPct + '%' }">
           <section class="block grow">
             <h3>{{ t('debug.console') }}</h3>
-            <div ref="consoleEl" class="console" @click="focusConsoleInput">
-              <div v-for="(line, i) in debug.consoleLines" :key="i" :class="['cline', line.kind]">
-                {{ line.kind === 'in' ? '› ' : '' }}{{ line.text }}
+            <div class="console-shell" @click="focusConsoleInput">
+              <div ref="consoleEl" class="console-log">
+                <div v-for="(line, i) in debug.consoleLines" :key="i" :class="['cline', line.kind]">
+                  {{ line.kind === 'in' ? '› ' : '' }}{{ line.text }}
+                </div>
               </div>
-              <div class="console-input-row">
+              <div class="console-input-row" @click.stop>
                 <span class="console-prompt">›</span>
                 <input
                   ref="consoleInputEl"
@@ -359,6 +404,15 @@ const sideViewTitle = computed(() => {
             </div>
           </section>
         </div>
+
+        <div
+          class="debug-sash"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-valuenow="Math.round(leftPct)"
+          :title="t('debug.resizeSplit')"
+          @pointerdown="onSplitPointerDown"
+        />
 
         <div class="debug-col debug-col--right">
           <section class="block grow">
@@ -574,8 +628,9 @@ const sideViewTitle = computed(() => {
 .debug-split {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
   overflow: hidden;
 }
 .debug-col {
@@ -586,7 +641,35 @@ const sideViewTitle = computed(() => {
   overflow: hidden;
 }
 .debug-col--left {
-  border-right: 1px solid var(--border);
+  flex: 0 0 auto;
+  max-width: calc(100% - 124px);
+  min-width: 120px;
+}
+.debug-col--right {
+  flex: 1 1 0;
+  min-width: 120px;
+}
+.debug-sash {
+  flex: 0 0 5px;
+  width: 5px;
+  margin: 0 -1px;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+  position: relative;
+  z-index: 2;
+}
+.debug-sash::before {
+  content: '';
+  position: absolute;
+  inset: 0 1px;
+  background: var(--border);
+  transition: background 0.12s ease, inset 0.12s ease;
+}
+.debug-sash:hover::before,
+.debug-sash:active::before {
+  inset: 0 0;
+  background: color-mix(in srgb, var(--primary) 55%, var(--border));
 }
 .block {
   padding: 8px 10px;
@@ -686,24 +769,34 @@ h3 {
   align-items: center;
   margin: 4px 0;
 }
-.console {
+.console-shell {
   flex: 1;
   min-height: 80px;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 6px 8px;
   background: var(--editor-bg);
   font-family: var(--mono);
   font-size: 12px;
   cursor: text;
 }
+.console-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px 4px;
+}
 .console-input-row {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
-  min-height: 18px;
-  margin-top: 2px;
+  min-height: 28px;
+  padding: 4px 8px 6px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--editor-bg) 92%, var(--panel-bg));
 }
 .console-prompt {
   flex-shrink: 0;

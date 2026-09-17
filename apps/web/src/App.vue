@@ -34,6 +34,7 @@ watch(
 function onVisibility() {
   if (document.visibilityState === 'visible' && store.workspaceId) {
     void store.refreshWorkspaceStatus()
+    void useDebugStore().restoreSessions()
   }
 }
 
@@ -45,7 +46,9 @@ async function bootstrapApp() {
   await Promise.all([store.loadWorkspaces(), store.loadSettings()])
   if (store.workspaceId) {
     await store.selectWorkspace(store.workspaceId, { openExplorer: false })
-    void useDebugStore().hydrateBreakpoints(true)
+    const debug = useDebugStore()
+    void debug.hydrateBreakpoints(true)
+    void debug.restoreSessions()
   }
   bootstrapped.value = true
 }

@@ -18,6 +18,7 @@ class Workspace(Model):
     ssh_user = fields.CharField(max_length=128, null=True)
     ssh_secret = fields.TextField(null=True)  # encrypted JSON: password / private_key / passphrase
     ssh_display_name = fields.CharField(max_length=120, null=True)
+    ssh_group = fields.CharField(max_length=120, null=True)
     created_at = fields.DatetimeField(auto_now_add=True)
     last_opened_at = fields.DatetimeField(auto_now=True)
 
