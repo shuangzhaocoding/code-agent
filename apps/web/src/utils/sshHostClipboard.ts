@@ -65,9 +65,9 @@ export function subscribeSshHostClipboard(fn: () => void): () => void {
 }
 
 export function formatSshEndpoint(clipOr: {
-  ssh_host?: string
-  ssh_port?: number
-  ssh_user?: string
+  ssh_host?: string | null
+  ssh_port?: number | null
+  ssh_user?: string | null
 }): string {
   const host = clipOr.ssh_host || 'unknown'
   const port = clipOr.ssh_port || 22
