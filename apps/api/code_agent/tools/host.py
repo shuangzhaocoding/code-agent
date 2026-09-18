@@ -424,6 +424,10 @@ async def run_command(command: str, cwd: str = ".") -> str:
     Prefer run_in_terminal yourself for long-lived servers/watchers (including `cd … && npm run dev`).
     As a safety net, obvious long-lived patterns may still be auto-launched in the Terminal panel.
     """
+    import time
+
+    from code_agent.streaming.run_manager import get_cancel_event
+    from code_agent.tools import progress as tool_progress
     from code_agent.tools.long_lived import is_long_lived_command
 
     if is_long_lived_command(command):
@@ -439,15 +443,86 @@ async def run_command(command: str, cwd: str = ".") -> str:
     ):
         return "ERROR: user denied this operation"
     fs = await _backend()
-    timeout = int(settings.get("agent.tool_timeout_sec") or 90)
+    timeout = int(settings.get("agent.tool_timeout_sec") or 300)
     max_chars = int(settings.get("agent.max_tool_output_chars") or 12000)
-    code, stdout, stderr = await fs.run_command(command, cwd=cwd, timeout=timeout)
+    heartbeat = max(1, int(settings.get("agent.tool_heartbeat_sec") or 3))
+    run_id = get_run_id()
+    cancel_event = get_cancel_event(run_id)
+    started = time.monotonic()
+    streamed = 0
+    stream_cap = min(max_chars, 8000)
+    last_beat = 0.0
+    stop_beat = asyncio.Event()
+
+    async def _heartbeat_loop() -> None:
+        nonlocal last_beat
+        while not stop_beat.is_set():
+            try:
+                await asyncio.wait_for(stop_beat.wait(), timeout=heartbeat)
+                break
+            except asyncio.TimeoutError:
+                pass
+            now = time.monotonic()
+            last_beat = now
+            await tool_progress.emit_meta(
+                run_id,
+                {"elapsed_sec": int(now - started), "phase": "running"},
+                name="run_command",
+            )
+
+    async def on_output(chunk: str) -> None:
+        nonlocal streamed, last_beat
+        if not chunk:
+            return
+        remain = stream_cap - streamed
+        if remain > 0:
+            piece = chunk if len(chunk) <= remain else chunk[:remain]
+            streamed += len(piece)
+            await tool_progress.emit_delta(run_id, piece, name="run_command")
+            if streamed >= stream_cap and len(chunk) > remain:
+                await tool_progress.emit_delta(run_id, "\n...[truncated live output]\n", name="run_command")
+        now = time.monotonic()
+        if now - last_beat >= heartbeat:
+            last_beat = now
+            await tool_progress.emit_meta(
+                run_id,
+                {"elapsed_sec": int(now - started), "phase": "running"},
+                name="run_command",
+            )
+
+    beat_task = asyncio.create_task(_heartbeat_loop())
+    try:
+        code, stdout, stderr = await fs.run_command(
+            command,
+            cwd=cwd,
+            timeout=timeout,
+            cancel_event=cancel_event,
+            on_output=on_output,
+        )
+    finally:
+        stop_beat.set()
+        try:
+            await beat_task
+        except Exception:
+            pass
+
+    elapsed = int(time.monotonic() - started)
+    await tool_progress.emit_meta(
+        run_id,
+        {
+            "elapsed_sec": elapsed,
+            "phase": "done" if code not in {124, 130} else ("timeout" if code == 124 else "cancelled"),
+        },
+        name="run_command",
+    )
+    if code == 130 or (cancel_event is not None and cancel_event.is_set() and code != 0):
+        return "ERROR: cancelled"
     output = stdout + (("\n" + stderr) if stderr else "")
     if len(output) > max_chars:
         output = output[:max_chars] + "\n...[truncated]"
     await _emit(
         "terminal",
-        {"command": command, "cwd": cwd, "exit_code": code},
+        {"command": command, "cwd": cwd, "exit_code": code, "elapsed_sec": elapsed},
         output[-4000:],
     )
     return f"exit {code}\n{output}"

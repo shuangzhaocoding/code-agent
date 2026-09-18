@@ -7,6 +7,7 @@ from code_agent.agent.hitl import wait_for_approval_resume
 from code_agent.llm.thinking import thinking_enabled
 from code_agent.protocol.events import new_id
 from code_agent.streaming.broker import broker
+from code_agent.tools import progress as tool_progress
 
 # Only the user-facing ReAct loop should emit SSE blocks.
 _STREAM_NODES = frozenset({"agent"})
@@ -187,10 +188,12 @@ async def stream_graph_events(
                     )
                     if reused:
                         tool_blocks[call_id] = reused
+                        tool_progress.bind(run_id, call_id, reused, name)
                         continue
                 block_id = new_id()
                 tool_blocks[call_id] = block_id
                 open_tool_blocks.setdefault(name, []).append(block_id)
+                tool_progress.bind(run_id, call_id, block_id, name)
                 await broker.publish(
                     run_id,
                     "block.started",
@@ -212,6 +215,7 @@ async def stream_graph_events(
                 block_id = tool_blocks.get(call_id)
                 if block_id:
                     completed_tool_blocks.add(block_id)
+                    tool_progress.unbind(run_id, call_id=call_id, block_id=block_id)
                     await broker.publish(
                         run_id,
                         "block.completed",
@@ -222,6 +226,7 @@ async def stream_graph_events(
                 tcid = data.get("tool_call_id")
                 block_id = tool_blocks.get(call_id) or (tool_blocks.get(str(tcid)) if tcid else None) or new_id()
                 completed_tool_blocks.add(block_id)
+                tool_progress.unbind(run_id, call_id=call_id, block_id=block_id)
                 output = data.get("output")
                 text = output if isinstance(output, str) else str(getattr(output, "content", output))
                 result_id = new_id()

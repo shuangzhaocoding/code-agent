@@ -1474,22 +1474,6 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
   cursor: default;
 }
 
-.ws-missing-badge {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 6px;
-  padding: 0 5px;
-  height: 16px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--danger, #ef4444);
-  background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent);
-  vertical-align: middle;
-  flex-shrink: 0;
-}
-
 .workspace-body {
   flex: 1;
   min-height: 0;

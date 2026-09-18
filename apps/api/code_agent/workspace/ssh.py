@@ -406,7 +406,13 @@ class SshWorkspaceBackend:
         return hits
 
     async def run_command(
-        self, command: str, *, cwd: str = ".", timeout: int = 90
+        self,
+        command: str,
+        *,
+        cwd: str = ".",
+        timeout: int = 90,
+        cancel_event: asyncio.Event | None = None,
+        on_output=None,
     ) -> tuple[int, str, str]:
         from code_agent.runtime.python_env import resolve_python_env, shell_export_prefix
 
@@ -415,11 +421,92 @@ class SshWorkspaceBackend:
         pyenv = resolve_python_env(workspace_root=self.root_path)
         activate = shell_export_prefix(pyenv, windows=False)
         remote = f"cd {shlex.quote(work)} && {activate}{command}"
+
+        proc = await conn.create_process(remote)
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+
+        async def _pump(stream, sink: list[str]) -> None:
+            if stream is None:
+                return
+            try:
+                while True:
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        break
+                    if isinstance(chunk, (bytes, bytearray)):
+                        text = bytes(chunk).decode(errors="replace")
+                    else:
+                        text = str(chunk)
+                    sink.append(text)
+                    if on_output:
+                        try:
+                            await on_output(text)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+
+        pump_out = asyncio.create_task(_pump(proc.stdout, stdout_parts))
+        pump_err = asyncio.create_task(_pump(proc.stderr, stderr_parts))
+        wait_task = asyncio.create_task(proc.wait())
+        cancel_task: asyncio.Task | None = None
+        if cancel_event is not None:
+            cancel_task = asyncio.create_task(cancel_event.wait())
+
+        async def _kill() -> None:
+            try:
+                proc.kill()
+            except Exception:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            try:
+                proc.close()
+            except Exception:
+                pass
+
+        timed_out = False
+        cancelled = False
         try:
-            result = await asyncio.wait_for(conn.run(remote, check=False), timeout=timeout)
-        except TimeoutError:
-            return 124, "", f"command timed out after {timeout}s"
-        return int(result.exit_status or 0), result.stdout or "", result.stderr or ""
+            waiters: set[asyncio.Task] = {wait_task}
+            if cancel_task:
+                waiters.add(cancel_task)
+            done, _pending = await asyncio.wait(
+                waiters,
+                timeout=max(1, int(timeout or 90)),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task and cancel_task in done and cancel_event and cancel_event.is_set():
+                cancelled = True
+                await _kill()
+            elif wait_task not in done:
+                timed_out = True
+                await _kill()
+            if wait_task not in done:
+                try:
+                    await asyncio.wait_for(asyncio.shield(wait_task), timeout=3)
+                except Exception:
+                    pass
+        finally:
+            if cancel_task and not cancel_task.done():
+                cancel_task.cancel()
+            await asyncio.gather(pump_out, pump_err, return_exceptions=True)
+
+        out = "".join(stdout_parts)
+        err = "".join(stderr_parts)
+        if cancelled:
+            return 130, out, (err + ("\n" if err else "") + "command cancelled")
+        if timed_out:
+            return 124, out, (err + ("\n" if err else "") + f"command timed out after {timeout}s")
+        code = getattr(proc, "exit_status", None)
+        if code is None and wait_task.done():
+            try:
+                code = wait_task.result()
+            except Exception:
+                code = 1
+        return int(code or 0), out, err
 
     async def close(self) -> None:
         # Workspace connections stay in the process-wide pool so port-forwards /

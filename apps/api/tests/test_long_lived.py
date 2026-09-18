@@ -15,11 +15,15 @@ def test_detects_common_dev_servers():
     assert is_long_lived_command("cd backend && npm run dev")
     assert is_long_lived_command("cd apps/web && pnpm start")
     assert is_long_lived_command("cd api; uvicorn app:main --reload")
+    assert is_long_lived_command("tail -f app.log")
+    assert is_long_lived_command("watch ls")
+    assert is_long_lived_command("pnpm run build --watch")
     assert not is_long_lived_command("docker compose up -d")
     assert not is_long_lived_command("npm install")
     assert not is_long_lived_command("cd backend && npm install")
     assert not is_long_lived_command("pytest")
     assert not is_long_lived_command("echo hello")
+    assert not is_long_lived_command("tail app.log")
 
 
 def test_normalize_strips_background_wrappers():

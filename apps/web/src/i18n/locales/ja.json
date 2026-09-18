@@ -1108,6 +1108,7 @@
     "error": "エラー",
     "thinking": "思考中…",
     "executing": "実行中…",
+    "elapsed": "実行中 {n}s",
     "inProgress": "進行中…",
     "reply": "返信",
     "user": "ユーザー",

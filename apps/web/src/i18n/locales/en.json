@@ -1490,6 +1490,7 @@
     "error": "Errors",
     "thinking": "Thinking…",
     "executing": "Running…",
+    "elapsed": "Running {n}s",
     "inProgress": "In progress…",
     "reply": "Reply",
     "user": "User",

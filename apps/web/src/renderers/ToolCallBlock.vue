@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import type { Block } from '@/protocol/applyEvent'
 import EventCard from '@/components/EventCard.vue'
 import { useAppStore } from '@/stores/app'
+import { t } from '@/i18n'
 
 const props = defineProps<{ block: Block }>()
 const store = useAppStore()
+const tick = ref(0)
+let tickTimer: ReturnType<typeof setInterval> | null = null
 
 type Tone = 'default' | 'think' | 'danger' | 'tool'
 
@@ -46,7 +49,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
     } catch {
       return null
     }
@@ -87,9 +92,31 @@ function openFile() {
   if (fileOp.value && path.value) store.openAgentFile(path.value)
 }
 
+const elapsedSec = computed(() => {
+  void tick.value
+  const metaSec = Number(props.block.meta.elapsed_sec)
+  if (Number.isFinite(metaSec) && metaSec >= 0) return Math.floor(metaSec)
+  if (props.block.status !== 'streaming') return null
+  const started = props.block.started_at
+  const startMs = typeof started === 'number' ? started : started ? Date.parse(String(started)) : NaN
+  if (!Number.isFinite(startMs)) return null
+  return Math.max(0, Math.floor((Date.now() - startMs) / 1000))
+})
+
 const subtitle = computed(() => {
-  if (toolName.value === 'run_command' || toolName.value === 'run_in_terminal' || props.block.type === 'terminal' || props.block.type === 'terminal.launch') {
-    return String(args.value.command || props.block.meta.command || '')
+  if (
+    toolName.value === 'run_command' ||
+    toolName.value === 'run_in_terminal' ||
+    props.block.type === 'terminal' ||
+    props.block.type === 'terminal.launch'
+  ) {
+    const cmd = String(args.value.command || props.block.meta.command || '')
+    if (props.block.status === 'streaming' && elapsedSec.value != null) {
+      return cmd
+        ? `${cmd} · ${t('trajectory.elapsed', { n: elapsedSec.value })}`
+        : t('trajectory.elapsed', { n: elapsedSec.value })
+    }
+    return cmd
   }
   if (props.block.type === 'skill.activated') {
     const name = String(props.block.meta.name || '')
@@ -100,6 +127,11 @@ const subtitle = computed(() => {
     const skill = props.block.meta.active_skill ? `@${props.block.meta.active_skill}` : ''
     const rules = props.block.meta.rules_count != null ? `${props.block.meta.rules_count} rules` : ''
     return [rules, skill].filter(Boolean).join(' · ')
+  }
+  if (props.block.status === 'streaming' && elapsedSec.value != null && props.block.type === 'tool.call') {
+    const base = path.value && path.value !== spec.value.label ? path.value : ''
+    const elapsed = t('trajectory.elapsed', { n: elapsedSec.value })
+    return base ? `${base} · ${elapsed}` : elapsed
   }
   return path.value && path.value !== spec.value.label ? path.value : ''
 })
@@ -118,6 +150,16 @@ const body = computed(() => {
   delete meta.args
   return Object.keys(meta).length ? JSON.stringify(meta, null, 2) : ''
 })
+
+onMounted(() => {
+  tickTimer = setInterval(() => {
+    if (props.block.status === 'streaming') tick.value += 1
+  }, 1000)
+})
+
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer)
+})
 </script>
 
 <template>
@@ -127,7 +169,8 @@ const body = computed(() => {
     :subtitle="subtitle"
     :tone="spec.tone"
     :status="block.status"
-    :default-open="block.status === 'error'"
+    :elapsed-sec="elapsedSec"
+    :default-open="block.status === 'error' || (block.status === 'streaming' && !!block.text)"
     :activatable="fileOp && !!path"
     @activate="openFile"
   >

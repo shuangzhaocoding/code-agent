@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import subprocess
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -158,31 +157,116 @@ class LocalWorkspaceBackend:
         )
 
     async def run_command(
-        self, command: str, *, cwd: str = ".", timeout: int = 90
+        self,
+        command: str,
+        *,
+        cwd: str = ".",
+        timeout: int = 90,
+        cancel_event: asyncio.Event | None = None,
+        on_output=None,
     ) -> tuple[int, str, str]:
         work = path_tools.resolve_in_workspace(self.root_path, cwd)
         if not await run_sync(work.is_dir):
             work = Path(self.root_path)
 
-        def _run() -> tuple[int, str, str]:
-            from code_agent.runtime.python_env import merge_python_env, resolve_python_env
+        from code_agent.runtime.python_env import merge_python_env, resolve_python_env
 
-            pyenv = resolve_python_env(workspace_root=self.root_path)
-            proc = subprocess.run(
-                command,
-                shell=True,
-                cwd=str(work),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                env=merge_python_env(os.environ, pyenv),
-            )
-            return proc.returncode, proc.stdout or "", proc.stderr or ""
-
+        pyenv = resolve_python_env(workspace_root=self.root_path)
+        env = merge_python_env(os.environ, pyenv)
         try:
-            return await run_sync(_run)
-        except subprocess.TimeoutExpired:
-            return 124, "", f"command timed out after {timeout}s"
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                cwd=str(work),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            return 1, "", str(exc)
+
+        stdout_parts: list[str] = []
+        stderr_parts: list[str] = []
+
+        async def _pump(stream: asyncio.StreamReader | None, sink: list[str]) -> None:
+            if not stream:
+                return
+            while True:
+                chunk = await stream.read(4096)
+                if not chunk:
+                    break
+                text = chunk.decode(errors="replace")
+                sink.append(text)
+                if on_output:
+                    try:
+                        await on_output(text)
+                    except Exception:
+                        pass
+
+        pump_out = asyncio.create_task(_pump(proc.stdout, stdout_parts))
+        pump_err = asyncio.create_task(_pump(proc.stderr, stderr_parts))
+        wait_task = asyncio.create_task(proc.wait())
+        cancel_task: asyncio.Task | None = None
+        if cancel_event is not None:
+            cancel_task = asyncio.create_task(cancel_event.wait())
+
+        def _kill() -> None:
+            if proc.returncode is not None:
+                return
+            try:
+                if hasattr(os, "killpg") and proc.pid:
+                    os.killpg(proc.pid, 15)
+                else:
+                    proc.terminate()
+            except ProcessLookupError:
+                return
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+        timed_out = False
+        cancelled = False
+        try:
+            waiters: set[asyncio.Task] = {wait_task}
+            if cancel_task:
+                waiters.add(cancel_task)
+            done, _pending = await asyncio.wait(
+                waiters,
+                timeout=max(1, int(timeout or 90)),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if cancel_task and cancel_task in done and cancel_event and cancel_event.is_set():
+                cancelled = True
+                _kill()
+            elif wait_task not in done:
+                timed_out = True
+                _kill()
+            if wait_task not in done:
+                try:
+                    await asyncio.wait_for(wait_task, timeout=3)
+                except Exception:
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                    try:
+                        await wait_task
+                    except Exception:
+                        pass
+        finally:
+            if cancel_task and not cancel_task.done():
+                cancel_task.cancel()
+            await asyncio.gather(pump_out, pump_err, return_exceptions=True)
+
+        out = "".join(stdout_parts)
+        err = "".join(stderr_parts)
+        if cancelled:
+            return 130, out, (err + ("\n" if err else "") + "command cancelled")
+        if timed_out:
+            return 124, out, (err + ("\n" if err else "") + f"command timed out after {timeout}s")
+        return int(proc.returncode or 0), out, err
 
     async def close(self) -> None:
         return None

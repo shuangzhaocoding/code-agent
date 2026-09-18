@@ -178,7 +178,7 @@ const blockClass = computed(() => ({
             <span class="ws-copy">
               <span class="ws-name">{{ ws.name || basename(ws.root_path) }}</span>
               <span
-                v-if="ws.id === store.workspaceId && store.workspaceRootMissing"
+                v-if="ws.root_missing || (ws.id === store.workspaceId && store.workspaceRootMissing)"
                 class="ws-missing-badge"
               >{{ t('workspace.panel.rootMissingBadge') }}</span>
             </span>
@@ -615,7 +615,7 @@ const blockClass = computed(() => ({
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 0;
+  gap: 6px;
 }
 .ws-name {
   display: block;
@@ -626,6 +626,21 @@ const blockClass = computed(() => ({
   font-weight: 600;
   line-height: 17px;
   min-width: 0;
+  flex: 1;
+}
+.ws-missing-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 5px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  color: var(--danger, #ef4444);
+  background: color-mix(in srgb, var(--danger, #ef4444) 14%, transparent);
 }
 .ws-dot {
   width: 6px;

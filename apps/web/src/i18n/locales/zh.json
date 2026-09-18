@@ -1490,6 +1490,7 @@
     "error": "错误",
     "thinking": "思考中…",
     "executing": "执行中…",
+    "elapsed": "已运行 {n}s",
     "inProgress": "进行中…",
     "reply": "回复",
     "user": "用户",

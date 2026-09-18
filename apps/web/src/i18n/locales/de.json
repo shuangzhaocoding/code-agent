@@ -1118,6 +1118,7 @@
     "error": "Fehler",
     "thinking": "Denkt…",
     "executing": "Läuft…",
+    "elapsed": "Läuft seit {n}s",
     "inProgress": "Läuft…",
     "reply": "Antwort",
     "user": "Benutzer",

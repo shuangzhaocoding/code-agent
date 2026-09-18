@@ -22,6 +22,11 @@ _tasks: set[asyncio.Task] = set()
 _cancel: dict[str, asyncio.Event] = {}
 
 
+def get_cancel_event(run_id: str) -> asyncio.Event | None:
+    """Return the in-flight cancel event for a run, if any."""
+    return _cancel.get(str(run_id or ""))
+
+
 async def start_run(
     conversation_id: str,
     user_text: str,
@@ -123,6 +128,12 @@ async def _execute(run_id: str) -> None:
             watch.cancel()
             broker.close_run(run_id)
             _cancel.pop(run_id, None)
+            try:
+                from code_agent.tools.progress import clear_run
+
+                clear_run(run_id)
+            except Exception:
+                pass
             try:
                 finished = await Run.get_or_none(id=run_id)
                 if finished and finished.graph_thread_id:

@@ -57,9 +57,19 @@ class WorkspaceBackend(Protocol):
     ) -> list[dict]: ...
 
     async def run_command(
-        self, command: str, *, cwd: str = ".", timeout: int = 90
+        self,
+        command: str,
+        *,
+        cwd: str = ".",
+        timeout: int = 90,
+        cancel_event: Any | None = None,
+        on_output: Any | None = None,
     ) -> tuple[int, str, str]:
-        """Return (exit_code, stdout, stderr)."""
+        """Return (exit_code, stdout, stderr).
+
+        Optional cancel_event: when set, kill the process and return exit 130.
+        Optional on_output: async callable(str) for live stdout/stderr chunks.
+        """
 
     async def close(self) -> None: ...
 

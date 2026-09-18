@@ -356,7 +356,18 @@ SETTINGS_SCHEMA: dict[str, Any] = {
         "agent.tool_timeout_sec": {
             "type": "integer",
             "title": "单工具超时（秒）",
-            "default": 90,
+            "default": 300,
+            "minimum": 10,
+            "maximum": 3600,
+            "description": "run_command 等短命令的默认超时。长驻进程（dev server 等）应使用 run_in_terminal，不受此限制。",
+        },
+        "agent.tool_heartbeat_sec": {
+            "type": "integer",
+            "title": "工具心跳间隔（秒）",
+            "default": 3,
+            "minimum": 1,
+            "maximum": 60,
+            "description": "长跑工具向界面推送「已运行时长」的间隔。",
         },
         "agent.run_timeout_sec": {
             "type": "integer",

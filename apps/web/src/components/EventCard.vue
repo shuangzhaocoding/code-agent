@@ -9,10 +9,11 @@ const props = withDefaults(
     subtitle?: string
     tone?: 'default' | 'think' | 'danger' | 'tool'
     status?: string
+    elapsedSec?: number | null
     defaultOpen?: boolean
     activatable?: boolean
   }>(),
-  { tone: 'default', defaultOpen: false, subtitle: '', status: '', activatable: false },
+  { tone: 'default', defaultOpen: false, subtitle: '', status: '', elapsedSec: null, activatable: false },
 )
 
 const emit = defineEmits<{ activate: [] }>()
@@ -60,6 +61,9 @@ function onChevron(e: Event) {
         <span class="titles">
           <span class="title" :class="{ running: status === 'streaming' }">{{ title }}</span>
           <span v-if="subtitle" class="sub">{{ subtitle }}</span>
+        </span>
+        <span v-if="status === 'streaming' && elapsedSec != null" class="pill live">
+          {{ elapsedSec }}s
         </span>
         <span v-if="status === 'error'" class="pill error">失败</span>
         <button type="button" class="ghost-icon-btn chev-btn" @click="onChevron">
@@ -188,6 +192,11 @@ function onChevron(e: Event) {
 .pill.error {
   color: var(--error-text);
   background: color-mix(in srgb, var(--error-text) 12%, var(--panel-bg));
+}
+.pill.live {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, var(--panel-bg));
+  font-variant-numeric: tabular-nums;
 }
 .chev-btn {
   flex-shrink: 0;

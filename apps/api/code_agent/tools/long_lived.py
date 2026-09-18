@@ -4,17 +4,19 @@ from __future__ import annotations
 
 import re
 
-# Dev servers / watchers: subprocess.run + timeout cannot host these.
+# Dev servers / watchers: tool timeouts cannot host these.
 _LONG_LIVED = re.compile(
     r"""(?ix)
     (?:^|[\n;&|]\s*)(?:nohup\s+)?(?:
       (?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+(?:run\s+)?(?:dev|start|serve)\b
+      |(?:npm|pnpm|yarn|bun)(?:\.cmd)?\s+run\s+\S[^\n;&|]*--watch\b
       |(?:npx|pnpx|bunx)\s+(?:--yes\s+)?(?:vite|next|nuxt|remix|astro|webpack(?:-dev-server)?)\b
       |vite\b
       |next\s+dev\b
       |nuxt\s+(?:dev|start)\b
       |astro\s+dev\b
       |webpack(?:-dev-server)?\b
+      |webpack\b[^\n;&|]*--watch\b
       |nodemon\b
       |uvicorn\b
       |gunicorn\b
@@ -23,6 +25,8 @@ _LONG_LIVED = re.compile(
       |(?:python(?:\d+(?:\.\d+)*)?)\s+(?:-m\s+)?(?:http\.server|uvicorn|flask)\b
       |dotnet\s+watch\b
       |cargo\s+watch\b
+      |watch\s+\S
+      |tail\s+(?:-[^\sf]+\s+)*-f\b
       |rails\s+s(?:erver)?\b
       |php\s+-S\b
       |hugo\s+server\b

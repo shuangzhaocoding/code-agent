@@ -89,9 +89,14 @@ function blockSubtitle(block: Block): string {
   if (path) return path
   // Avoid coupling ledger subtitle to growing stream text (major re-render cost).
   if (block.status === 'streaming') {
-    if (block.type === 'assistant.thinking') return '思考中…'
-    if (block.type === 'tool.call' || block.type === 'tool.result') return '执行中…'
-    return '进行中…'
+    const elapsed = Number(block.meta.elapsed_sec)
+    const elapsedLabel =
+      Number.isFinite(elapsed) && elapsed >= 0 ? `已运行 ${Math.floor(elapsed)}s` : ''
+    if (block.type === 'assistant.thinking') return elapsedLabel || '思考中…'
+    if (block.type === 'tool.call' || block.type === 'tool.result') {
+      return elapsedLabel || '执行中…'
+    }
+    return elapsedLabel || '进行中…'
   }
   if (block.text) {
     const oneLine = block.text.trim().split('\n')[0]

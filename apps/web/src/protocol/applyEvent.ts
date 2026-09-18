@@ -86,8 +86,10 @@ export function applyEvent(messages: ChatMessage[], event: StreamEnvelope): Chat
         // In-place checklist / content replace (same block id).
         if (payload.text != null) copy.text = String(payload.text)
         if (payload.meta) copy.meta = { ...copy.meta, ...(payload.meta as Record<string, unknown>) }
-        if (payload.status != null) copy.status = String(payload.status)
-        copy.ended_at = Date.now()
+        if (payload.status != null) {
+          copy.status = String(payload.status)
+          if (copy.status !== 'streaming') copy.ended_at = Date.now()
+        }
       } else {
         copy.status = String(payload.status || 'ok')
         copy.ended_at = Date.now()
