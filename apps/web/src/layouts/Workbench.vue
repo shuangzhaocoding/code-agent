@@ -2,6 +2,7 @@
 import { DockviewVue, type VueComponent } from 'dockview-vue'
 import type { DockviewApi, DockviewReadyEvent } from 'dockview-vue'
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, shallowRef, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { panelTitle } from '@/i18n'
 import { api } from '@/api/http'
 import { useAppStore } from '@/stores/app'
@@ -15,14 +16,34 @@ import PromptCard from '@/components/PromptCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AppToastHost from '@/components/AppToastHost.vue'
+import AttentionBar from '@/components/AttentionBar.vue'
+import { useToast } from '@/composables/useToast'
 import {
   applyLayoutPreset,
   clearDock,
+  clearStoredLayoutSnapshots,
+  createSavedLayoutId,
   DEFAULT_LAYOUT_PRESET,
+  deleteSavedLayout,
+  emitLayoutState,
+  emitNamedLayoutsChanged,
+  findSavedLayoutByName,
+  getSavedLayout,
   getStoredLayoutPreset,
+  getStoredLayoutSelection,
+  getStoredLayoutSnapshot,
   isLayoutPresetId,
+  listSavedLayouts,
+  matchLayoutPreset,
+  matchSavedLayout,
+  samePanelSet,
+  SAVED_LAYOUT_NAME_MAX,
   setStoredLayoutPreset,
+  setStoredLayoutSelection,
+  setStoredLayoutSnapshot,
+  upsertSavedLayout,
   type LayoutPresetId,
+  type SavedLayout,
 } from '@/utils/layoutPresets'
 import { getMenuBarPosition, isMenuBarPosition, type MenuBarPosition } from '@/utils/layoutPrefs'
 import { hasCustomTitleBar } from '@/utils/desktop'
@@ -49,6 +70,8 @@ const MemoryPanel = defineAsyncComponent(() => import('@/panels/MemoryPanel.vue'
 const ContextDebugPanel = defineAsyncComponent(() => import('@/panels/ContextDebugPanel.vue'))
 const CheckpointsPanel = defineAsyncComponent(() => import('@/panels/CheckpointsPanel.vue'))
 
+const { t } = useI18n()
+const toast = useToast()
 const store = useAppStore()
 const theme = ref<Theme>(currentTheme())
 const menuPosition = ref<MenuBarPosition>(getMenuBarPosition())
@@ -114,6 +137,8 @@ onMounted(() => {
   window.addEventListener('ca-theme', onTheme)
   window.addEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.addEventListener('ca-focus-editor', focusEditor)
+  window.addEventListener('ca-follow-editor', onFollowEditor as EventListener)
+  window.addEventListener('ca-open-review', onOpenReview as EventListener)
   window.addEventListener('ca-focus-agent', focusAgent)
   window.addEventListener('ca-open-models', openModels)
   window.addEventListener('ca-open-search', openSearch)
@@ -128,6 +153,8 @@ onMounted(() => {
   window.addEventListener('ca-open-url-preview', openUrlPreviewPanel)
   window.addEventListener('ca-layout-reset', onLayoutReset)
   window.addEventListener('ca-layout-preset', onLayoutPreset as EventListener)
+  window.addEventListener('ca-layout-save', onLayoutSave)
+  window.addEventListener('ca-layout-named-delete', onLayoutNamedDelete as EventListener)
   window.addEventListener('ca-layout-export', onLayoutExport)
   window.addEventListener('ca-layout-import', onLayoutImport as EventListener)
   window.addEventListener('keydown', onWorkbenchKey, true)
@@ -139,6 +166,8 @@ onUnmounted(() => {
   window.removeEventListener('ca-theme', onTheme)
   window.removeEventListener('ca-menu-position', onMenuPosition as EventListener)
   window.removeEventListener('ca-focus-editor', focusEditor)
+  window.removeEventListener('ca-follow-editor', onFollowEditor as EventListener)
+  window.removeEventListener('ca-open-review', onOpenReview as EventListener)
   window.removeEventListener('ca-focus-agent', focusAgent)
   window.removeEventListener('ca-open-models', openModels)
   window.removeEventListener('ca-open-search', openSearch)
@@ -153,18 +182,61 @@ onUnmounted(() => {
   window.removeEventListener('ca-open-url-preview', openUrlPreviewPanel)
   window.removeEventListener('ca-layout-reset', onLayoutReset)
   window.removeEventListener('ca-layout-preset', onLayoutPreset as EventListener)
+  window.removeEventListener('ca-layout-save', onLayoutSave)
+  window.removeEventListener('ca-layout-named-delete', onLayoutNamedDelete as EventListener)
   window.removeEventListener('ca-layout-export', onLayoutExport)
   window.removeEventListener('ca-layout-import', onLayoutImport as EventListener)
   window.removeEventListener('keydown', onWorkbenchKey, true)
   window.removeEventListener('ca-locale', retitlePanels)
 })
 
+let applyingLayout = false
+let quietEditorFocus = false
+let followTimer: ReturnType<typeof setTimeout> | null = null
+let followPath = ''
+
 function focusEditor() {
+  if (quietEditorFocus) {
+    ensurePanel('editor', 'editor', panelTitle('editor'), false)
+    return
+  }
   openPanel('editor', 'editor', panelTitle('editor'))
 }
 
 function focusAgent() {
   openPanel('agent', 'agent', panelTitle('agent'))
+}
+
+async function openFollowedFile(path: string) {
+  const apiRef = dock.value
+  const prev = apiRef?.activePanel?.id
+  quietEditorFocus = true
+  try {
+    ensurePanel('editor', 'editor', panelTitle('editor'), false)
+    await store.openChatFilePath(path)
+  } finally {
+    quietEditorFocus = false
+    if (prev && prev !== 'editor') apiRef?.getPanel(prev)?.api.setActive()
+  }
+}
+
+function onFollowEditor(e: Event) {
+  const path = String((e as CustomEvent<{ path?: string }>).detail?.path || '')
+  if (!path) return
+  followPath = path
+  if (followTimer) clearTimeout(followTimer)
+  followTimer = setTimeout(() => {
+    followTimer = null
+    const next = followPath
+    followPath = ''
+    if (next) void openFollowedFile(next)
+  }, 80)
+}
+
+async function onOpenReview(e: Event) {
+  const path = String((e as CustomEvent<{ path?: string }>).detail?.path || '')
+  openPanel('editor', 'editor', panelTitle('editor'))
+  if (path) await store.openChatFilePath(path)
 }
 
 function openModels() {
@@ -384,7 +456,7 @@ function cycleActiveGroupTab(delta: number) {
   })
 }
 
-const LAYOUT_SEED = 3
+const LAYOUT_SEED = 6
 
 function persistLayout(apiRef: DockviewApi) {
   const layout = apiRef.toJSON()
@@ -394,29 +466,190 @@ function persistLayout(apiRef: DockviewApi) {
   }).catch(() => undefined)
 }
 
-function rebuildLayout(apply: (api: DockviewApi) => void, preset?: LayoutPresetId) {
+function panelIdsOf(apiRef: DockviewApi) {
+  return apiRef.panels.map((panel) => panel.id)
+}
+
+function currentSelectionId() {
+  return getStoredLayoutSelection(store.workspaceId)
+}
+
+function refreshLayoutState(apiRef?: DockviewApi | null) {
+  const api = apiRef || dock.value
+  if (!api) return
+  const ws = store.workspaceId
+  const ids = panelIdsOf(api)
+  const stored = currentSelectionId()
+  const saved = listSavedLayouts(ws)
+  const named = matchSavedLayout(ids, ws, stored)
+  if (!isLayoutPresetId(stored) && named && named.id === stored) {
+    setStoredLayoutSelection(named.id, ws)
+    emitLayoutState({ id: named.id, dirty: false, saved })
+    return
+  }
+  const builtin = matchLayoutPreset(ids)
+  if (builtin) {
+    setStoredLayoutSelection(builtin, ws)
+    emitLayoutState({ id: builtin, dirty: false, saved })
+    return
+  }
+  if (named) {
+    setStoredLayoutSelection(named.id, ws)
+    emitLayoutState({ id: named.id, dirty: false, saved })
+    return
+  }
+  emitLayoutState({ id: stored, dirty: true, saved })
+}
+
+function notifyLayoutApplied(id: LayoutPresetId) {
+  window.dispatchEvent(new CustomEvent('ca-layout-preset-applied', { detail: { id, reset: true } }))
+  toast.success(t('layout.presetApplied', { name: t(`layout.presets.${id}`) }))
+}
+
+function saveViewSnapshot(apiRef: DockviewApi, id: LayoutPresetId) {
+  try {
+    setStoredLayoutSnapshot(id, apiRef.toJSON(), store.workspaceId)
+  } catch {
+    /* ignore */
+  }
+}
+
+function rebuildLayout(apply: (api: DockviewApi) => void, selection?: string) {
   const apiRef = dock.value
   if (!apiRef) return
+  applyingLayout = true
   clearDock(apiRef)
   apply(apiRef)
   localStorage.setItem(layoutSeedKey(), String(LAYOUT_SEED))
-  if (preset) {
-    setStoredLayoutPreset(preset, store.workspaceId)
-    window.dispatchEvent(new CustomEvent('ca-layout-preset-changed', { detail: { id: preset } }))
+  if (selection) {
+    setStoredLayoutSelection(selection, store.workspaceId)
+    window.dispatchEvent(new CustomEvent('ca-layout-preset-changed', { detail: { id: selection } }))
+    if (isLayoutPresetId(selection)) saveViewSnapshot(apiRef, selection)
   }
   const active = apiRef.activePanel
   if (active?.id) store.activity = active.id
   persistLayout(apiRef)
+  applyingLayout = false
+  refreshLayoutState(apiRef)
+}
+
+function switchLayoutView(id: LayoutPresetId, opts?: { force?: boolean }) {
+  const apiRef = dock.value
+  if (!apiRef) return
+  const matched = matchLayoutPreset(panelIdsOf(apiRef))
+  if (!opts?.force && matched === id) return
+  rebuildLayout((api) => applyLayoutPreset(api, id), id)
+  notifyLayoutApplied(id)
+}
+
+function switchNamedLayout(id: string, opts?: { force?: boolean }) {
+  const apiRef = dock.value
+  const saved = getSavedLayout(id, store.workspaceId)
+  if (!apiRef || !saved) return
+  if (!opts?.force && currentSelectionId() === id && samePanelSet(saved.panelIds, panelIdsOf(apiRef))) return
+  applyingLayout = true
+  try {
+    apiRef.fromJSON(saved.layout as never)
+  } catch {
+    applyingLayout = false
+    toast.error(t('layout.importInvalid'))
+    return
+  }
+  localStorage.setItem(layoutSeedKey(), String(LAYOUT_SEED))
+  setStoredLayoutSelection(id, store.workspaceId)
+  window.dispatchEvent(new CustomEvent('ca-layout-preset-changed', { detail: { id } }))
+  const active = apiRef.activePanel
+  if (active?.id) store.activity = active.id
+  persistLayout(apiRef)
+  applyingLayout = false
+  refreshLayoutState(apiRef)
+  toast.success(t('layout.presetApplied', { name: saved.name }))
 }
 
 function onLayoutReset() {
-  rebuildLayout((api) => applyLayoutPreset(api, DEFAULT_LAYOUT_PRESET), DEFAULT_LAYOUT_PRESET)
+  const id = currentSelectionId()
+  if (isLayoutPresetId(id)) switchLayoutView(id, { force: true })
+  else switchNamedLayout(id, { force: true })
 }
 
 function onLayoutPreset(e: Event) {
-  const raw = (e as CustomEvent<{ id: LayoutPresetId }>).detail?.id
-  const id = isLayoutPresetId(raw) ? raw : DEFAULT_LAYOUT_PRESET
-  rebuildLayout((api) => applyLayoutPreset(api, id), id)
+  const id = (e as CustomEvent<{ id?: string }>).detail?.id
+  if (isLayoutPresetId(id)) {
+    switchLayoutView(id)
+    return
+  }
+  if (id && getSavedLayout(id, store.workspaceId)) {
+    switchNamedLayout(id)
+    return
+  }
+  switchLayoutView(DEFAULT_LAYOUT_PRESET)
+}
+
+async function onLayoutSave() {
+  const apiRef = dock.value
+  if (!apiRef) return
+  const ws = store.workspaceId
+  const stored = currentSelectionId()
+  const currentSaved = isLayoutPresetId(stored) ? null : getSavedLayout(stored, ws)
+  const raw = await store.askPrompt({
+    title: t('layout.saveTitle'),
+    summary: t('layout.saveSummary'),
+    label: t('layout.saveLabel'),
+    placeholder: t('layout.savePlaceholder'),
+    defaultValue: currentSaved?.name || '',
+    confirmLabel: t('common.save'),
+  })
+  if (raw == null) return
+  const name = raw.trim().slice(0, SAVED_LAYOUT_NAME_MAX)
+  if (!name) {
+    toast.error(t('layout.nameRequired'))
+    return
+  }
+  const byName = findSavedLayoutByName(name, ws)
+  let id = currentSaved && currentSaved.name === name ? currentSaved.id : byName?.id
+  if (byName && byName.id !== currentSaved?.id) {
+    const ok = await store.askConfirm({
+      title: t('layout.saveOverwriteTitle'),
+      summary: t('layout.saveOverwrite', { name }),
+    })
+    if (!ok) return
+    id = byName.id
+  }
+  const entry: SavedLayout = {
+    id: id || createSavedLayoutId(),
+    name,
+    layout: apiRef.toJSON(),
+    panelIds: panelIdsOf(apiRef),
+    updatedAt: Date.now(),
+  }
+  upsertSavedLayout(entry, ws)
+  setStoredLayoutSelection(entry.id, ws)
+  emitNamedLayoutsChanged(ws)
+  persistLayout(apiRef)
+  refreshLayoutState(apiRef)
+  toast.success(t('layout.saveDone', { name }))
+}
+
+async function onLayoutNamedDelete(e: Event) {
+  const id = (e as CustomEvent<{ id?: string }>).detail?.id
+  const ws = store.workspaceId
+  const saved = id ? getSavedLayout(id, ws) : null
+  if (!saved || !id) return
+  const ok = await store.askConfirm({
+    title: t('layout.deleteTitle'),
+    summary: t('layout.deleteSummary', { name: saved.name }),
+    danger: true,
+    confirmLabel: t('common.delete'),
+  })
+  if (!ok) return
+  deleteSavedLayout(id, ws)
+  if (currentSelectionId() === id) {
+    const builtin = dock.value ? matchLayoutPreset(panelIdsOf(dock.value)) : null
+    setStoredLayoutSelection(builtin || DEFAULT_LAYOUT_PRESET, ws)
+  }
+  emitNamedLayoutsChanged(ws)
+  refreshLayoutState(dock.value)
+  toast.success(t('layout.deleteDone', { name: saved.name }))
 }
 
 function onLayoutExport() {
@@ -445,6 +678,9 @@ function onLayoutImport(e: Event) {
     const active = apiRef.activePanel
     if (active?.id) store.activity = active.id
     persistLayout(apiRef)
+    const view = currentSelectionId()
+    if (isLayoutPresetId(view)) saveViewSnapshot(apiRef, view)
+    refreshLayoutState(apiRef)
     window.dispatchEvent(new CustomEvent('ca-layout-import-result', { detail: { ok: true } }))
   } catch {
     window.dispatchEvent(new CustomEvent('ca-layout-import-result', { detail: { ok: false } }))
@@ -452,13 +688,16 @@ function onLayoutImport(e: Event) {
 }
 
 function seed(apiRef: DockviewApi) {
+  clearStoredLayoutSnapshots(store.workspaceId)
   const preset = getStoredLayoutPreset(store.workspaceId)
   applyLayoutPreset(apiRef, preset)
   setStoredLayoutPreset(preset, store.workspaceId)
+  saveViewSnapshot(apiRef, preset)
   store.activity = preset === 'code' ? 'editor' : 'agent'
 }
 
-const LEFT_PANELS = ['workspace', 'explorer', 'search'] as const
+const LEFT_PANELS = ['workspace', 'explorer', 'search', 'git'] as const
+const BOTTOM_PANELS = ['terminal', 'debug'] as const
 const AGENT_PANELS = ['agent', 'memory', 'contextDebug', 'checkpoints'] as const
 
 function findExisting(apiRef: DockviewApi, ids: readonly string[]) {
@@ -488,18 +727,27 @@ async function onReady(event: DockviewReadyEvent) {
   } else {
     const active = event.api.activePanel
     if (active?.id) store.activity = active.id
+    const view = currentSelectionId()
+    if (isLayoutPresetId(view) && !getStoredLayoutSnapshot(view, store.workspaceId)) {
+      saveViewSnapshot(event.api, view)
+    }
   }
   window.dispatchEvent(
     new CustomEvent('ca-layout-preset-changed', {
-      detail: { id: getStoredLayoutPreset(store.workspaceId) },
+      detail: { id: currentSelectionId() },
     }),
   )
+  refreshLayoutState(event.api)
   await nextTick()
   requestAnimationFrame(() => {
     window.dispatchEvent(new Event('ca-layout-ready'))
   })
   event.api.onDidLayoutChange(() => {
+    if (applyingLayout) return
     persistLayout(event.api)
+    const view = currentSelectionId()
+    if (isLayoutPresetId(view)) saveViewSnapshot(event.api, view)
+    refreshLayoutState(event.api)
   })
   event.api.onDidActivePanelChange((ev) => {
     if (ev?.panel?.id) store.activity = ev.panel.id
@@ -521,7 +769,9 @@ function panelPosition(apiRef: DockviewApi, id: string): PanelPlace | undefined 
     return agent ? { referencePanel: agent, direction: 'left' } : undefined
   }
 
-  if (id === 'terminal') {
+  if ((BOTTOM_PANELS as readonly string[]).includes(id)) {
+    const bottom = findExisting(apiRef, BOTTOM_PANELS)
+    if (bottom) return { referencePanel: bottom, direction: 'within' }
     if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'below' }
     const agent = findExisting(apiRef, AGENT_PANELS)
     return agent ? { referencePanel: agent, direction: 'below' } : undefined
@@ -543,7 +793,7 @@ function panelPosition(apiRef: DockviewApi, id: string): PanelPlace | undefined 
     return undefined
   }
 
-  // Settings / models / git / … — keep with the agent column when present.
+  // Settings / models / plugins — keep with the agent column when present.
   const agent = findExisting(apiRef, AGENT_PANELS)
   if (agent) return { referencePanel: agent, direction: 'within' }
   if (apiRef.getPanel('editor')) return { referencePanel: 'editor', direction: 'right' }
@@ -563,14 +813,16 @@ function retitlePanels() {
   }
 }
 
-function openPanel(id: string, component: string, title: string) {
+function ensurePanel(id: string, component: string, title: string, activate = true) {
   const apiRef = dock.value
   if (!apiRef) return
   const existing = apiRef.getPanel(id)
   if (existing) {
     if (!existing.api.group.api.isVisible) existing.api.group.api.setVisible(true)
-    existing.api.setActive()
-    store.activity = id
+    if (activate) {
+      existing.api.setActive()
+      store.activity = id
+    }
     return
   }
   const place = panelPosition(apiRef, id)
@@ -580,7 +832,11 @@ function openPanel(id: string, component: string, title: string) {
     title,
     ...(place ? { position: place } : {}),
   })
-  store.activity = id
+  if (activate) store.activity = id
+}
+
+function openPanel(id: string, component: string, title: string) {
+  ensurePanel(id, component, title, true)
 }
 
 function onToggleTheme() {
@@ -626,6 +882,7 @@ const dockThemeClass = computed(() =>
         @open-file-palette="openFilePalette"
       />
       <div class="workbench-main">
+        <AttentionBar />
         <div class="dock">
           <DockviewVue
             :class="[dockThemeClass, 'dockview-theme-codeagent']"
@@ -717,5 +974,9 @@ const dockThemeClass = computed(() =>
 }
 .dock :deep(.dv-tabs-and-actions-container) {
   min-height: 36px;
+}
+.dock :deep(.dv-right-actions-container) {
+  display: flex;
+  align-items: center;
 }
 </style>

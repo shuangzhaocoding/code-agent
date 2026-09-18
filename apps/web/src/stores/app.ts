@@ -413,25 +413,29 @@ export const useAppStore = defineStore('app', () => {
     await selectWorkspace(ws.id)
   }
 
-  async function addSshWorkspace(payload: {
-    root_path: string
-    name?: string
-    ssh_display_name?: string
-    ssh_group?: string
-    ssh_host: string
-    ssh_port?: number
-    ssh_user: string
-    ssh_password?: string
-    ssh_private_key?: string
-    ssh_passphrase?: string
-    reuse_ssh_from?: string
-  }) {
+  async function addSshWorkspace(
+    payload: {
+      root_path: string
+      name?: string
+      ssh_display_name?: string
+      ssh_group?: string
+      ssh_host: string
+      ssh_port?: number
+      ssh_user: string
+      ssh_password?: string
+      ssh_private_key?: string
+      ssh_passphrase?: string
+      reuse_ssh_from?: string
+    },
+    opts?: { select?: boolean },
+  ) {
     const ws = await api<Workspace>('/api/workspaces', {
       method: 'POST',
       body: JSON.stringify({ ...payload, kind: 'ssh' }),
     })
     await loadWorkspaces()
-    await selectWorkspace(ws.id)
+    if (opts?.select !== false) await selectWorkspace(ws.id)
+    return ws
   }
 
   async function removeWorkspace(id: string) {
@@ -2287,6 +2291,13 @@ export const useAppStore = defineStore('app', () => {
         if (meta.action === 'create') {
           sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: 'added' }
         }
+      }
+      if (
+        type === 'file.diff' &&
+        changedPath &&
+        (runStatus.value === 'running' || runStatus.value === 'queued')
+      ) {
+        window.dispatchEvent(new CustomEvent('ca-follow-editor', { detail: { path: changedPath } }))
       }
     }
     if (event.type === 'run.started') {

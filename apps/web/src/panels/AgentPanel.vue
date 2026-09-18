@@ -266,20 +266,56 @@ const toolbarOverflowRef = shallowRef<ChatInputToolbarOverflowApi | null>(null)
 provide(chatInputToolbarOverflowKey, toolbarOverflowRef)
 const draft = ref('')
 
-const quickPrompts = computed(() => [
-  { label: t('chat.promptExplainLabel'), text: t('chat.promptExplainText') },
-  { label: t('chat.promptReviewLabel'), text: t('chat.promptReviewText') },
-  { label: t('chat.promptTestLabel'), text: t('chat.promptTestText') },
-  { label: t('chat.promptLintLabel'), text: t('chat.promptLintText') },
-])
+const quickPrompts = computed(() => {
+  const items: { id: string; label: string; text: string; mention?: boolean }[] = []
+  const path = store.activePath
+  const isRevisionTab = Boolean(path && path.includes(':') && !path.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(path))
+  const filePath = path && !isRevisionTab ? path : ''
+  if (filePath) {
+    const name = fileNameFromPath(filePath)
+    items.push({
+      id: 'file',
+      label: t('chat.promptFileLabel', { name }),
+      text: t('chat.promptFileText', { path: filePath }),
+      mention: true,
+    })
+  }
+  if (store.gitRepoOk && Object.keys(store.gitChangedPaths).length) {
+    items.push({
+      id: 'review',
+      label: t('chat.promptReviewLabel'),
+      text: t('chat.promptReviewText'),
+    })
+  }
+  items.push({
+    id: 'explain',
+    label: t('chat.promptExplainLabel'),
+    text: t('chat.promptExplainText'),
+  })
+  if (filePath) {
+    items.push({
+      id: 'test',
+      label: t('chat.promptTestLabel'),
+      text: t('chat.promptTestText'),
+    })
+  } else {
+    items.push({
+      id: 'lint',
+      label: t('chat.promptLintLabel'),
+      text: t('chat.promptLintText'),
+    })
+  }
+  return items.slice(0, 4)
+})
 
-function useQuickPrompt(text: string) {
+function useQuickPrompt(item: { text: string; mention?: boolean }) {
   if (composerLocked.value) {
     toast.warning(t('chat.needModel'))
     openModelsPanel()
     return
   }
-  setSenderDraft(text)
+  if (item.mention) setSenderDraftFromMessage(item.text)
+  else setSenderDraft(item.text)
   nextTick(() => {
     const el = document.querySelector('.agent-sender .ProseMirror') as HTMLElement | null
     el?.focus()
@@ -1451,14 +1487,15 @@ function openContextUsageDialog() {
             <AppIcon name="atom" :size="32" />
           </div>
           <p class="empty-lead">{{ t('chat.emptyLead') }}</p>
-          <p class="empty-hint"><kbd>{{ commandShortcut }}</kbd> {{ t('chat.emptyHint') }}</p>
+          <p class="empty-modes">{{ t('chat.emptyModes') }}</p>
+          <p class="empty-hint"><kbd>{{ commandShortcut }}</kbd> {{ t('chat.emptyHint') }} · <kbd>@</kbd> {{ t('chat.emptyHintAt') }}</p>
           <div class="quick-prompts">
             <button
               v-for="item in quickPrompts"
-              :key="item.label"
+              :key="item.id"
               type="button"
               class="quick-prompt"
-              @click="useQuickPrompt(item.text)"
+              @click="useQuickPrompt(item)"
             >
               {{ item.label }}
             </button>
@@ -1763,7 +1800,7 @@ function openContextUsageDialog() {
 </template>
 
 <style scoped>
-.agent { background: var(--page-bg); position: relative; }
+.agent { background: var(--page-bg); position: relative; --agent-column: 48rem; }
 .agent-main {
   flex: 1;
   min-height: 0;
@@ -1778,7 +1815,7 @@ function openContextUsageDialog() {
   overflow-anchor: none;
   scroll-behavior: auto;
   scrollbar-gutter: auto;
-  padding: 12px 20px 8px;
+  padding: 12px 0 8px;
 }
 .timeline.is-pinning {
   scroll-behavior: auto !important;
@@ -1792,7 +1829,10 @@ function openContextUsageDialog() {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  width: 100%;
+  box-sizing: border-box;
+  width: min(100%, var(--agent-column));
+  margin-inline: auto;
+  padding-inline: 20px;
   min-height: min-content;
 }
 .switch-loading {
@@ -1843,6 +1883,12 @@ function openContextUsageDialog() {
   color: var(--text-secondary);
   font-size: 14px;
   line-height: 1.6;
+}
+.empty-modes {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 .empty-hint {
   margin: 0 0 16px;
@@ -2081,8 +2127,11 @@ article.msg-wrap:focus-within .msg-bar {
 }
 footer.agent-footer {
   position: relative;
+  box-sizing: border-box;
+  width: min(100%, var(--agent-column));
+  margin-inline: auto;
   border-top: 0;
-  padding: 0 16px 16px;
+  padding: 0 20px 16px;
   background: linear-gradient(to top, var(--page-bg) 72%, transparent);
 }
 

@@ -6,6 +6,7 @@ import { useAppStore } from '@/stores/app'
 import { api } from '@/api/http'
 import { formatRelativeTime, isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
 import { isRunnableScript } from '@/utils/scriptRun'
+import { listSavedLayouts } from '@/utils/layoutPresets'
 
 type PaletteItem = {
   id: string
@@ -44,8 +45,16 @@ let fileSearchGen = 0
 const shortcut = paletteShortcutLabel()
 const altShortcut = isMacMod() ? '⌘K' : 'Ctrl+K'
 const fileShortcut = isMacMod() ? '⌘P' : 'Ctrl+P'
+const savedLayoutsTick = ref(0)
 
-const staticCommands = computed<PaletteItem[]>(() => [
+function bumpSavedLayouts() {
+  savedLayoutsTick.value += 1
+}
+
+const staticCommands = computed<PaletteItem[]>(() => {
+  void savedLayoutsTick.value
+  void store.workspaceId
+  return [
   {
     id: 'new-chat',
     title: t('commandPalette.newChat'),
@@ -116,7 +125,48 @@ const staticCommands = computed<PaletteItem[]>(() => [
       }]
     : []),
   { id: 'toggle-theme', title: t('commandPalette.toggleTheme'), icon: 'sun', group: t('commandPalette.groupLayout'), keywords: 'dark light', run: () => emit('toggleTheme') },
-])
+  {
+    id: 'layout-chat',
+    title: t('layout.presets.chat'),
+    icon: 'chat',
+    group: t('commandPalette.groupLayout'),
+    keywords: 'layout chat preset 对话',
+    run: () => window.dispatchEvent(new CustomEvent('ca-layout-preset', { detail: { id: 'chat' } })),
+  },
+  {
+    id: 'layout-code',
+    title: t('layout.presets.code'),
+    icon: 'file',
+    group: t('commandPalette.groupLayout'),
+    keywords: 'layout code editor preset 编码',
+    run: () => window.dispatchEvent(new CustomEvent('ca-layout-preset', { detail: { id: 'code' } })),
+  },
+  {
+    id: 'layout-reset',
+    title: t('layout.reset'),
+    icon: 'refresh',
+    group: t('commandPalette.groupLayout'),
+    keywords: 'layout reset default',
+    run: () => window.dispatchEvent(new Event('ca-layout-reset')),
+  },
+  {
+    id: 'layout-save',
+    title: t('layout.save'),
+    icon: 'save',
+    group: t('commandPalette.groupLayout'),
+    keywords: 'layout save named 保存布局',
+    run: () => window.dispatchEvent(new Event('ca-layout-save')),
+  },
+  ...listSavedLayouts(store.workspaceId).map((item) => ({
+    id: `layout-saved:${item.id}`,
+    title: item.name,
+    icon: 'pin',
+    group: t('commandPalette.groupLayout'),
+    keywords: `layout saved named ${item.name}`,
+    run: () => window.dispatchEvent(new CustomEvent('ca-layout-preset', { detail: { id: item.id } })),
+  })),
+  ]
+})
 
 const sessionCommands = computed<PaletteItem[]>(() =>
   store.conversations.map((c) => ({
@@ -298,9 +348,13 @@ function onWindowKey(e: KeyboardEvent) {
 
 onMounted(() => {
   window.addEventListener('keydown', onWindowKey, true)
+  window.addEventListener('ca-layout-named-changed', bumpSavedLayouts)
+  window.addEventListener('ca-layout-state', bumpSavedLayouts)
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onWindowKey, true)
+  window.removeEventListener('ca-layout-named-changed', bumpSavedLayouts)
+  window.removeEventListener('ca-layout-state', bumpSavedLayouts)
   if (fileSearchTimer) clearTimeout(fileSearchTimer)
 })
 </script>

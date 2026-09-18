@@ -35,7 +35,7 @@ function onUpdate(value: string) {
     <FormSelect
       class="lang-control"
       :class="{ compact }"
-      :model-value="locale"
+      :model-value="String(locale || '')"
       :options="options"
       @update:model-value="onUpdate"
     />

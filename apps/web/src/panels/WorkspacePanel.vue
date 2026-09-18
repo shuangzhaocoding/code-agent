@@ -31,6 +31,14 @@ import {
   sanitizeFolderName,
   uniqueSiblingPath,
 } from '@/utils/sshHostGroups'
+import {
+  formatSshEndpoint,
+  getSshHostClipboard,
+  hasSshHostClipboard,
+  setSshHostClipboard,
+  subscribeSshHostClipboard,
+  uniqueHostCopyName,
+} from '@/utils/sshHostClipboard'
 
 const PREVIEW_LIMIT = 5
 
@@ -73,11 +81,17 @@ let tipRaf = 0
 
 onMounted(async () => {
   await store.loadWorkspaces()
+  unsubClipboard = subscribeSshHostClipboard(() => {
+    clipboardTick.value += 1
+  })
+  window.addEventListener('keydown', onPanelKeydown, true)
 })
 
 onBeforeUnmount(() => {
   clearHoverHide()
   if (tipRaf) cancelAnimationFrame(tipRaf)
+  unsubClipboard?.()
+  window.removeEventListener('keydown', onPanelKeydown, true)
 })
 
 watch(
@@ -110,7 +124,9 @@ function hostKey(ws: Workspace) {
   const host = ws.ssh_host || 'unknown'
   const port = ws.ssh_port || 22
   const user = ws.ssh_user || ''
-  return `ssh:${user}@${host}:${port}`
+  const display = (ws.ssh_display_name || '').trim()
+  // Match backend dedupe: named sessions are separate host cards.
+  return display ? `ssh:${user}@${host}:${port}/n/${display}` : `ssh:${user}@${host}:${port}`
 }
 
 function hostEndpoint(ws: Workspace) {
@@ -216,6 +232,12 @@ const dropFolderPath = ref<string | null>(null)
 const moving = ref(false)
 
 const folderMenu = ref<{ x: number; y: number; path: string } | null>(null)
+const hostMenu = ref<{ x: number; y: number; key: string } | null>(null)
+const wsMenu = ref<{ x: number; y: number; wsId: string } | null>(null)
+const clipboardTick = ref(0)
+const focusHostKey = ref<string | null>(null)
+let unsubClipboard: (() => void) | null = null
+let pastingHost = false
 
 function persistExpandedHosts() {
   saveExpandedSet(EXPANDED_HOSTS_KEY, expandedHosts.value)
@@ -384,6 +406,9 @@ function onHostDragStart(group: WorkspaceHostGroup, e: DragEvent) {
   }
   requestAnimationFrame(() => {
     clearTip()
+    folderMenu.value = null
+    hostMenu.value = null
+    wsMenu.value = null
     dragHostKey.value = group.key
     dragFolderPath.value = null
     dropFolderPath.value = null
@@ -404,6 +429,8 @@ function onFolderDragStart(path: string, e: DragEvent) {
   requestAnimationFrame(() => {
     clearTip()
     folderMenu.value = null
+    hostMenu.value = null
+    wsMenu.value = null
     dragFolderPath.value = path
     dragHostKey.value = null
     dropFolderPath.value = null
@@ -597,14 +624,35 @@ function startAddInFolder(folderPath: string) {
 }
 
 function openFolderMenu(path: string, e: MouseEvent) {
+  hostMenu.value = null
+  wsMenu.value = null
   folderMenu.value = { x: e.clientX, y: e.clientY, path }
 }
 
+function openUngroupedMenu(e: MouseEvent) {
+  // Don't steal host/workspace row context menus.
+  const target = e.target as HTMLElement | null
+  if (target?.closest('.host-row, .ws-row, .host-block')) return
+  hostMenu.value = null
+  wsMenu.value = null
+  folderMenu.value = { x: e.clientX, y: e.clientY, path: '' }
+}
+
 const folderMenuItems = computed((): ContextMenuItem[] => {
+  void clipboardTick.value
   if (!folderMenu.value) return []
+  const path = folderMenu.value.path
+  // Ungrouped / root paste target — only add/paste.
+  if (!path) {
+    return [
+      { id: 'new-session', label: t('workspace.panel.ctxAddRemoteWorkspace'), icon: 'plus' },
+      { id: 'paste', label: t('workspace.panel.ctxPaste'), icon: 'paste', disabled: !hasSshHostClipboard() },
+    ]
+  }
   return [
-    { id: 'new-session', label: t('workspace.panel.ctxNewSession'), icon: 'plus' },
+    { id: 'new-session', label: t('workspace.panel.ctxAddRemoteWorkspace'), icon: 'plus' },
     { id: 'new-subfolder', label: t('workspace.panel.ctxNewSubfolder'), icon: 'folder-plus' },
+    { id: 'paste', label: t('workspace.panel.ctxPaste'), icon: 'paste', disabled: !hasSshHostClipboard() },
     { id: 'sep1', separator: true },
     { id: 'rename', label: t('workspace.panel.ctxRename'), icon: 'pencil' },
     { id: 'copy', label: t('workspace.panel.ctxCopy'), icon: 'copy' },
@@ -616,12 +664,249 @@ const folderMenuItems = computed((): ContextMenuItem[] => {
 function onFolderMenuSelect(id: string) {
   const path = folderMenu.value?.path
   folderMenu.value = null
-  if (!path) return
+  if (path == null) return
   if (id === 'new-session') startAddInFolder(path)
   else if (id === 'new-subfolder') void createHostGroup(path)
+  else if (id === 'paste') void pasteHostClone(path)
   else if (id === 'rename') void renameFolder(path)
   else if (id === 'copy') copyFolder(path)
   else if (id === 'delete') void deleteFolder(path)
+}
+
+function findHostGroup(key: string | null | undefined) {
+  if (!key) return null
+  return workspaceGroups.value.find((g) => g.key === key) || null
+}
+
+function findWorkspace(id: string | null | undefined) {
+  if (!id) return null
+  return store.recentWorkspaces.find((w) => w.id === id) || null
+}
+
+function openHostMenu(group: WorkspaceHostGroup, e: MouseEvent) {
+  folderMenu.value = null
+  wsMenu.value = null
+  focusHostKey.value = group.key
+  hostMenu.value = { x: e.clientX, y: e.clientY, key: group.key }
+}
+
+function openWsMenu(ws: Workspace, e: MouseEvent) {
+  folderMenu.value = null
+  hostMenu.value = null
+  wsMenu.value = { x: e.clientX, y: e.clientY, wsId: ws.id }
+}
+
+const hostMenuItems = computed((): ContextMenuItem[] => {
+  void clipboardTick.value
+  const group = findHostGroup(hostMenu.value?.key)
+  if (!group) return []
+  if (group.kind !== 'ssh') {
+    return [
+      { id: 'add-workspace', label: t('workspace.panel.addLocalWorkspace'), icon: 'plus' },
+      { id: 'details', label: t('workspace.panel.ctxDetails'), icon: 'eye' },
+    ]
+  }
+  return [
+    { id: 'add-workspace', label: t('workspace.panel.ctxAddRemoteWorkspace'), icon: 'plus' },
+    { id: 'edit', label: t('workspace.panel.ctxEdit'), icon: 'pencil' },
+    { id: 'copy', label: t('workspace.panel.ctxCopyHost'), icon: 'copy' },
+    { id: 'paste', label: t('workspace.panel.ctxPaste'), icon: 'paste', disabled: !hasSshHostClipboard() },
+    { id: 'details', label: t('workspace.panel.ctxDetails'), icon: 'eye' },
+    { id: 'sep1', separator: true },
+    { id: 'delete', label: t('workspace.panel.ctxDeleteHost'), icon: 'trash', danger: true },
+  ]
+})
+
+const wsMenuItems = computed((): ContextMenuItem[] => {
+  const ws = findWorkspace(wsMenu.value?.wsId)
+  if (!ws) return []
+  const items: ContextMenuItem[] = []
+  if (ws.id !== store.workspaceId) {
+    items.push({ id: 'open', label: t('workspace.panel.open'), icon: 'folder' })
+  }
+  items.push({ id: 'new-session', label: t('workspace.panel.newSession'), icon: 'plus' })
+  if (isSsh(ws)) {
+    items.push({ id: 'copy-host', label: t('workspace.panel.ctxCopyHost'), icon: 'copy' })
+  }
+  items.push({ id: 'details', label: t('workspace.panel.ctxDetails'), icon: 'eye' })
+  items.push({ id: 'sep1', separator: true })
+  items.push({ id: 'remove', label: t('workspace.panel.removeWorkspace'), icon: 'trash', danger: true })
+  return items
+})
+
+function copyHostGroup(group: WorkspaceHostGroup) {
+  if (group.kind !== 'ssh') return
+  const sample = group.workspaces[0]
+  if (!sample) return
+  focusHostKey.value = group.key
+  setSshHostClipboard({
+    ssh_display_name: (sample.ssh_display_name || '').trim() || undefined,
+    ssh_group: (sample.ssh_group || group.groupName || '').trim() || undefined,
+    ssh_host: sample.ssh_host || '',
+    ssh_port: sample.ssh_port || 22,
+    ssh_user: sample.ssh_user || '',
+    reuse_ssh_from: sample.id,
+    label: group.label,
+    workspaces: group.workspaces.map((ws) => ({
+      root_path: ws.root_path,
+      name: ws.name || undefined,
+    })),
+  })
+  toast.info(t('workspace.panel.copiedHost', { host: group.label || formatSshEndpoint(sample) }))
+}
+
+async function pasteHostClone(folderPath: string | null) {
+  const clip = getSshHostClipboard()
+  if (!clip?.ssh_host || !clip.workspaces.length) return
+  if (pastingHost) return
+  pastingHost = true
+  const targetGroup = normalizeFolderPath(folderPath || '') || undefined
+  const display = uniqueHostCopyName(
+    clip.label || clip.ssh_display_name || formatSshEndpoint(clip),
+    sshHostGroups.value.map((g) => g.label),
+    t('workspace.panel.copySuffix'),
+  )
+  try {
+    let lastId: string | null = null
+    for (const item of clip.workspaces) {
+      const ws = await store.addSshWorkspace(
+        {
+          root_path: item.root_path,
+          name: item.name,
+          ssh_display_name: display,
+          ssh_group: targetGroup ?? clip.ssh_group,
+          ssh_host: clip.ssh_host,
+          ssh_port: clip.ssh_port,
+          ssh_user: clip.ssh_user,
+          reuse_ssh_from: clip.reuse_ssh_from,
+        },
+        { select: false },
+      )
+      lastId = ws.id
+    }
+    await store.loadWorkspaces()
+    if (lastId) {
+      const created = store.recentWorkspaces.find((w) => w.id === lastId)
+      if (created) {
+        focusHostKey.value = hostKey(created)
+        const next = new Set(expandedHosts.value)
+        next.add(focusHostKey.value)
+        expandedHosts.value = next
+        persistExpandedHosts()
+      }
+    }
+    toast.info(t('workspace.panel.pastedHost', { host: display, n: clip.workspaces.length }))
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : t('workspace.panel.pasteHostFailed'))
+  } finally {
+    pastingHost = false
+  }
+}
+
+function onPanelKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return
+  const mod = e.ctrlKey || e.metaKey
+  if (!mod || e.altKey) return
+  const key = e.key.toLowerCase()
+  if (key === 'c') {
+    const group = findHostGroup(focusHostKey.value)
+    if (group?.kind !== 'ssh') return
+    e.preventDefault()
+    e.stopPropagation()
+    copyHostGroup(group)
+  } else if (key === 'v') {
+    if (!hasSshHostClipboard()) return
+    // Prefer pasting while a host/folder context is active.
+    const inPanel = Boolean(
+      target.closest?.('.workspace-panel') ||
+        document.activeElement?.closest?.('.workspace-panel') ||
+        hostMenu.value ||
+        folderMenu.value ||
+        focusHostKey.value,
+    )
+    if (!inPanel) return
+    e.preventDefault()
+    e.stopPropagation()
+    const group = findHostGroup(focusHostKey.value)
+    void pasteHostClone(group?.groupName || null)
+  }
+}
+
+function showHostDetails(group: WorkspaceHostGroup, x: number, y: number) {
+  clearHoverHide()
+  hoverId.value = null
+  hoverHostKey.value = group.key
+  scheduleTipPlace({ left: x, top: y, right: x, bottom: y, width: 0, height: 0, x, y, toJSON() { return {} } } as DOMRect, () => hoverHostKey.value === group.key)
+}
+
+function showWsDetails(ws: Workspace, x: number, y: number) {
+  clearHoverHide()
+  hoverHostKey.value = null
+  hoverId.value = ws.id
+  scheduleTipPlace({ left: x, top: y, right: x, bottom: y, width: 0, height: 0, x, y, toJSON() { return {} } } as DOMRect, () => hoverId.value === ws.id)
+}
+
+async function deleteHostGroup(group: WorkspaceHostGroup) {
+  const n = group.workspaces.length
+  if (!n) return
+  const ok = await store.askConfirm({
+    title: t('workspace.panel.ctxDeleteHost'),
+    summary:
+      n === 1
+        ? t('workspace.panel.deleteHostConfirmOne', { host: group.label })
+        : t('workspace.panel.deleteHostConfirm', { host: group.label, n }),
+    confirmLabel: t('workspace.panel.ctxDeleteHost'),
+    danger: true,
+  })
+  if (!ok) return
+  for (const ws of [...group.workspaces]) {
+    try {
+      await store.removeWorkspace(ws.id)
+      const next = new Set(expandedIds.value)
+      next.delete(ws.id)
+      expandedIds.value = next
+      delete convMap[ws.id]
+      delete loading[ws.id]
+      delete errors[ws.id]
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err))
+      break
+    }
+  }
+}
+
+function onHostMenuSelect(id: string) {
+  const group = findHostGroup(hostMenu.value?.key)
+  const x = hostMenu.value?.x ?? 0
+  const y = hostMenu.value?.y ?? 0
+  hostMenu.value = null
+  if (!group) return
+  const fake = { preventDefault() {}, stopPropagation() {} } as MouseEvent
+  if (id === 'add-workspace') startAddWorkspace(group, fake)
+  else if (id === 'edit') startEditHost(group, fake)
+  else if (id === 'copy') copyHostGroup(group)
+  else if (id === 'paste') void pasteHostClone(group.groupName || null)
+  else if (id === 'details') showHostDetails(group, x, y)
+  else if (id === 'delete') void deleteHostGroup(group)
+}
+
+function onWsMenuSelect(id: string) {
+  const ws = findWorkspace(wsMenu.value?.wsId)
+  const x = wsMenu.value?.x ?? 0
+  const y = wsMenu.value?.y ?? 0
+  wsMenu.value = null
+  if (!ws) return
+  const fake = { preventDefault() {}, stopPropagation() {} } as MouseEvent
+  if (id === 'open') void openWorkspace(ws, fake)
+  else if (id === 'new-session') void newSession(ws, fake)
+  else if (id === 'copy-host') {
+    const group = workspaceGroups.value.find((g) => g.workspaces.some((w) => w.id === ws.id))
+    if (group) copyHostGroup(group)
+  } else if (id === 'details') showWsDetails(ws, x, y)
+  else if (id === 'remove') void removeWorkspace(ws, fake)
 }
 
 function onHostEdited() {
@@ -633,6 +918,7 @@ function onHostEdited() {
 }
 
 function toggleHost(key: string) {
+  focusHostKey.value = key
   const next = new Set(expandedHosts.value)
   const opening = !next.has(key)
   if (opening) {
@@ -1119,7 +1405,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
 </script>
 
 <template>
-  <div class="panel-shell workspace-panel panel-chromeless">
+  <div class="panel-shell workspace-panel panel-chromeless" tabindex="-1">
     <header class="ws-head">
       <span class="ws-head-title">{{ t('workspace.panel.title') }}</span>
       <div class="ws-head-actions">
@@ -1176,6 +1462,8 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
         @toggle-host="toggleHost(group.key)"
         @edit-host="startEditHost(group, $event)"
         @add-workspace="startAddWorkspace(group, $event)"
+        @host-contextmenu="openHostMenu(group, $event)"
+        @ws-contextmenu="(ws, e) => openWsMenu(ws, e)"
         @host-tip="showHostTip(group, $event)"
         @host-tip-hide="scheduleHideTip"
         @ws-tip="(ws, e) => showTip(ws, e)"
@@ -1231,6 +1519,8 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
               @toggle-host="toggleHost(group.key)"
               @edit-host="startEditHost(group, $event)"
               @add-workspace="startAddWorkspace(group, $event)"
+              @host-contextmenu="openHostMenu(group, $event)"
+              @ws-contextmenu="(ws, e) => openWsMenu(ws, e)"
               @dragstart="onHostDragStart(group, $event)"
               @dragend="onHostDragEnd"
               @host-tip="showHostTip(group, $event)"
@@ -1261,6 +1551,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
           :class="{ 'drop-over': dropFolderPath === '' && (dragHostKey || dragFolderPath) }"
           @dragover="onRootDragOver"
           @drop="onRootDrop"
+          @contextmenu.prevent="openUngroupedMenu"
         >
           <div class="ungrouped-label">{{ t('workspace.panel.ungrouped') }}</div>
           <WorkspaceHostBlock
@@ -1270,6 +1561,8 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
             @toggle-host="toggleHost(group.key)"
             @edit-host="startEditHost(group, $event)"
             @add-workspace="startAddWorkspace(group, $event)"
+            @host-contextmenu="openHostMenu(group, $event)"
+            @ws-contextmenu="(ws, e) => openWsMenu(ws, e)"
             @dragstart="onHostDragStart(group, $event)"
             @dragend="onHostDragEnd"
             @host-tip="showHostTip(group, $event)"
@@ -1408,6 +1701,22 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       :items="folderMenuItems"
       @select="onFolderMenuSelect"
       @close="folderMenu = null"
+    />
+    <ContextMenu
+      v-if="hostMenu"
+      :x="hostMenu.x"
+      :y="hostMenu.y"
+      :items="hostMenuItems"
+      @select="onHostMenuSelect"
+      @close="hostMenu = null"
+    />
+    <ContextMenu
+      v-if="wsMenu"
+      :x="wsMenu.x"
+      :y="wsMenu.y"
+      :items="wsMenuItems"
+      @select="onWsMenuSelect"
+      @close="wsMenu = null"
     />
   </div>
 </template>

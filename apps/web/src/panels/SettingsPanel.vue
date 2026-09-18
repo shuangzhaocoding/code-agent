@@ -48,6 +48,14 @@ type SchemaSpec = {
   scope?: 'user' | 'workspace' | string
 }
 
+defineOptions({ inheritAttrs: false })
+defineProps<{
+  params?: unknown
+  api?: unknown
+  containerApi?: unknown
+  tabLocation?: string
+}>()
+
 const { t, te } = useI18n()
 const store = useAppStore()
 const toast = useToast()
@@ -112,6 +120,7 @@ const cropQueue = ref<File[]>([])
 const cropReplaceWallpaperId = ref('')
 const cropReplacePetStatus = ref<PetTaskStatus | null>(null)
 const local = reactive<Record<string, unknown>>({})
+const baseline = ref<Record<string, unknown>>({})
 const saved = ref(false)
 const saving = ref(false)
 const activeGroup = ref('appearance')
@@ -443,6 +452,7 @@ watch(
   (s) => {
     if (s) applySettingsValues(s)
   },
+  { immediate: true },
 )
 
 watch(
@@ -506,8 +516,6 @@ const accessPasswordSet = computed(
 
 const accessPasswordOn = computed(() => Boolean(local['server.access_password_enabled']))
 
-const baseline = ref<Record<string, unknown>>({})
-
 function applySettingsValues(payload: Record<string, unknown> | null | undefined) {
   if (!payload) return
   const userValues = (payload.user_values as Record<string, unknown> | undefined)
@@ -518,7 +526,8 @@ function applySettingsValues(payload: Record<string, unknown> | null | undefined
   if (local['server.access_password_enabled'] == null) {
     local['server.access_password_enabled'] = false
   }
-  baseline.value = { ...userValues, 'server.access_password_enabled': local['server.access_password_enabled'] }
+  fillEnumDefaults(local, 'user')
+  baseline.value = { ...local }
 
   for (const key of Object.keys(localWorkspace)) {
     delete localWorkspace[key]
@@ -527,7 +536,31 @@ function applySettingsValues(payload: Record<string, unknown> | null | undefined
   if (localWorkspace['python.interpreter'] == null) {
     localWorkspace['python.interpreter'] = ''
   }
-  baselineWorkspace.value = { ...wsValues }
+  fillEnumDefaults(localWorkspace, 'workspace')
+  baselineWorkspace.value = { ...localWorkspace }
+}
+
+function fillEnumDefaults(bag: Record<string, unknown>, scope: 'user' | 'workspace') {
+  for (const [key, spec] of Object.entries(schema.value)) {
+    const isWs = workspaceKeys.value.has(key)
+    if (scope === 'workspace' ? !isWs : isWs) continue
+    if (typeof bag[key] === 'string') continue
+    if (!spec.enum?.length) continue
+    bag[key] = typeof spec.default === 'string' ? spec.default : spec.enum[0]
+  }
+}
+
+function settingsBag() {
+  return settingsScope.value === 'workspace' ? localWorkspace : local
+}
+
+function stringSetting(key: string) {
+  const raw = settingsBag()[key]
+  return typeof raw === 'string' ? raw : ''
+}
+
+function setStringSetting(key: string, value: string) {
+  settingsBag()[key] = value
 }
 
 function buildSettingsPatch(scope: 'user' | 'workspace') {
@@ -1104,9 +1137,10 @@ async function save() {
             <FormSelect
               v-if="specFor(key).enum"
               :id="key"
-              v-model="(settingsScope === 'workspace' ? localWorkspace : local)[key] as string"
               class="setting-select"
+              :model-value="stringSetting(key)"
               :options="enumOptions(key)"
+              @update:model-value="setStringSetting(key, $event)"
             />
 
             <textarea
@@ -1172,11 +1206,12 @@ async function save() {
             <div v-else-if="key === 'python.interpreter'" class="python-interpreter-field">
               <FormSelect
                 :id="key"
-                v-model="localWorkspace['python.interpreter'] as string"
                 class="setting-select python-interpreter-select"
                 :disabled="pythonInterpretersLoading"
+                :model-value="stringSetting(key)"
                 :options="pythonInterpreterSelectOptions"
                 :placeholder="t('settings.python.autoDetect')"
+                @update:model-value="setStringSetting(key, $event)"
               />
               <div class="setting-path python-interpreter-path">
                 <input
@@ -1244,16 +1279,16 @@ async function save() {
         </div>
       </div>
     </div>
+    <ImageCropDialog
+      :open="cropOpen"
+      :file="cropFile"
+      :src-url="cropSrcUrl"
+      :kind="cropKind"
+      :mode="cropMode"
+      @close="closeCrop"
+      @confirm="onCropConfirm"
+    />
   </div>
-  <ImageCropDialog
-    :open="cropOpen"
-    :file="cropFile"
-    :src-url="cropSrcUrl"
-    :kind="cropKind"
-    :mode="cropMode"
-    @close="closeCrop"
-    @confirm="onCropConfirm"
-  />
 </template>
 
 <style scoped>

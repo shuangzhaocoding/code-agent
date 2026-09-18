@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import BrandMark from '@/components/BrandMark.vue'
 import DesktopWindowControls from '@/components/DesktopWindowControls.vue'
+import LayoutPresetSwitch from '@/components/LayoutPresetSwitch.vue'
 import { useAppStore } from '@/stores/app'
 import { currentTheme, type Theme } from '@/theme'
 import { formatWindowTitle, WINDOW_TITLE_APP_NAME } from '@/utils/windowTitle'
@@ -43,6 +44,7 @@ const resolvedTheme = computed(() => props.theme || currentTheme())
     </div>
     <div class="desktop-titlebar-drag" />
     <div v-if="showActions" class="desktop-titlebar-actions">
+      <LayoutPresetSwitch />
       <button
         type="button"
         class="ghost-icon-btn"

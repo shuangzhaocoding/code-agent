@@ -5,11 +5,12 @@ import AppIcon, { type AppIconName } from '@/components/AppIcon.vue'
 import { useToast } from '@/composables/useToast'
 import { useAppStore } from '@/stores/app'
 import {
-  DEFAULT_LAYOUT_PRESET,
-  getStoredLayoutPreset,
-  isLayoutPresetId,
+  getStoredLayoutSelection,
   LAYOUT_PRESET_IDS,
+  listSavedLayouts,
   type LayoutPresetId,
+  type LayoutViewState,
+  type SavedLayout,
 } from '@/utils/layoutPresets'
 import {
   getMenuBarPosition,
@@ -23,7 +24,9 @@ const { t } = useI18n()
 const toast = useToast()
 const store = useAppStore()
 const importInput = ref<HTMLInputElement | null>(null)
-const activePreset = ref<LayoutPresetId>(getStoredLayoutPreset(store.workspaceId))
+const activeId = ref(getStoredLayoutSelection(store.workspaceId))
+const layoutDirty = ref(false)
+const savedLayouts = ref<SavedLayout[]>(listSavedLayouts(store.workspaceId))
 const menuPosition = ref<MenuBarPosition>(getMenuBarPosition())
 
 const PRESET_ICONS: Record<LayoutPresetId, string> = {
@@ -38,13 +41,27 @@ const POSITION_ICONS: Record<MenuBarPosition, AppIconName> = {
   bottom: 'layout-bottom',
 }
 
-function syncActivePreset(id?: LayoutPresetId) {
-  activePreset.value = id && isLayoutPresetId(id) ? id : getStoredLayoutPreset(store.workspaceId)
+function syncActivePreset(id?: string) {
+  activeId.value = id || getStoredLayoutSelection(store.workspaceId)
+  savedLayouts.value = listSavedLayouts(store.workspaceId)
 }
 
 function onPresetChanged(e: Event) {
-  const id = (e as CustomEvent<{ id: LayoutPresetId }>).detail?.id
+  const id = (e as CustomEvent<{ id?: string }>).detail?.id
   syncActivePreset(id)
+}
+
+function onLayoutState(e: Event) {
+  const detail = (e as CustomEvent<LayoutViewState>).detail
+  if (!detail) return
+  activeId.value = detail.id
+  layoutDirty.value = Boolean(detail.dirty)
+  savedLayouts.value = detail.saved ?? listSavedLayouts(store.workspaceId)
+}
+
+function onNamedChanged(e: Event) {
+  const next = (e as CustomEvent<{ saved?: SavedLayout[] }>).detail?.saved
+  savedLayouts.value = next ?? listSavedLayouts(store.workspaceId)
 }
 
 function onMenuPositionChanged(e: Event) {
@@ -59,14 +76,27 @@ function onMenuPositionSelect(value: MenuBarPosition) {
 
 function resetLayout() {
   window.dispatchEvent(new Event('ca-layout-reset'))
-  syncActivePreset(DEFAULT_LAYOUT_PRESET)
-  toast.success(t('layout.resetDone'))
 }
 
 function applyPreset(id: LayoutPresetId) {
   window.dispatchEvent(new CustomEvent('ca-layout-preset', { detail: { id } }))
-  syncActivePreset(id)
-  toast.success(t('layout.presetApplied', { name: t(`layout.presets.${id}`) }))
+}
+
+function onPresetApplied(e: Event) {
+  const id = (e as CustomEvent<{ id?: string; reset?: boolean }>).detail?.id
+  if (id) syncActivePreset(id)
+}
+
+function saveCurrentLayout() {
+  window.dispatchEvent(new Event('ca-layout-save'))
+}
+
+function applySaved(id: string) {
+  window.dispatchEvent(new CustomEvent('ca-layout-preset', { detail: { id } }))
+}
+
+function deleteSaved(id: string) {
+  window.dispatchEvent(new CustomEvent('ca-layout-named-delete', { detail: { id } }))
 }
 
 function exportLayout() {
@@ -105,10 +135,16 @@ onMounted(() => {
   syncActivePreset()
   menuPosition.value = getMenuBarPosition()
   window.addEventListener('ca-layout-preset-changed', onPresetChanged as EventListener)
+  window.addEventListener('ca-layout-preset-applied', onPresetApplied as EventListener)
+  window.addEventListener('ca-layout-state', onLayoutState as EventListener)
+  window.addEventListener('ca-layout-named-changed', onNamedChanged as EventListener)
   window.addEventListener('ca-menu-position', onMenuPositionChanged as EventListener)
 })
 onUnmounted(() => {
   window.removeEventListener('ca-layout-preset-changed', onPresetChanged as EventListener)
+  window.removeEventListener('ca-layout-preset-applied', onPresetApplied as EventListener)
+  window.removeEventListener('ca-layout-state', onLayoutState as EventListener)
+  window.removeEventListener('ca-layout-named-changed', onNamedChanged as EventListener)
   window.removeEventListener('ca-menu-position', onMenuPositionChanged as EventListener)
 })
 
@@ -144,7 +180,12 @@ watch(
 
     <h3>{{ t('layout.title') }}</h3>
     <p class="layout-lead">{{ t('layout.lead') }}</p>
+    <p v-if="layoutDirty" class="layout-current">{{ t('layout.current') }} · {{ t('layout.currentHint') }}</p>
     <div class="layout-actions">
+      <button type="button" class="btn" @click="saveCurrentLayout">
+        <AppIcon name="save" :size="14" />
+        {{ t('layout.save') }}
+      </button>
       <button type="button" class="btn" @click="resetLayout">
         <AppIcon name="refresh" :size="14" />
         {{ t('layout.reset') }}
@@ -165,7 +206,7 @@ watch(
         :key="id"
         type="button"
         class="preset-card"
-        :class="{ active: activePreset === id }"
+        :class="{ active: !layoutDirty && activeId === id }"
         @click="applyPreset(id)"
       >
         <span class="preset-icon">
@@ -176,6 +217,37 @@ watch(
           <span>{{ t(`layout.presetsDesc.${id}`) }}</span>
         </span>
       </button>
+    </div>
+
+    <h3>{{ t('layout.namedGroup') }}</h3>
+    <p class="layout-lead">{{ t('layout.savedLead') }}</p>
+    <p v-if="!savedLayouts.length" class="layout-empty">{{ t('layout.savedEmpty') }}</p>
+    <div v-else class="saved-list">
+      <div
+        v-for="item in savedLayouts"
+        :key="item.id"
+        class="saved-row"
+        :class="{ active: !layoutDirty && activeId === item.id }"
+      >
+        <button type="button" class="saved-main" @click="applySaved(item.id)">
+          <span class="preset-icon">
+            <AppIcon name="pin" :size="16" />
+          </span>
+          <span class="preset-copy">
+            <strong>{{ item.name }}</strong>
+            <span>{{ t('layout.savedHint') }}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="saved-delete"
+          :title="t('common.delete')"
+          :aria-label="t('layout.deleteNamed', { name: item.name })"
+          @click="deleteSaved(item.id)"
+        >
+          <AppIcon name="trash" :size="14" />
+        </button>
+      </div>
     </div>
   </section>
 </template>
@@ -249,6 +321,13 @@ watch(
   color: var(--text-secondary);
   line-height: 1.45;
 }
+.layout-current {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  line-height: 1.45;
+}
 .layout-actions {
   display: flex;
   flex-wrap: wrap;
@@ -304,11 +383,73 @@ watch(
 .preset-copy strong {
   font-size: 12px;
   color: var(--text-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.preset-dirty {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--primary);
 }
 .preset-copy span {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.35;
+}
+.layout-empty {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.saved-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.saved-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+}
+.saved-row:hover {
+  border-color: var(--primary);
+}
+.saved-row.active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--panel-bg));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+.saved-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+.saved-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+.saved-delete:hover {
+  background: color-mix(in srgb, var(--danger, #d14343) 12%, transparent);
+  color: var(--danger, #d14343);
 }
 @media (max-width: 560px) {
   .preset-grid,

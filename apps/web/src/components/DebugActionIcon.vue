@@ -9,16 +9,15 @@ withDefaults(
 </script>
 
 <template>
-  <!-- Start debugging: solid green beetle -->
-  <svg
-    v-if="kind === 'start'"
-    class="debug-action-icon debug-action-icon--start"
-    viewBox="0 0 24 24"
-    fill="none"
-    aria-hidden="true"
-    :width="size"
-    :height="size"
-  >
+  <span class="debug-action-icon-wrap" aria-hidden="true">
+    <svg
+      v-if="kind === 'start'"
+      class="debug-action-icon debug-action-icon--start"
+      viewBox="0 0 24 24"
+      fill="none"
+      :width="size"
+      :height="size"
+    >
     <path
       d="M9.25 5.6 7.6 3.7M14.75 5.6l1.65-1.9"
       stroke="currentColor"
@@ -76,9 +75,15 @@ withDefaults(
       />
     </g>
   </svg>
+  </span>
 </template>
 
 <style scoped>
+.debug-action-icon-wrap {
+  display: inline-flex;
+  flex-shrink: 0;
+  line-height: 0;
+}
 .debug-action-icon {
   display: block;
   flex-shrink: 0;

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppIcon from '@/components/AppIcon.vue'
 import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
 import { useAppStore } from '@/stores/app'
+import { watchTabStrip } from '@/utils/tabStripCompact'
 
 type PanelLike = {
   id: string
@@ -57,6 +58,8 @@ const icons: Record<string, string> = {
 }
 
 const menu = ref<{ x: number; y: number } | null>(null)
+const root = ref<HTMLElement | null>(null)
+let stopStripWatch: (() => void) | undefined
 
 const panelApi = computed(
   () => props.api || props.params?.api || props.params?.params?.api || null,
@@ -235,10 +238,28 @@ function onTabKeydown(e: KeyboardEvent) {
     close()
   }
 }
+
+onMounted(() => {
+  let tries = 0
+  const bind = () => {
+    if (!root.value) return
+    const stop = watchTabStrip(root.value)
+    if (stop) {
+      stopStripWatch = stop
+      return
+    }
+    if (tries++ < 12) requestAnimationFrame(bind)
+  }
+  void nextTick(bind)
+})
+onBeforeUnmount(() => {
+  stopStripWatch?.()
+})
 </script>
 
 <template>
   <div
+    ref="root"
     class="ptab"
     :class="{ dirty }"
     :title="dirty ? `${info.label} (${t('panels.tab.dirty')})` : info.label"
@@ -262,22 +283,22 @@ function onTabKeydown(e: KeyboardEvent) {
     >
       <AppIcon name="close" :size="12" :stroke-width="1.75" />
     </button>
+    <Teleport to="body">
+      <ContextMenu
+        v-if="menu"
+        :x="menu.x"
+        :y="menu.y"
+        :items="menuItems"
+        @select="onMenuSelect"
+        @close="menu = null"
+      />
+    </Teleport>
   </div>
-
-  <Teleport to="body">
-    <ContextMenu
-      v-if="menu"
-      :x="menu.x"
-      :y="menu.y"
-      :items="menuItems"
-      @select="onMenuSelect"
-      @close="menu = null"
-    />
-  </Teleport>
 </template>
 
 <style scoped>
 .ptab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -286,11 +307,12 @@ function onTabKeydown(e: KeyboardEvent) {
   color: inherit;
   outline: none;
 }
+.ptab-ico {
+  flex-shrink: 0;
+  opacity: 0.82;
+}
 .ptab:focus-visible {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 55%, transparent);
-}
-.ptab-ico {
-  opacity: 0.82;
 }
 .lbl {
   font-size: 12px;

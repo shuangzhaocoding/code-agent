@@ -18,7 +18,7 @@ function reviewGitChanges() {
 
 <template>
   <div
-    v-if="canReviewGit"
+    v-show="canReviewGit"
     class="review-bulk"
     role="group"
     :aria-label="t('editor.reviewActionsAll')"

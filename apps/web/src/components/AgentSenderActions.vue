@@ -155,28 +155,28 @@ function activateMoreRowAction(row: EventTarget | null) {
       :disabled="contextDisabled"
       @click="emit('contextClick')"
     />
-    <UploadButton
-      v-if="showUploadInline"
-      class="action-inline"
-      :tooltip="t('chat.uploadImage')"
-      tooltip-placement="top"
-      multiple
-      :max-size="uploadMaxSize"
-      :max-count="uploadMaxCount"
-      :accept="uploadAccept"
-      :disabled="inputBlocked"
-      @select="emit('fileSelect', $event)"
-      @error="emit('uploadError', $event)"
-    />
-    <VoiceButton
-      v-if="showVoiceInline"
-      class="action-inline"
-      :tooltip="t('chat.voiceInput')"
-      tooltip-placement="top"
-      :speech-config="speechConfig"
-      :disabled="inputBlocked"
-      @speech-error="emit('speechError', $event)"
-    />
+    <span v-if="showUploadInline" class="action-inline">
+      <UploadButton
+        :tooltip="t('chat.uploadImage')"
+        tooltip-placement="top"
+        multiple
+        :max-size="uploadMaxSize"
+        :max-count="uploadMaxCount"
+        :accept="uploadAccept"
+        :disabled="inputBlocked"
+        @select="emit('fileSelect', $event)"
+        @error="emit('uploadError', $event)"
+      />
+    </span>
+    <span v-if="showVoiceInline" class="action-inline">
+      <VoiceButton
+        :tooltip="t('chat.voiceInput')"
+        tooltip-placement="top"
+        :speech-config="speechConfig"
+        :disabled="inputBlocked"
+        @speech-error="emit('speechError', $event)"
+      />
+    </span>
 
     <button
       v-if="showMore"
@@ -327,6 +327,7 @@ function activateMoreRowAction(row: EventTarget | null) {
   gap: 10px;
 }
 
+.agent-sender-actions :deep(.action-inline .tr-action-button),
 .agent-sender-actions :deep(.action-inline.tr-action-button) {
   width: auto;
   min-width: 0;
@@ -339,6 +340,7 @@ function activateMoreRowAction(row: EventTarget | null) {
   transition: opacity 0.15s ease;
 }
 
+.agent-sender-actions :deep(.action-inline .tr-action-button:hover:not(:disabled)),
 .agent-sender-actions :deep(.action-inline.tr-action-button:hover:not(:disabled)) {
   color: var(--text-h);
   background: transparent;

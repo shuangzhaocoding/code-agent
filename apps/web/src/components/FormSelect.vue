@@ -10,13 +10,14 @@ export type FormSelectOption = {
 
 const props = withDefaults(
   defineProps<{
-    modelValue: string
+    modelValue?: string | null
     options: FormSelectOption[]
     placeholder?: string
     id?: string
     disabled?: boolean
   }>(),
   {
+    modelValue: '',
     placeholder: '',
     id: undefined,
     disabled: false,

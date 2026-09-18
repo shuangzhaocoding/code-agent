@@ -1235,6 +1235,15 @@ html[data-theme='dark'] .dropdown-panel {
   padding: 0;
 }
 
+.dockview-theme-codeagent .dv-right-actions-container {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  height: 100%;
+  padding: 0 6px 0 2px;
+  gap: 2px;
+}
+
 .dockview-theme-codeagent .dv-tabs-container {
   gap: 0;
   padding: 0;
@@ -1323,14 +1332,61 @@ html[data-theme='dark'] .dropdown-panel {
   box-shadow: none;
 }
 
-.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default {
-  margin: 0 2px;
-  height: auto;
-  align-self: stretch;
+.dockview-theme-codeagent .dv-tabs-container.ca-tabs-icon-only .ptab {
   padding: 0 8px;
-  border-radius: 0;
-  color: var(--text-secondary);
-  border: 1px solid transparent;
+  gap: 0;
+}
+.dockview-theme-codeagent .dv-tabs-container.ca-tabs-icon-only .ptab .lbl {
+  position: absolute;
+  left: 0;
+  width: max-content;
+  max-width: none;
+  height: auto;
+  overflow: visible;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.dockview-theme-codeagent .dv-tabs-container.ca-tabs-icon-only .ptab-close,
+.dockview-theme-codeagent .dv-tabs-container.ca-tabs-icon-only .ptab-dirty {
+  display: none;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  align-self: center;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default svg,
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default span {
+  display: none;
+}
+
+.dockview-theme-codeagent .dv-tabs-overflow-dropdown-default::before {
+  content: '';
+  width: 16px;
+  height: 16px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") center / 16px 16px no-repeat;
 }
 
 .dockview-theme-codeagent .dv-groupview.dv-inactive-group .dv-tab.dv-active-tab {
@@ -1412,9 +1468,8 @@ html[data-theme='dark'] .dropdown-panel {
 
 /* Tabs overflow chevron */
 .dockview-theme-codeagent .dv-tabs-overflow-dropdown-default:hover {
-  background: var(--code-bg);
+  background: color-mix(in srgb, var(--text-h) 8%, transparent);
   color: var(--text-h);
-  border-color: var(--border);
 }
 
 .dockview-theme-codeagent .dv-tabs-overflow-container {

@@ -19,7 +19,7 @@ export type ToolbarSelectOption = {
 const { t } = useI18n()
 const props = withDefaults(
   defineProps<{
-    modelValue: string | null
+    modelValue?: string | null
     options: ToolbarSelectOption[]
     placeholder?: string
     displayLabel?: string
@@ -30,6 +30,7 @@ const props = withDefaults(
     searchPlaceholder?: string
   }>(),
   {
+    modelValue: null,
     placeholder: '',
     displayLabel: '',
     selectedChildValue: null,

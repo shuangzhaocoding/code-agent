@@ -42,6 +42,8 @@ const emit = defineEmits<{
   'toggle-host': []
   'edit-host': [e: MouseEvent]
   'add-workspace': [e: MouseEvent]
+  'host-contextmenu': [e: MouseEvent]
+  'ws-contextmenu': [ws: Workspace, e: MouseEvent]
   'dragstart': [e: DragEvent]
   'dragend': []
   'host-tip': [e: MouseEvent]
@@ -105,6 +107,7 @@ const blockClass = computed(() => ({
       @dragend="onRowDragEnd"
       @mouseenter="emit('host-tip', $event)"
       @mouseleave="emit('host-tip-hide')"
+      @contextmenu.prevent.stop="emit('host-contextmenu', $event)"
     >
       <div
         class="host-main"
@@ -166,7 +169,12 @@ const blockClass = computed(() => ({
         class="ws-group"
         :class="{ current: ws.id === store.workspaceId, open: isExpanded(ws.id) }"
       >
-        <div class="ws-row" @mouseenter="emit('ws-tip', ws, $event)" @mouseleave="emit('ws-tip-hide')">
+        <div
+          class="ws-row"
+          @mouseenter="emit('ws-tip', ws, $event)"
+          @mouseleave="emit('ws-tip-hide')"
+          @contextmenu.prevent.stop="emit('ws-contextmenu', ws, $event)"
+        >
           <button type="button" class="ws-main" @click="emit('toggle-expand', ws.id)">
             <AppIcon
               class="ws-chev"

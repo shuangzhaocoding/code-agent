@@ -14,6 +14,7 @@ import {
 import { isMacMod, paletteShortcutLabel } from '@/utils/relativeTime'
 import { isDesktopApp, openDesktopWindow, needsDesktopWindowControls } from '@/utils/desktop'
 import DesktopWindowControls from '@/components/DesktopWindowControls.vue'
+import LayoutPresetSwitch from '@/components/LayoutPresetSwitch.vue'
 
 type MenuId = 'file' | 'edit' | 'panel' | 'help'
 
@@ -580,6 +581,7 @@ onUnmounted(() => {
     </div>
 
     <div v-if="!hideActions" class="menu-actions">
+      <LayoutPresetSwitch :vertical="isSideRail" :compact="isSideRail" />
       <button
         v-if="isSideRail"
         type="button"
@@ -608,51 +610,51 @@ onUnmounted(() => {
       hidden
       @change="onImportFile"
     />
+
+    <Teleport to="body">
+      <div
+        v-if="activeMenu"
+        ref="dropdownEl"
+        class="menu-dropdown"
+        role="menu"
+        :style="dropdownStyle"
+      >
+        <template v-for="item in activeMenu.items" :key="item.id">
+          <div v-if="item.separator" class="menu-sep" role="separator" />
+          <button
+            v-else
+            type="button"
+            class="menu-option"
+            :class="{ active: activeItemId === item.id }"
+            role="menuitem"
+            :disabled="item.disabled"
+            :aria-checked="item.checked"
+            @mouseenter="
+              activeOption = activeMenuItems.findIndex((it) => it.id === item.id)
+            "
+            @click="runItem(item)"
+          >
+            <span class="menu-option-main">
+              <AppIcon
+                v-if="item.icon"
+                class="menu-option-icon"
+                :name="item.icon"
+                :size="14"
+                :stroke-width="1.75"
+              />
+              <span class="menu-option-label">{{ item.label }}</span>
+            </span>
+            <span v-if="item.checked" class="menu-option-check">
+              <AppIcon name="check" :size="13" :stroke-width="2" />
+            </span>
+            <span v-else-if="item.shortcut" class="menu-option-shortcut">{{ item.shortcut }}</span>
+          </button>
+        </template>
+      </div>
+    </Teleport>
+
+    <ShortcutsHelp v-model:open="shortcutsOpen" />
   </header>
-
-  <Teleport to="body">
-    <div
-      v-if="activeMenu"
-      ref="dropdownEl"
-      class="menu-dropdown"
-      role="menu"
-      :style="dropdownStyle"
-    >
-      <template v-for="item in activeMenu.items" :key="item.id">
-        <div v-if="item.separator" class="menu-sep" role="separator" />
-        <button
-          v-else
-          type="button"
-          class="menu-option"
-          :class="{ active: activeItemId === item.id }"
-          role="menuitem"
-          :disabled="item.disabled"
-          :aria-checked="item.checked"
-          @mouseenter="
-            activeOption = activeMenuItems.findIndex((it) => it.id === item.id)
-          "
-          @click="runItem(item)"
-        >
-          <span class="menu-option-main">
-            <AppIcon
-              v-if="item.icon"
-              class="menu-option-icon"
-              :name="item.icon"
-              :size="14"
-              :stroke-width="1.75"
-            />
-            <span class="menu-option-label">{{ item.label }}</span>
-          </span>
-          <span v-if="item.checked" class="menu-option-check">
-            <AppIcon name="check" :size="13" :stroke-width="2" />
-          </span>
-          <span v-else-if="item.shortcut" class="menu-option-shortcut">{{ item.shortcut }}</span>
-        </button>
-      </template>
-    </div>
-  </Teleport>
-
-  <ShortcutsHelp v-model:open="shortcutsOpen" />
 </template>
 
 <style scoped>
@@ -678,6 +680,7 @@ onUnmounted(() => {
 .app-menu-bar.is-titlebar .menu-actions,
 .app-menu-bar.is-titlebar .menu-search-center,
 .app-menu-bar.is-titlebar .ghost-icon-btn,
+.app-menu-bar.is-titlebar .layout-switch,
 .app-menu-bar.is-titlebar .win-controls,
 .app-menu-bar.is-titlebar input {
   -webkit-app-region: no-drag;
@@ -850,6 +853,7 @@ onUnmounted(() => {
   margin-left: 0;
   margin-top: auto;
   flex-direction: column;
+  width: 100%;
   gap: 4px;
 }
 </style>

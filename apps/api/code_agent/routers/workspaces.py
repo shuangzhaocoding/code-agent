@@ -58,6 +58,11 @@ def _workspace_dedupe_key(row: Workspace) -> str:
         host = getattr(row, "ssh_host", "") or ""
         port = int(getattr(row, "ssh_port", None) or 22)
         user = getattr(row, "ssh_user", "") or ""
+        # Include display name so identical connection+path can exist as separate
+        # "session" cards (copy/paste host). Empty name keeps legacy behavior.
+        display = (getattr(row, "ssh_display_name", None) or "").strip()
+        if display:
+            return f"ssh://{user}@{host}:{port}/n/{display}{row.root_path}"
         return f"ssh://{user}@{host}:{port}{row.root_path}"
     try:
         return _normalize_root_path(row.root_path)
@@ -328,8 +333,6 @@ async def _add_ssh_workspace(body: WorkspaceIn):
     if not await backend.is_dir(root):
         raise HTTPException(status_code=400, detail={"code": "workspace.invalid", "message": "Remote directory does not exist"})
 
-    key = f"ssh://{user}@{host}:{int(body.ssh_port or 22)}{root}"
-    existing = await _find_workspace_by_key(key)
     display_name = (body.ssh_display_name or "").strip()[:120] or None
     if body.ssh_group is not None:
         group_name = body.ssh_group.strip()[:120] or None
@@ -339,6 +342,13 @@ async def _add_ssh_workspace(body: WorkspaceIn):
         group_name = None
     if display_name is None and reused is not None and body.ssh_display_name is None:
         display_name = (getattr(reused, "ssh_display_name", None) or "").strip()[:120] or None
+    port = int(body.ssh_port or 22)
+    key = (
+        f"ssh://{user}@{host}:{port}/n/{display_name}{root}"
+        if display_name
+        else f"ssh://{user}@{host}:{port}{root}"
+    )
+    existing = await _find_workspace_by_key(key)
     if existing and workspace_is_ssh(existing):
         existing.ssh_secret = secret
         existing.root_path = root
@@ -356,7 +366,7 @@ async def _add_ssh_workspace(body: WorkspaceIn):
         ignore_globs=body.ignore_globs,
         kind="ssh",
         ssh_host=host,
-        ssh_port=int(body.ssh_port or 22),
+        ssh_port=port,
         ssh_user=user,
         ssh_secret=secret,
         ssh_display_name=display_name,
