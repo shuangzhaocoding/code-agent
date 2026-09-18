@@ -3,6 +3,7 @@ from __future__ import annotations
 import mimetypes
 import os
 import posixpath
+import shlex
 import shutil
 import tempfile
 import zipfile
@@ -19,7 +20,7 @@ from starlette.background import BackgroundTask
 from code_agent.async_io import run_sync
 from code_agent.db.models import Workspace
 from code_agent.policy.engine import is_protected
-from code_agent.tools.paths import replace_file_contents, split_patterns, workspace_root
+from code_agent.tools.paths import open_in_file_manager, replace_file_contents, resolve_in_workspace, split_patterns, workspace_root
 from code_agent.workspace.backend import get_workspace_backend, workspace_is_ssh
 from code_agent.workspace.ssh import SshWorkspaceBackend
 from code_agent.workspace.ssh_pool import SshAuth
@@ -159,6 +160,10 @@ class EntryCopy(BaseModel):
 class MkdirIn(BaseModel):
     parent: str
     name: str
+
+
+class PathIn(BaseModel):
+    path: str = ""
 
 
 class InlineEditIn(BaseModel):
@@ -386,6 +391,45 @@ async def open_workspace(workspace_id: str):
     plugins = await _activate_workspace_plugins(row)
     status = await _workspace_root_status(row)
     return {**_ws(row), "plugins": plugins, **status}
+
+
+@router.post("/{workspace_id}/open-in-folder")
+async def open_in_folder(workspace_id: str, body: PathIn):
+    """Open the folder (or a file's parent) in the host OS file manager."""
+    ws = await _get_ws(workspace_id)
+    rel = (body.path or "").strip().replace("\\", "/").strip("/")
+    backend = await get_workspace_backend(ws)
+    if rel and not await backend.exists(rel):
+        raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+    folder_rel = rel
+    if rel and not await backend.is_dir(rel):
+        folder_rel = posixpath.dirname(rel)
+    if workspace_is_ssh(ws) and isinstance(backend, SshWorkspaceBackend):
+        target = await backend._abs(folder_rel or ".")
+        quoted = shlex.quote(target)
+        cmd = (
+            f"if command -v xdg-open >/dev/null 2>&1; then xdg-open {quoted}; "
+            f"elif command -v open >/dev/null 2>&1; then open {quoted}; "
+            f"elif command -v explorer.exe >/dev/null 2>&1; then explorer.exe {quoted}; "
+            f"else echo 'no file manager' >&2; exit 1; fi"
+        )
+        code, _out, err = await backend.run_command(cmd, cwd=".", timeout=20)
+        if code != 0:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "os.open_failed", "message": (err or "").strip() or "Failed to open folder"},
+            )
+        return {"ok": True, "path": folder_rel}
+    try:
+        open_in_file_manager(resolve_in_workspace(ws.root_path, folder_rel or "."))
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "os.open_failed", "message": str(exc)},
+        ) from exc
+    return {"ok": True, "path": folder_rel}
 
 
 @router.get("/{workspace_id}/status")
@@ -815,8 +859,19 @@ async def get_file(workspace_id: str, path: str):
     backend = await get_workspace_backend(ws)
     if not await backend.is_file(path):
         raise HTTPException(status_code=404, detail={"code": "path.not_found"})
-    content = await backend.read_text(path)
-    return {"path": path, "content": content}
+    # Editor preview: load up to RAW_FILE_MAX_BYTES instead of rejecting large logs.
+    limit = RAW_FILE_MAX_BYTES
+    data = await backend.read_bytes(path, max_bytes=limit + 1)
+    if b"\x00" in data[:4096]:
+        raise HTTPException(status_code=400, detail={"code": "file.binary", "message": "Binary file"})
+    truncated = len(data) > limit
+    if truncated:
+        data = data[:limit]
+    return {
+        "path": path,
+        "content": data.decode("utf-8", errors="replace"),
+        "truncated": truncated,
+    }
 
 
 @router.get("/{workspace_id}/file/raw")

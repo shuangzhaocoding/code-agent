@@ -36,13 +36,8 @@ class LocalWorkspaceBackend:
         def _read() -> bytes:
             if not path.is_file():
                 raise HTTPException(status_code=404, detail={"code": "path.not_found"})
-            size = path.stat().st_size
-            if size > limit:
-                raise HTTPException(
-                    status_code=400,
-                    detail={"code": "file.too_large", "message": f"File exceeds {limit} bytes"},
-                )
-            return path.read_bytes()
+            with path.open("rb") as fh:
+                return fh.read(limit)
 
         return await run_sync(_read)
 

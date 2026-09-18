@@ -169,26 +169,14 @@ class SshWorkspaceBackend:
         target = await self._abs(rel)
         limit = max_bytes or int(settings.get("workspace.max_file_bytes") or 1048576)
         try:
-            attrs = await sftp.stat(target)
-            size = int(getattr(attrs, "size", 0) or 0)
-            if size > limit:
-                raise HTTPException(
-                    status_code=400,
-                    detail={"code": "file.too_large", "message": f"File exceeds {limit} bytes"},
-                )
             async with sftp.open(target, "rb") as fh:
-                data = await fh.read(limit + 1)
+                data = await fh.read(limit)
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=404, detail={"code": "path.not_found", "message": str(exc)}) from exc
         if isinstance(data, str):
             data = data.encode("utf-8", errors="replace")
-        if len(data) > limit:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "file.too_large", "message": f"File exceeds {limit} bytes"},
-            )
         return bytes(data)
 
     async def read_text(self, rel: str, max_bytes: int | None = None) -> str:

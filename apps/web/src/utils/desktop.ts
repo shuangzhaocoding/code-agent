@@ -13,6 +13,8 @@ export type CodeAgentDesktop = {
   newWindow?: () => Promise<boolean>
   setTitle?: (title: string) => void | Promise<void>
   openExternal?: (url: string) => Promise<boolean>
+  /** Open a local filesystem path in the OS file manager / default app. */
+  openPath?: (targetPath: string) => Promise<boolean>
   windowMinimize?: () => Promise<void>
   windowMaximizeToggle?: () => Promise<boolean>
   windowClose?: () => Promise<void>

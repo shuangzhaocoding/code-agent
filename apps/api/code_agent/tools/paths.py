@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -42,6 +43,24 @@ def resolve_in_workspace(root: str, rel: str) -> Path:
     if candidate.is_absolute():
         return candidate.resolve()
     return (base / raw).resolve()
+
+
+def open_in_file_manager(path: Path) -> None:
+    """Open a folder (or a file's parent) in the host OS file manager."""
+    folder = path if path.is_dir() else path.parent
+    if not folder.exists():
+        raise HTTPException(status_code=404, detail={"code": "path.not_found"})
+    target = str(folder)
+    if sys.platform == "win32":
+        os.startfile(target)  # type: ignore[attr-defined]
+        return
+    opener = ["open", target] if sys.platform == "darwin" else ["xdg-open", target]
+    subprocess.Popen(
+        opener,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
 
 
 def matches_ignore(rel: str, patterns: list[str]) -> bool:
@@ -83,13 +102,8 @@ def load_ignore_file(root: str) -> list[str]:
 
 def read_text_file(path: Path, max_bytes: int | None = None) -> str:
     limit = max_bytes or int(settings.get("workspace.max_file_bytes") or 1048576)
-    size = path.stat().st_size
-    if size > limit:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "file.too_large", "message": f"File exceeds {limit} bytes"},
-        )
-    data = path.read_bytes()
+    with path.open("rb") as fh:
+        data = fh.read(limit)
     if b"\x00" in data[:4096]:
         raise HTTPException(status_code=400, detail={"code": "file.binary", "message": "Binary file"})
     return data.decode("utf-8", errors="replace")

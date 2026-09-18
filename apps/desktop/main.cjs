@@ -732,6 +732,14 @@ if (!gotLock) {
     if (typeof url !== 'string') return false
     return openExternalUrl(url)
   })
+  ipcMain.handle('desktop:open-path', async (_event, targetPath) => {
+    if (typeof targetPath !== 'string') return false
+    const p = targetPath.trim()
+    if (!p || p.length > 4096) return false
+    if (/^(https?|javascript|data|file):/i.test(p)) return false
+    const err = await shell.openPath(p)
+    return !err
+  })
   ipcMain.handle('desktop:window-minimize', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return

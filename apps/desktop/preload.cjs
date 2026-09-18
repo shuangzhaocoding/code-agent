@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('codeAgentDesktop', {
   newWindow: () => ipcRenderer.invoke('desktop:new-window'),
   setTitle: (title) => ipcRenderer.invoke('desktop:set-title', title),
   openExternal: (url) => ipcRenderer.invoke('desktop:open-external', url),
+  openPath: (targetPath) => ipcRenderer.invoke('desktop:open-path', targetPath),
   windowMinimize: () => ipcRenderer.invoke('desktop:window-minimize'),
   windowMaximizeToggle: () => ipcRenderer.invoke('desktop:window-maximize-toggle'),
   windowClose: () => ipcRenderer.invoke('desktop:window-close'),

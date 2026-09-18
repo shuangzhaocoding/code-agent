@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import {
   api,
+  isFileTooLargeError,
   isPathNotFoundError,
   subscribeRun,
   subscribeWorkspaceEvents,
@@ -286,6 +287,8 @@ export const useAppStore = defineStore('app', () => {
   let treeTimer: ReturnType<typeof setTimeout> | null = null
   /** path → last known fs kind (`deleted` / `added` / `modified` / undefined). */
   const pendingTreePaths = new Map<string, string | undefined>()
+  /** True if any event in the current debounce window asked to reveal the path. */
+  let pendingTreeReveal = false
   let gitRefreshTimer: ReturnType<typeof setTimeout> | null = null
   let gitRefreshFollowUpTimer: ReturnType<typeof setTimeout> | null = null
   let stopWorkspaceFsWatch: (() => void) | null = null
@@ -344,15 +347,19 @@ export const useAppStore = defineStore('app', () => {
       if (event.type !== 'fs.changed') return
       const paths = Array.isArray(event.paths) ? event.paths.filter(Boolean) : []
       const kinds = Array.isArray(event.kinds) ? event.kinds : []
+      // Watch bursts must not reveal/auto-expand. Tools like `dlog` dump thousands
+      // of files into a new dir; revealing the first path would expand it and then
+      // re-list it on every subsequent write.
+      const watchOpts = { reveal: false as const }
       if (!paths.length || event.truncated) {
-        scheduleTreeRefresh()
+        scheduleTreeRefresh(undefined, undefined, watchOpts)
       } else {
         // Cap fan-out — too many paths becomes a full refresh.
         const slice = paths.slice(0, 24)
-        if (paths.length > slice.length) scheduleTreeRefresh()
+        if (paths.length > slice.length) scheduleTreeRefresh(undefined, undefined, watchOpts)
         else {
           for (let i = 0; i < slice.length; i++) {
-            scheduleTreeRefresh(slice[i], kinds[i])
+            scheduleTreeRefresh(slice[i], kinds[i], watchOpts)
           }
         }
       }
@@ -911,7 +918,8 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  function scheduleTreeRefresh(relPath?: string, kind?: string) {
+  function scheduleTreeRefresh(relPath?: string, kind?: string, opts?: { reveal?: boolean }) {
+    if (opts?.reveal !== false) pendingTreeReveal = true
     if (relPath) {
       // Prefer deleted if any event in the debounce window says so.
       const prev = pendingTreePaths.get(relPath)
@@ -923,6 +931,8 @@ export const useAppStore = defineStore('app', () => {
       treeTimer = null
       const entries = [...pendingTreePaths.entries()]
       pendingTreePaths.clear()
+      const reveal = pendingTreeReveal
+      pendingTreeReveal = false
       try {
         if (!entries.length) {
           await refreshTree()
@@ -930,23 +940,30 @@ export const useAppStore = defineStore('app', () => {
         }
         // Process deletes deepest-first so parents are pruned after children.
         entries.sort((a, b) => b[0].split('/').length - a[0].split('/').length || a[0].localeCompare(b[0]))
+        const dirs = new Set<string>()
         for (const [path, kind] of entries) {
-          const parent = parentPath(path) || ''
           try {
             if (kind === 'deleted') {
               pruneTreePath(path)
-              await loadTree(parent).catch(() => undefined)
-            } else {
+              dirs.add(deepestExpandedAncestor(path))
+              continue
+            }
+            if (reveal) {
               // May 404 if the path was already removed (e.g. SSH marks deletes as modified).
               await revealInTree(path).catch(() => undefined)
-              if (parent) await loadTree(parent).catch(() => undefined)
+              const parent = parentPath(path) || ''
+              if (parent) dirs.add(parent)
+            } else {
+              if (expanded.value.has(path)) dirs.add(path)
+              dirs.add(deepestExpandedAncestor(path))
             }
           } catch (err) {
             console.error(err)
-            await loadTree(parent).catch(() => undefined)
+            dirs.add(parentPath(path) || '')
           }
         }
-        await loadTree('').catch(() => undefined)
+        dirs.add('')
+        await Promise.all([...dirs].map((dir) => loadTree(dir).catch(() => undefined)))
         await loadGitChangedPaths()
       } catch (err) {
         console.error(err)
@@ -962,6 +979,16 @@ export const useAppStore = defineStore('app', () => {
   function parentPath(path: string) {
     const i = path.lastIndexOf('/')
     return i <= 0 ? '' : path.slice(0, i)
+  }
+
+  /** Deepest already-expanded ancestor, or workspace root. Does not auto-expand. */
+  function deepestExpandedAncestor(path: string): string {
+    let cur = parentPath(path)
+    while (cur) {
+      if (expanded.value.has(cur)) return cur
+      cur = parentPath(cur)
+    }
+    return ''
   }
 
   function joinPath(dir: string, name: string) {
@@ -1228,12 +1255,14 @@ export const useAppStore = defineStore('app', () => {
 
   function friendlyFileError(err: unknown, fallbackKey = 'file.openFailed'): string {
     if (isPathNotFoundError(err)) return t('file.notFound')
+    if (isFileTooLargeError(err)) return ''
     const msg = err instanceof Error ? err.message : String(err)
     if (!msg) return t(fallbackKey)
     if (msg.startsWith('{') || msg.startsWith('[')) {
       try {
         const parsed = JSON.parse(msg) as { code?: string; message?: string }
         if (parsed.code === 'path.not_found') return t('file.notFound')
+        if (parsed.code === 'file.too_large') return ''
         if (typeof parsed.message === 'string' && parsed.message.trim()) return parsed.message
         if (typeof parsed.code === 'string') return t(fallbackKey)
       } catch {
@@ -1263,6 +1292,25 @@ export const useAppStore = defineStore('app', () => {
     window.dispatchEvent(new Event('ca-focus-editor'))
   }
 
+  function openRawPreview(path: string, kind: OpenFileKind) {
+    const ws = workspaceId.value
+    if (!ws) return
+    const url = rawFileUrl(ws, path)
+    const existing = openFiles.value.find((f) => f.path === path)
+    if (existing) {
+      existing.kind = kind
+      existing.content = ''
+      existing.previewUrl = url
+      existing.dirty = false
+      existing.readonly = true
+    } else {
+      openFiles.value = [...openFiles.value, { path, kind, content: '', previewUrl: url, dirty: false, readonly: true }]
+    }
+    activePath.value = path
+    fileNotice.value = null
+    window.dispatchEvent(new Event('ca-focus-editor'))
+  }
+
   async function retryOpenPath(path: string) {
     await openPath(path, false)
   }
@@ -1282,10 +1330,11 @@ export const useAppStore = defineStore('app', () => {
         if (existing.kind === 'html') {
           existing.previewUrl = rawFileUrl(workspaceId.value, path)
           try {
-            const data = await api<{ path: string; content: string }>(
+            const data = await api<{ path: string; content: string; truncated?: boolean }>(
               `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
             )
             existing.content = data.content
+            existing.readonly = Boolean(data.truncated) || existing.readonly
             window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
           } catch (err) {
             if (isPathNotFoundError(err)) {
@@ -1298,10 +1347,11 @@ export const useAppStore = defineStore('app', () => {
           existing.previewUrl = rawFileUrl(workspaceId.value, path)
         } else {
           try {
-            const data = await api<{ path: string; content: string }>(
+            const data = await api<{ path: string; content: string; truncated?: boolean }>(
               `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
             )
             existing.content = data.content
+            existing.readonly = Boolean(data.truncated)
             window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
           } catch (err) {
             if (isPathNotFoundError(err)) {
@@ -1325,15 +1375,16 @@ export const useAppStore = defineStore('app', () => {
 
     if (kind === 'html') {
       try {
-        const data = await api<{ path: string; content: string }>(
+        const data = await api<{ path: string; content: string; truncated?: boolean }>(
           `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
         )
+        const readonly = Boolean(data.truncated)
         if (existing && retryingMissing) {
           existing.kind = 'html'
           existing.content = data.content
           existing.previewUrl = rawFileUrl(ws, data.path)
           existing.dirty = false
-          existing.readonly = false
+          existing.readonly = readonly
           activePath.value = data.path
         } else {
           openFiles.value = [
@@ -1344,6 +1395,7 @@ export const useAppStore = defineStore('app', () => {
               content: data.content,
               previewUrl: rawFileUrl(ws, data.path),
               dirty: false,
+              readonly,
             },
           ]
           activePath.value = data.path
@@ -1353,6 +1405,10 @@ export const useAppStore = defineStore('app', () => {
       } catch (err) {
         if (isPathNotFoundError(err)) {
           openMissingFile(path)
+          return
+        }
+        if (isFileTooLargeError(err)) {
+          openRawPreview(path, 'html')
           return
         }
         fileNotice.value = friendlyFileError(err)
@@ -1380,18 +1436,22 @@ export const useAppStore = defineStore('app', () => {
     }
 
     try {
-      const data = await api<{ path: string; content: string }>(
+      const data = await api<{ path: string; content: string; truncated?: boolean }>(
         `/api/workspaces/${ws}/file?path=${encodeURIComponent(path)}`,
       )
+      const readonly = Boolean(data.truncated)
       if (existing && retryingMissing) {
         existing.kind = 'text'
         existing.content = data.content
         existing.dirty = false
-        existing.readonly = false
+        existing.readonly = readonly
         existing.previewUrl = undefined
         activePath.value = data.path
       } else {
-        openFiles.value = [...openFiles.value, { path: data.path, kind: 'text', content: data.content, dirty: false }]
+        openFiles.value = [
+          ...openFiles.value,
+          { path: data.path, kind: 'text', content: data.content, dirty: false, readonly },
+        ]
         activePath.value = data.path
       }
     } catch (err) {
@@ -1400,31 +1460,10 @@ export const useAppStore = defineStore('app', () => {
         openMissingFile(path)
         return
       }
-      // Unknown/binary: fall back to binary preview tab
-      if (msg.includes('file.binary') || msg.includes('Binary file')) {
-        try {
-          const url = rawFileUrl(ws, path)
-          if (existing && retryingMissing) {
-            existing.kind = 'binary'
-            existing.content = ''
-            existing.previewUrl = url
-            existing.dirty = false
-            existing.readonly = false
-          } else {
-            openFiles.value = [
-              ...openFiles.value,
-              { path, kind: 'binary', content: '', previewUrl: url, dirty: false },
-            ]
-          }
-          activePath.value = path
-        } catch (fallbackErr) {
-          if (isPathNotFoundError(fallbackErr)) {
-            openMissingFile(path)
-            return
-          }
-          fileNotice.value = friendlyFileError(fallbackErr)
-          return
-        }
+      // Unknown/binary, or leftover size-cap errors: fall back to a preview tab.
+      if (msg.includes('file.binary') || msg.includes('Binary file') || isFileTooLargeError(err)) {
+        openRawPreview(path, 'binary')
+        return
       } else if (activeReview) {
         if (existing && retryingMissing) {
           existing.kind = 'text'
@@ -1565,6 +1604,7 @@ export const useAppStore = defineStore('app', () => {
         openMissingFile(tabPath)
         return
       }
+      if (isFileTooLargeError(err)) return
       fileNotice.value = friendlyFileError(err)
     }
   }
@@ -2160,14 +2200,15 @@ export const useAppStore = defineStore('app', () => {
     try {
       const head = path.match(/^(HEAD|[0-9a-fA-F]{7,40}):(.+)$/)
       const data = head
-        ? await api<{ path: string; content: string }>(
+        ? await api<{ path: string; content: string; truncated?: boolean }>(
             `/api/workspaces/${workspaceId.value}/git/blob?path=${encodeURIComponent(head[2])}&rev=${encodeURIComponent(head[1])}`,
           )
-        : await api<{ path: string; content: string }>(
+        : await api<{ path: string; content: string; truncated?: boolean }>(
             `/api/workspaces/${workspaceId.value}/file?path=${encodeURIComponent(path)}`,
           )
       file.content = data.content
       file.dirty = false
+      if (!head) file.readonly = Boolean(data.truncated)
       window.dispatchEvent(new CustomEvent('ca-file-reload', { detail: { path, content: data.content } }))
     } catch {
       /* keep previous */

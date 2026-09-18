@@ -55,6 +55,13 @@ export function isPathNotFoundError(err: unknown): boolean {
   return getErrorCode(err) === 'path.not_found' || (err instanceof Error && err.message.includes('path.not_found'))
 }
 
+export function isFileTooLargeError(err: unknown): boolean {
+  const code = getErrorCode(err)
+  if (code === 'file.too_large') return true
+  const msg = err instanceof Error ? err.message : String(err)
+  return msg.includes('file.too_large') || /File exceeds \d+ bytes/i.test(msg)
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,

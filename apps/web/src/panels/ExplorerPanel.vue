@@ -13,9 +13,12 @@ import {
   type FsDragPayload,
 } from '@/panels/explorerDrag'
 import { collectDataTransferFiles } from '@/utils/fsDrop'
+import { api } from '@/api/http'
+import { getDesktopBridge, isDesktopApp } from '@/utils/desktop'
 
 const { t } = useI18n()
 const store = useAppStore()
+const isDesktop = isDesktopApp()
 const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
 const menuEl = ref<HTMLElement | null>(null)
 const menuPos = ref({ left: 0, top: 0 })
@@ -564,6 +567,33 @@ function toAbsolutePath(rel: string): string {
   return `${normalizedRoot}${sep}${normalizedRel}`
 }
 
+function openInTerminal() {
+  const cwd = targetDir()
+  closeMenu()
+  window.dispatchEvent(new CustomEvent('ca-open-terminal', { detail: { cwd } }))
+}
+
+async function openInFolder() {
+  const rel = targetDir()
+  const abs = toAbsolutePath(rel)
+  closeMenu()
+  const desktop = getDesktopBridge()
+  const localDesktop = store.workspace?.kind !== 'ssh' && typeof desktop?.openPath === 'function'
+  try {
+    if (localDesktop) {
+      const ok = await desktop.openPath!(abs)
+      if (ok) return
+    }
+    if (!store.workspaceId) throw new Error(t('explorer.openInFolderFail'))
+    await api(`/api/workspaces/${store.workspaceId}/open-in-folder`, {
+      method: 'POST',
+      body: JSON.stringify({ path: rel }),
+    })
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : t('explorer.openInFolderFail')
+  }
+}
+
 async function copyText(text: string) {
   try {
     await navigator.clipboard.writeText(text)
@@ -807,6 +837,15 @@ onUnmounted(() => {
       <button type="button" @click="startUploadDir($event)">
         <AppIcon class="ctx-ico" name="folder" :size="15" />
         <span>{{ t('explorer.uploadDir') }}</span>
+      </button>
+      <div class="ctx-sep" />
+      <button type="button" @click="openInTerminal">
+        <AppIcon class="ctx-ico" name="terminal" :size="15" />
+        <span>{{ t('explorer.openInTerminal') }}</span>
+      </button>
+      <button v-if="isDesktop" type="button" @click="openInFolder">
+        <AppIcon class="ctx-ico" name="folder" :size="15" />
+        <span>{{ t('explorer.openInFolder') }}</span>
       </button>
 
       <!-- 对话 -->
