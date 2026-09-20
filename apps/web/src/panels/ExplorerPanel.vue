@@ -13,12 +13,15 @@ import {
   type FsDragPayload,
 } from '@/panels/explorerDrag'
 import { collectDataTransferFiles } from '@/utils/fsDrop'
-import { api } from '@/api/http'
 import { getDesktopBridge, isDesktopApp } from '@/utils/desktop'
 
 const { t } = useI18n()
 const store = useAppStore()
 const isDesktop = isDesktopApp()
+/** Only local desktop can open the OS file manager; hide on web and SSH. */
+const canOpenInFolder = computed(
+  () => isDesktop && store.workspace?.kind !== 'ssh' && typeof getDesktopBridge()?.openPath === 'function',
+)
 const menu = ref<{ x: number; y: number; item: FsItem | null } | null>(null)
 const menuEl = ref<HTMLElement | null>(null)
 const menuPos = ref({ left: 0, top: 0 })
@@ -574,21 +577,12 @@ function openInTerminal() {
 }
 
 async function openInFolder() {
-  const rel = targetDir()
-  const abs = toAbsolutePath(rel)
+  if (!canOpenInFolder.value) return
+  const abs = toAbsolutePath(targetDir())
   closeMenu()
-  const desktop = getDesktopBridge()
-  const localDesktop = store.workspace?.kind !== 'ssh' && typeof desktop?.openPath === 'function'
   try {
-    if (localDesktop) {
-      const ok = await desktop.openPath!(abs)
-      if (ok) return
-    }
-    if (!store.workspaceId) throw new Error(t('explorer.openInFolderFail'))
-    await api(`/api/workspaces/${store.workspaceId}/open-in-folder`, {
-      method: 'POST',
-      body: JSON.stringify({ path: rel }),
-    })
+    const ok = await getDesktopBridge()!.openPath!(abs)
+    if (!ok) throw new Error(t('explorer.openInFolderFail'))
   } catch (err) {
     error.value = err instanceof Error ? err.message : t('explorer.openInFolderFail')
   }
@@ -843,7 +837,7 @@ onUnmounted(() => {
         <AppIcon class="ctx-ico" name="terminal" :size="15" />
         <span>{{ t('explorer.openInTerminal') }}</span>
       </button>
-      <button v-if="isDesktop" type="button" @click="openInFolder">
+      <button v-if="canOpenInFolder" type="button" @click="openInFolder">
         <AppIcon class="ctx-ico" name="folder" :size="15" />
         <span>{{ t('explorer.openInFolder') }}</span>
       </button>
