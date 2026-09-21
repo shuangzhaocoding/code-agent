@@ -29,14 +29,28 @@ function initialCollapsed(): boolean {
 }
 
 const collapsed = ref(initialCollapsed())
+/** Once the user toggles, status refreshes must not fight their choice. */
+let userTouched = false
+
+function toggle() {
+  userTouched = true
+  collapsed.value = !collapsed.value
+}
+
+watch(
+  () => props.block.id,
+  () => {
+    userTouched = false
+    collapsed.value = initialCollapsed()
+  },
+)
 
 watch(
   () => [props.defaultCollapsed, props.block.status, props.live] as const,
   () => {
-    if (props.defaultCollapsed != null) {
-      collapsed.value = props.defaultCollapsed
-      return
-    }
+    // Honor the user's collapse/expand; status refreshes must not re-open the card.
+    if (userTouched) return
+    if (props.defaultCollapsed != null) return
     if (props.live || props.block.status === 'streaming') collapsed.value = false
   },
 )
@@ -165,10 +179,6 @@ function itemVisualClass(status: TodoStatus): string {
     return 'interrupted'
   }
   return 'skipped'
-}
-
-function toggle() {
-  collapsed.value = !collapsed.value
 }
 </script>
 

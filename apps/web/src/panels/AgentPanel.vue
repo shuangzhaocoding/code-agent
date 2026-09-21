@@ -19,6 +19,8 @@ import RunReviewActions from '@/components/RunReviewActions.vue'
 import ReviewBulkActions from '@/components/ReviewBulkActions.vue'
 import ConnectionStatusBar from '@/components/ConnectionStatusBar.vue'
 import TodoBlock from '@/renderers/TodoBlock.vue'
+import ContextMenu, { type ContextMenuItem } from '@/components/ContextMenu.vue'
+import { chatExternalHref, openExternalUrl, safeExternalUrl } from '@/utils/openUrl'
 import { animateScrollTo, cancelSmoothScroll, scrollToTop } from '@/utils/smoothScroll'
 import { useChatAttachments } from '@/composables/useChatAttachments'
 import { openImageLightbox } from '@/composables/useImageLightbox'
@@ -109,6 +111,102 @@ async function copyMsg(msg: (typeof store.messages)[0]) {
   if (copyToastTimer) clearTimeout(copyToastTimer)
   copyToast.value = true
   copyToastTimer = setTimeout(() => { copyToast.value = false }, 2000)
+}
+
+function showCopyToast() {
+  if (copyToastTimer) clearTimeout(copyToastTimer)
+  copyToast.value = true
+  copyToastTimer = setTimeout(() => { copyToast.value = false }, 2000)
+}
+
+const agentCtxMenu = ref<{
+  x: number
+  y: number
+  linkHref: string | null
+  selectedText: string
+} | null>(null)
+
+const agentCtxItems = computed((): ContextMenuItem[] => {
+  if (!agentCtxMenu.value) return []
+  const hasSel = Boolean(agentCtxMenu.value.selectedText.trim())
+  const link = agentCtxMenu.value.linkHref
+  const items: ContextMenuItem[] = [
+    { id: 'copy', label: t('chat.copySelection'), icon: 'copy', disabled: !hasSel },
+    { id: 'select-all', label: t('chat.selectAll'), icon: 'expand-all' },
+  ]
+  if (link) {
+    items.push({ id: 'sep1', separator: true })
+    items.push({ id: 'copy-link', label: t('chat.copyLink'), icon: 'path-absolute' })
+    items.push({ id: 'open-browser', label: t('chat.openInBrowser'), icon: 'globe' })
+  } else {
+    const fromSel = safeExternalUrl(agentCtxMenu.value.selectedText.trim())
+    items.push({ id: 'sep1', separator: true })
+    items.push({
+      id: 'open-browser',
+      label: t('chat.openInBrowser'),
+      icon: 'globe',
+      disabled: !fromSel,
+    })
+  }
+  return items
+})
+
+function selectedTimelineText() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed) return ''
+  const root = timelineInner.value
+  if (!root) return sel.toString()
+  for (let i = 0; i < sel.rangeCount; i++) {
+    const range = sel.getRangeAt(i)
+    if (root.contains(range.commonAncestorContainer)) return sel.toString()
+  }
+  return ''
+}
+
+function openAgentCtxMenu(e: MouseEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  // Leave native menu for editable composer / form controls.
+  if (target.closest('textarea, input, select, [contenteditable="true"], .agent-sender')) return
+  e.preventDefault()
+  agentCtxMenu.value = {
+    x: e.clientX,
+    y: e.clientY,
+    linkHref: chatExternalHref(target),
+    selectedText: selectedTimelineText(),
+  }
+}
+
+async function onAgentCtxSelect(id: string) {
+  const snap = agentCtxMenu.value
+  agentCtxMenu.value = null
+  if (!snap) return
+  if (id === 'copy') {
+    const text = snap.selectedText
+    if (!text) return
+    await navigator.clipboard.writeText(text).catch(() => {})
+    showCopyToast()
+    return
+  }
+  if (id === 'select-all') {
+    const root = timelineInner.value
+    if (!root) return
+    const range = document.createRange()
+    range.selectNodeContents(root)
+    const sel = window.getSelection()
+    sel?.removeAllRanges()
+    sel?.addRange(range)
+    return
+  }
+  if (id === 'copy-link' && snap.linkHref) {
+    await navigator.clipboard.writeText(snap.linkHref).catch(() => {})
+    showCopyToast()
+    return
+  }
+  if (id === 'open-browser') {
+    const url = snap.linkHref || safeExternalUrl(snap.selectedText.trim())
+    if (url) void openExternalUrl(url)
+  }
 }
 
 function focusSenderEnd() {
@@ -1475,7 +1573,7 @@ function openContextUsageDialog() {
       </Transition>
     </Teleport>
     <div class="agent-main">
-      <div ref="scroller" class="timeline" :class="{ 'is-pinning': forcePinning }" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown">
+      <div ref="scroller" class="timeline" :class="{ 'is-pinning': forcePinning }" @scroll="onScroll" @wheel="onWheel" @pointerdown="onPointerDown" @contextmenu="openAgentCtxMenu">
         <div ref="timelineInner" class="timeline-inner">
         <div v-if="store.switchLoading" class="switch-loading" role="status" aria-live="polite">
           <span class="switch-spinner" aria-hidden="true" />
@@ -1795,6 +1893,14 @@ function openContextUsageDialog() {
       :mode="store.mode"
       :files="pendingFiles"
       @close="contextUsageOpen = false"
+    />
+    <ContextMenu
+      v-if="agentCtxMenu"
+      :x="agentCtxMenu.x"
+      :y="agentCtxMenu.y"
+      :items="agentCtxItems"
+      @select="onAgentCtxSelect"
+      @close="agentCtxMenu = null"
     />
   </div>
 </template>

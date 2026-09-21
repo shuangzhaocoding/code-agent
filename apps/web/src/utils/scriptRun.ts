@@ -18,6 +18,8 @@ export type TerminalRunRequest = {
   cwd?: string
   /** Open a fresh PTY tab instead of reusing the active one. */
   newTab?: boolean
+  /** Close the tab (and panel if empty) when the launched process exits. */
+  autoClose?: boolean
 }
 
 export function isWindowsRoot(root: string | null | undefined): boolean {

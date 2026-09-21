@@ -290,11 +290,10 @@ const showCredentialFields = computed(
               {{ t('common.parent') }}
             </button>
             <button
-              v-if="mode === 'local'"
               type="button"
               class="crumb-btn"
-              :disabled="local.atRoots"
-              @click="local.startCreate"
+              :disabled="mode === 'local' ? local.atRoots : !ssh.browsing || ssh.atRoots || ssh.connecting"
+              @click="mode === 'local' ? local.startCreate() : ssh.startCreate()"
             >
               {{ t('workspace.newFolder') }}
             </button>
@@ -308,6 +307,15 @@ const showCredentialFields = computed(
                 @update:model-value="local.createValue = $event"
                 @commit="local.commitCreate"
                 @cancel="local.cancelCreate"
+              />
+            </li>
+            <li v-else-if="mode === 'ssh' && ssh.creating">
+              <WorkspaceMkdirRow
+                :key="ssh.createKey"
+                :model-value="ssh.createValue"
+                @update:model-value="ssh.createValue = $event"
+                @commit="ssh.commitCreate"
+                @cancel="ssh.cancelCreate"
               />
             </li>
             <li v-for="item in mode === 'local' ? local.dirs : ssh.dirs" :key="item.path">

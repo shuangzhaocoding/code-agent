@@ -629,24 +629,57 @@ function openFolderMenu(path: string, e: MouseEvent) {
   folderMenu.value = { x: e.clientX, y: e.clientY, path }
 }
 
-function openUngroupedMenu(e: MouseEvent) {
-  // Don't steal host/workspace row context menus.
+function openBlankMenu(e: MouseEvent) {
+  // Don't steal host / workspace / folder row context menus.
   const target = e.target as HTMLElement | null
-  if (target?.closest('.host-row, .ws-row, .host-block')) return
+  if (target?.closest('.host-row, .ws-row, .host-block, .folder-row, .folder-node')) return
+  e.preventDefault()
   hostMenu.value = null
   wsMenu.value = null
   folderMenu.value = { x: e.clientX, y: e.clientY, path: '' }
+}
+
+function openUngroupedMenu(e: MouseEvent) {
+  openBlankMenu(e)
 }
 
 const folderMenuItems = computed((): ContextMenuItem[] => {
   void clipboardTick.value
   if (!folderMenu.value) return []
   const path = folderMenu.value.path
-  // Ungrouped / root paste target — only add/paste.
+  // Blank / root area.
   if (!path) {
+    const hasTree = store.recentWorkspaces.length > 0 || extraGroups.value.length > 0
     return [
-      { id: 'new-session', label: t('workspace.panel.ctxAddRemoteWorkspace'), icon: 'plus' },
-      { id: 'paste', label: t('workspace.panel.ctxPaste'), icon: 'paste', disabled: !hasSshHostClipboard() },
+      {
+        id: 'new-chat',
+        label: t('workspace.panel.newSession'),
+        icon: 'plus',
+        disabled: !store.workspaceId,
+      },
+      { id: 'open-workspace', label: t('workspace.panel.openWorkspace'), icon: 'folder' },
+      { id: 'new-folder', label: t('workspace.panel.newGroup'), icon: 'folder-plus' },
+      { id: 'add-remote', label: t('workspace.panel.ctxAddRemoteWorkspace'), icon: 'globe' },
+      { id: 'sep1', separator: true },
+      {
+        id: 'paste',
+        label: t('workspace.panel.ctxPaste'),
+        icon: 'paste',
+        disabled: !hasSshHostClipboard(),
+      },
+      { id: 'sep2', separator: true },
+      {
+        id: 'expand-all',
+        label: t('workspace.panel.expandHosts'),
+        icon: 'expand-all',
+        disabled: !hasTree,
+      },
+      {
+        id: 'collapse-all',
+        label: t('workspace.panel.collapseHosts'),
+        icon: 'collapse-all',
+        disabled: !hasTree,
+      },
     ]
   }
   return [
@@ -665,6 +698,20 @@ function onFolderMenuSelect(id: string) {
   const path = folderMenu.value?.path
   folderMenu.value = null
   if (path == null) return
+  if (!path) {
+    if (id === 'new-chat') {
+      const ws = store.workspace
+      if (ws) void newSession(ws, new MouseEvent('click'))
+    } else if (id === 'open-workspace') {
+      openPrefill.value = null
+      showOpen.value = true
+    } else if (id === 'new-folder') void createHostGroup()
+    else if (id === 'add-remote') startAddInFolder('')
+    else if (id === 'paste') void pasteHostClone('')
+    else if (id === 'expand-all') void expandAllSessions()
+    else if (id === 'collapse-all') collapseAllSessions()
+    return
+  }
   if (id === 'new-session') startAddInFolder(path)
   else if (id === 'new-subfolder') void createHostGroup(path)
   else if (id === 'paste') void pasteHostClone(path)
@@ -803,6 +850,20 @@ async function pasteHostClone(folderPath: string | null) {
   }
 }
 
+function hasTextSelection() {
+  const sel = window.getSelection()
+  return Boolean(sel && !sel.isCollapsed && sel.toString().trim())
+}
+
+function workspacePanelHasFocus(target: HTMLElement | null) {
+  return Boolean(
+    target?.closest?.('.workspace-panel') ||
+      document.activeElement?.closest?.('.workspace-panel') ||
+      hostMenu.value ||
+      folderMenu.value,
+  )
+}
+
 function onPanelKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
   if (!target) return
@@ -810,29 +871,25 @@ function onPanelKeydown(e: KeyboardEvent) {
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return
   const mod = e.ctrlKey || e.metaKey
   if (!mod || e.altKey) return
+  if (!workspacePanelHasFocus(target)) return
+
   const key = e.key.toLowerCase()
   if (key === 'c') {
+    // Let the browser copy real text selections (chat, editor, etc.).
+    if (hasTextSelection()) return
     const group = findHostGroup(focusHostKey.value)
     if (group?.kind !== 'ssh') return
     e.preventDefault()
     e.stopPropagation()
     copyHostGroup(group)
-  } else if (key === 'v') {
-    if (!hasSshHostClipboard()) return
-    // Prefer pasting while a host/folder context is active.
-    const inPanel = Boolean(
-      target.closest?.('.workspace-panel') ||
-        document.activeElement?.closest?.('.workspace-panel') ||
-        hostMenu.value ||
-        folderMenu.value ||
-        focusHostKey.value,
-    )
-    if (!inPanel) return
-    e.preventDefault()
-    e.stopPropagation()
-    const group = findHostGroup(focusHostKey.value)
-    void pasteHostClone(group?.groupName || null)
+    return
   }
+  if (key !== 'v') return
+  if (!hasSshHostClipboard()) return
+  e.preventDefault()
+  e.stopPropagation()
+  const group = findHostGroup(focusHostKey.value)
+  void pasteHostClone(group?.groupName || null)
 }
 
 function showHostDetails(group: WorkspaceHostGroup, x: number, y: number) {
@@ -1452,6 +1509,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
       :class="{ 'drop-root': dropFolderPath === '' && (dragHostKey || dragFolderPath) }"
       @dragover="onRootDragOver"
       @drop="onRootDrop"
+      @contextmenu="openBlankMenu"
     >
       <p v-if="!store.recentWorkspaces.length && !extraGroups.length" class="empty">{{ t('workspace.panel.empty') }}</p>
 
@@ -1551,7 +1609,7 @@ function onRenameKeydown(wsId: string, id: string, e: KeyboardEvent) {
           :class="{ 'drop-over': dropFolderPath === '' && (dragHostKey || dragFolderPath) }"
           @dragover="onRootDragOver"
           @drop="onRootDrop"
-          @contextmenu.prevent="openUngroupedMenu"
+          @contextmenu="openUngroupedMenu"
         >
           <div class="ungrouped-label">{{ t('workspace.panel.ungrouped') }}</div>
           <WorkspaceHostBlock

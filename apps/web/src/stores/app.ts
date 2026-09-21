@@ -2358,6 +2358,7 @@ export const useAppStore = defineStore('app', () => {
               command,
               cwd: typeof meta.cwd === 'string' ? meta.cwd : undefined,
               newTab: meta.new_tab !== false,
+              autoClose: true,
             },
           }),
         )

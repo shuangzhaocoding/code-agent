@@ -29,6 +29,8 @@ interface TermEntry {
   cwd: string
   createdAt: string | null
   alive: boolean
+  /** Close this tab when the shell process exits (agent temporary launch). */
+  autoClose: boolean
   term: Terminal | null
   fit: FitAddon | null
   webLinks: WebLinksAddon | null
@@ -408,6 +410,9 @@ async function connectEntry(entry: TermEntry) {
         if (msg?.type === 'exit') {
           entry.alive = false
           store.scheduleGitRefresh(300)
+          if (entry.autoClose) {
+            void removeTerminal(entry.id)
+          }
         }
       } catch {
         /* ignore non-json text frames */
@@ -462,6 +467,7 @@ async function runQueuedCommand() {
   const queued = takeTerminalRun()
   if (!queued?.command) return
   let entry = queued.newTab ? null : liveEntry()
+  let createdForRun = false
   if (!entry) {
     try {
       await addTerminal(queued.cwd)
@@ -470,6 +476,7 @@ async function runQueuedCommand() {
     }
     entry = activeEntry()
     if (!entry) return
+    createdForRun = true
     try {
       await waitForSocket(entry)
     } catch {
@@ -478,8 +485,12 @@ async function runQueuedCommand() {
   } else if (queued.cwd) {
     // Active tab may already be elsewhere; still send the command as-is (caller should cd).
   }
+  if (queued.autoClose && createdForRun) entry.autoClose = true
   activateTab(entry.id)
-  sendTerminalInput(entry, `${queued.command}\r`)
+  // Ephemeral agent launches: leave the shell after the command so the tab can auto-close.
+  const line =
+    queued.autoClose && createdForRun ? `${queued.command}; exit` : queued.command
+  sendTerminalInput(entry, `${line}\r`)
   entry.term?.focus()
 }
 
@@ -513,6 +524,7 @@ async function addTerminal(cwd?: string) {
     cwd: row.cwd || '',
     createdAt: row.created_at || new Date().toISOString(),
     alive: true,
+    autoClose: false,
     term: null,
     fit: null,
     webLinks: null,
@@ -583,6 +595,7 @@ async function loadExisting() {
       cwd: row.cwd || '',
       createdAt: row.created_at || null,
       alive: row.alive,
+      autoClose: false,
       term: null,
       fit: null,
       webLinks: null,

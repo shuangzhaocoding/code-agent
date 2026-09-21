@@ -19,6 +19,9 @@ export function useSshWorkspaceBrowse() {
   const path = ref('~')
   const error = ref('')
   const connecting = ref(false)
+  const creating = ref(false)
+  const createValue = ref('')
+  const createKey = ref(0)
   const reuseFromWorkspaceId = ref<string | null>(null)
   const auth = ref<SshAuthForm>({
     display_name: '',
@@ -52,27 +55,29 @@ export function useSshWorkspaceBrowse() {
     return raw
   }
 
+  function authBody(): Record<string, unknown> {
+    const body: Record<string, unknown> = {
+      host: auth.value.host.trim(),
+      port: Number(auth.value.port) || 22,
+      username: auth.value.username.trim(),
+    }
+    if (reuseFromWorkspaceId.value) body.workspace_id = reuseFromWorkspaceId.value
+    if (auth.value.password) body.password = auth.value.password
+    if (auth.value.private_key) {
+      body.private_key = auth.value.private_key
+      body.passphrase = auth.value.passphrase || null
+    }
+    return body
+  }
+
   async function browse(p: string) {
     error.value = ''
+    creating.value = false
     connecting.value = true
     try {
-      const body: Record<string, unknown> = {
-        host: auth.value.host.trim(),
-        port: Number(auth.value.port) || 22,
-        username: auth.value.username.trim(),
-        path: p,
-      }
-      if (reuseFromWorkspaceId.value) {
-        body.workspace_id = reuseFromWorkspaceId.value
-      }
-      if (auth.value.password) body.password = auth.value.password
-      if (auth.value.private_key) {
-        body.private_key = auth.value.private_key
-        body.passphrase = auth.value.passphrase || null
-      }
       browsing.value = await api<BrowseResult>('/api/workspaces/ssh/browse', {
         method: 'POST',
-        body: JSON.stringify(body),
+        body: JSON.stringify({ ...authBody(), path: p }),
       })
       path.value = browsing.value?.path || p
     } catch (err) {
@@ -88,12 +93,62 @@ export function useSshWorkspaceBrowse() {
     void browse(browsing.value.parent || '')
   }
 
+  function startCreate() {
+    if (!browsing.value || atRoots.value) {
+      error.value = t('workspace.pickDriveFirst')
+      return
+    }
+    error.value = ''
+    createValue.value = ''
+    createKey.value += 1
+    creating.value = true
+  }
+
+  function cancelCreate() {
+    creating.value = false
+  }
+
+  async function commitCreate() {
+    const name = createValue.value.trim()
+    if (!name) {
+      cancelCreate()
+      return
+    }
+    if (/[\\/]/.test(name) || name === '.' || name === '..') {
+      error.value = t('workspace.invalidName')
+      return
+    }
+    const parent = browsing.value?.path || path.value
+    if (!parent) {
+      error.value = t('workspace.pickDriveFirst')
+      return
+    }
+    connecting.value = true
+    try {
+      const created = await api<{ path: string }>('/api/workspaces/ssh/mkdir', {
+        method: 'POST',
+        body: JSON.stringify({ ...authBody(), parent, name }),
+      })
+      creating.value = false
+      error.value = ''
+      await browse(created.path)
+    } catch (err) {
+      error.value = errMessage(err)
+      createKey.value += 1
+    } finally {
+      connecting.value = false
+    }
+  }
+
   return {
     auth,
     browsing,
     path,
     error,
     connecting,
+    creating,
+    createValue,
+    createKey,
     reuseFromWorkspaceId,
     reusingCredentials,
     dirs,
@@ -102,6 +157,9 @@ export function useSshWorkspaceBrowse() {
     displayPath,
     browse,
     goParent,
+    startCreate,
+    cancelCreate,
+    commitCreate,
     errMessage,
   }
 }

@@ -130,6 +130,53 @@ class SshBrowseIn(BaseModel):
     workspace_id: str | None = None
 
 
+class SshMkdirIn(BaseModel):
+    host: str = ""
+    port: int = 22
+    username: str = ""
+    password: str | None = None
+    private_key: str | None = None
+    passphrase: str | None = None
+    parent: str
+    name: str
+    workspace_id: str | None = None
+
+
+async def _resolve_ssh_auth(body: SshBrowseIn | SshMkdirIn) -> SshAuth:
+    if body.workspace_id:
+        src = await _get_ws(body.workspace_id)
+        if not workspace_is_ssh(src):
+            raise HTTPException(status_code=400, detail={"code": "ssh.incomplete", "message": "workspace is not SSH"})
+        auth = SshAuth.from_workspace_fields(
+            host=(body.host or src.ssh_host or "").strip() or (src.ssh_host or ""),
+            port=int(body.port or src.ssh_port or 22),
+            username=(body.username or src.ssh_user or "").strip() or (src.ssh_user or ""),
+            secret_blob=getattr(src, "ssh_secret", None) or "",
+        )
+        if body.password:
+            auth.password = body.password
+        if body.private_key:
+            auth.private_key = body.private_key
+            auth.passphrase = body.passphrase
+    else:
+        auth = SshAuth(
+            host=body.host.strip(),
+            port=int(body.port or 22),
+            username=body.username.strip(),
+            password=body.password,
+            private_key=body.private_key,
+            passphrase=body.passphrase,
+        )
+    if not auth.host or not auth.username:
+        raise HTTPException(status_code=400, detail={"code": "ssh.incomplete", "message": "host/username required"})
+    if not auth.password and not auth.private_key:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "ssh.auth", "message": "Provide password or private key"},
+        )
+    return auth
+
+
 class FilePut(BaseModel):
     content: str
 
@@ -184,39 +231,7 @@ async def list_workspaces():
 
 @router.post("/ssh/browse")
 async def ssh_browse(body: SshBrowseIn):
-    auth: SshAuth
-    if body.workspace_id:
-        src = await _get_ws(body.workspace_id)
-        if not workspace_is_ssh(src):
-            raise HTTPException(status_code=400, detail={"code": "ssh.incomplete", "message": "workspace is not SSH"})
-        auth = SshAuth.from_workspace_fields(
-            host=(body.host or src.ssh_host or "").strip() or (src.ssh_host or ""),
-            port=int(body.port or src.ssh_port or 22),
-            username=(body.username or src.ssh_user or "").strip() or (src.ssh_user or ""),
-            secret_blob=getattr(src, "ssh_secret", None) or "",
-        )
-        # allow overriding password/key if provided
-        if body.password:
-            auth.password = body.password
-        if body.private_key:
-            auth.private_key = body.private_key
-            auth.passphrase = body.passphrase
-    else:
-        auth = SshAuth(
-            host=body.host.strip(),
-            port=int(body.port or 22),
-            username=body.username.strip(),
-            password=body.password,
-            private_key=body.private_key,
-            passphrase=body.passphrase,
-        )
-    if not auth.host or not auth.username:
-        raise HTTPException(status_code=400, detail={"code": "ssh.incomplete", "message": "host/username required"})
-    if not auth.password and not auth.private_key:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "ssh.auth", "message": "Provide password or private key"},
-        )
+    auth = await _resolve_ssh_auth(body)
     raw = (body.path or "~").strip() or "~"
     try:
         backend = await SshWorkspaceBackend.open_ephemeral(auth, root_path="/")
@@ -254,6 +269,41 @@ async def ssh_browse(body: SshBrowseIn):
         if parent == list_root:
             parent = ""
         return {"path": list_root, "parent": parent, "items": abs_items, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "ssh.connect_failed", "message": str(exc)},
+        ) from exc
+
+
+@router.post("/ssh/mkdir")
+async def ssh_mkdir(body: SshMkdirIn):
+    auth = await _resolve_ssh_auth(body)
+    name = (body.name or "").strip()
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "名称不合法"})
+    try:
+        backend = await SshWorkspaceBackend.open_ephemeral(auth, root_path="/")
+        parent = (body.parent or "").strip() or "~"
+        if parent in {"", ".", "__roots__"}:
+            raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "请先进入一个目录"})
+        if parent.startswith("~"):
+            conn = await backend._conn()
+            home = (await conn.run('printf %s "$HOME"', check=False)).stdout or ""
+            home = home.strip() or "/root"
+            parent = home if parent == "~" else posixpath.join(home, parent[2:].lstrip("/"))
+        if not parent.startswith("/"):
+            parent = f"/{parent}"
+        backend.root_path = "/"
+        if not await backend.is_dir(parent):
+            raise HTTPException(status_code=400, detail={"code": "path.invalid", "message": "上级目录不存在"})
+        dest = posixpath.join(parent, name) if parent != "/" else f"/{name}"
+        if await backend.exists(dest):
+            raise HTTPException(status_code=409, detail={"code": "path.exists", "message": "已存在同名文件或目录"})
+        await backend.mkdir(dest)
+        return {"name": name, "path": dest, "parent": parent}
     except HTTPException:
         raise
     except Exception as exc:

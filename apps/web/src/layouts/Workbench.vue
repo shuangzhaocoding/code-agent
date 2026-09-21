@@ -16,7 +16,6 @@ import PromptCard from '@/components/PromptCard.vue'
 import PortNotifyToast from '@/components/PortNotifyToast.vue'
 import CommandPalette from '@/components/CommandPalette.vue'
 import AppToastHost from '@/components/AppToastHost.vue'
-import AttentionBar from '@/components/AttentionBar.vue'
 import { useToast } from '@/composables/useToast'
 import {
   applyLayoutPreset,
@@ -882,7 +881,6 @@ const dockThemeClass = computed(() =>
         @open-file-palette="openFilePalette"
       />
       <div class="workbench-main">
-        <AttentionBar />
         <div class="dock">
           <DockviewVue
             :class="[dockThemeClass, 'dockview-theme-codeagent']"
