@@ -52,13 +52,20 @@ def connect_kwargs(auth: SshAuth) -> dict[str, Any]:
         # Do not parse OpenSSH config: `open(path)` uses locale encoding.
         "config": None,
         "known_hosts": _known_hosts_arg(settings.get("ssh.known_hosts")),
+        # Keep the session alive across long UI idle (NAT / server ClientAlive).
+        "tcp_keepalive": True,
     }
     cfg = settings.get("ssh.config")
     if cfg not in (None, "", False, "null"):
         kwargs["config"] = str(cfg)
     keepalive = settings.get("ssh.keepalive_interval")
-    if keepalive not in (None, "", False):
-        kwargs["keepalive_interval"] = int(keepalive)
+    if keepalive in (None, "", False):
+        keepalive = 30
+    kwargs["keepalive_interval"] = int(keepalive)
+    count_max = settings.get("ssh.keepalive_count_max")
+    if count_max in (None, "", False):
+        count_max = 10
+    kwargs["keepalive_count_max"] = int(count_max)
     if auth.private_key:
         kwargs["client_keys"] = [
             asyncssh.import_private_key(auth.private_key, passphrase=auth.passphrase)
@@ -73,6 +80,15 @@ def connect_kwargs(auth: SshAuth) -> dict[str, Any]:
     if auth.password:
         kwargs["password"] = auth.password
     return kwargs
+
+
+def _conn_is_dead(conn: asyncssh.SSHClientConnection) -> bool:
+    try:
+        if conn.is_closing():
+            return True
+    except Exception:
+        return True
+    return False
 
 
 @dataclass
@@ -139,12 +155,15 @@ class SshPool:
     async def _connect_unlocked(self, key: str, auth: SshAuth) -> asyncssh.SSHClientConnection:
         conn = self._conns.get(key)
         if conn is not None:
-            try:
-                # cheap liveness probe
-                await asyncio.wait_for(conn.run("true", check=False), timeout=5)
-                return conn
-            except Exception:
+            if _conn_is_dead(conn):
                 await self._drop_unlocked(key)
+            else:
+                try:
+                    # cheap liveness probe — recovers after overnight sleep / NAT drop
+                    await asyncio.wait_for(conn.run("true", check=False), timeout=5)
+                    return conn
+                except Exception:
+                    await self._drop_unlocked(key)
 
         conn = await asyncssh.connect(**connect_kwargs(auth))
         self._conns[key] = conn

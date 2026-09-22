@@ -20,6 +20,25 @@ def test_password_connect_skips_openssh_config_and_default_keys(monkeypatch):
     assert kw["password"] == "secret"
     assert kw["host"] == "10.0.0.1"
     assert kw["username"] == "root"
+    assert kw["tcp_keepalive"] is True
+    assert kw["keepalive_interval"] == 30
+    assert kw["keepalive_count_max"] == 10
+
+
+def test_keepalive_overrides(monkeypatch):
+    def get(key, default=None):
+        if key == "ssh.keepalive_interval":
+            return 60
+        if key == "ssh.keepalive_count_max":
+            return 5
+        if key == "ssh.login_timeout":
+            return 20
+        return None
+
+    monkeypatch.setattr("code_agent.workspace.ssh_pool.settings.get", get)
+    kw = connect_kwargs(SshAuth(host="h", port=22, username="u", password="p"))
+    assert kw["keepalive_interval"] == 60
+    assert kw["keepalive_count_max"] == 5
 
 
 def test_known_hosts_file_is_read_as_utf8_bytes(tmp_path: Path, monkeypatch):

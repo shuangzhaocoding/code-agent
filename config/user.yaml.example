@@ -34,4 +34,5 @@ storage:
 #   known_hosts: null  # null | auto | /path/to/known_hosts
 #   config: null  # null skips ~/.ssh/config (avoids Windows GBK decode errors)
 #   keepalive_interval: 30
+#   keepalive_count_max: 10  # close after this many missed keepalives
 #   mirror_ttl_sec: 1800  # SSH plugins/skills mirror cache; 0 = always resync

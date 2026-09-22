@@ -183,5 +183,7 @@ ssh:
   # Windows locale (GBK), which raises UnicodeDecodeError on UTF-8 comments.
   config: null
   keepalive_interval: 30
+  # Miss this many keepalives before closing (~5 min with interval 30).
+  keepalive_count_max: 10
   # Reuse mirrored plugins/skills between workspace switches (seconds). 0 = always resync.
   mirror_ttl_sec: 1800
