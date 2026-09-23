@@ -142,6 +142,16 @@ llm:
   request_timeout_sec: 120
   default_temperature: 0.2
 
+# LangSmith tracing for the LangGraph agent. API key: LANGSMITH_API_KEY,
+# observability.langsmith.api_key, or a LANGSMITH_* line in the repo .env.
+# Enabled here is overridden by ~/.code-agent/config.yaml.
+observability:
+  langsmith:
+    enabled: false
+    project: code-agent
+    api_key: ""
+    endpoint: ""
+
 ui:
   theme: dark
   font_size: 13

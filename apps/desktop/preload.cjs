@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('codeAgentDesktop', {
   windowMaximizeToggle: () => ipcRenderer.invoke('desktop:window-maximize-toggle'),
   windowClose: () => ipcRenderer.invoke('desktop:window-close'),
   isMaximized: () => ipcRenderer.invoke('desktop:window-is-maximized'),
+  notify: (payload) => ipcRenderer.invoke('desktop:notify', payload),
 })
 
 ipcRenderer.on('desktop:window-state', (_event, payload) => {

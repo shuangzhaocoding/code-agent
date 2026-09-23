@@ -88,9 +88,10 @@ export function playApprovalAlertSound() {
   playTone(698.46, 0.34, 0.14, 0.14, 'square')
 }
 
-export function notifyApprovalRequired(approvalId?: string) {
+/** Returns false when this approval was already announced. */
+export function notifyApprovalRequired(approvalId?: string): boolean {
   if (approvalId) {
-    if (playedApprovals.has(approvalId)) return
+    if (playedApprovals.has(approvalId)) return false
     playedApprovals.add(approvalId)
     if (playedApprovals.size > 200) {
       playedApprovals.clear()
@@ -98,4 +99,5 @@ export function notifyApprovalRequired(approvalId?: string) {
     }
   }
   playApprovalAlertSound()
+  return true
 }

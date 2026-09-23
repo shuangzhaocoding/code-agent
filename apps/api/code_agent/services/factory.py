@@ -262,9 +262,15 @@ async def _startup_common(*, full: bool) -> None:
     if storage_database_backend() == "sqlite":
         await configure_tortoise_sqlite()
     await _load_stored_settings()
+    from code_agent.config import apply_langsmith
+
+    langsmith_label = apply_langsmith()
     if full:
         await _seed_llm_from_env()
         schedule_startup_checkpoint_cleanup()
     host = settings.get("server.host")
     port = settings.get("server.port")
-    print(f"Code Agent on {host}:{port} — profile={settings.get('runtime.profile', 'split')}")
+    print(
+        f"Code Agent on {host}:{port} — profile={settings.get('runtime.profile', 'split')} "
+        f"langsmith={langsmith_label}"
+    )

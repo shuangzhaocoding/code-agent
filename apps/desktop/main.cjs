@@ -1,9 +1,13 @@
-const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme } = require('electron')
+const { app, BrowserWindow, Menu, dialog, shell, ipcMain, nativeTheme, Notification } = require('electron')
 const { spawn } = require('child_process')
 const http = require('http')
 const net = require('net')
 const path = require('path')
 const fs = require('fs')
+
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.codeagent.desktop')
+}
 
 const PORT = Number(process.env.CODE_AGENT_PORT || 4060)
 const HOST = process.env.CODE_AGENT_HOST || '127.0.0.1'
@@ -757,6 +761,27 @@ if (!gotLock) {
     const win = BrowserWindow.fromWebContents(event.sender)
     if (!win || win.isDestroyed()) return
     win.close()
+  })
+  ipcMain.handle('desktop:notify', (event, payload) => {
+    if (!Notification.isSupported()) return false
+    const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 120) : ''
+    const body = typeof payload?.body === 'string' ? payload.body.trim().slice(0, 240) : ''
+    if (!title && !body) return false
+    const win = BrowserWindow.fromWebContents(event.sender)
+    const focused = Boolean(win && !win.isDestroyed() && win.isFocused())
+    const note = new Notification({
+      title: title || 'Code Agent',
+      body,
+      silent: focused,
+    })
+    note.on('click', () => {
+      if (!win || win.isDestroyed()) return
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    })
+    note.show()
+    return true
   })
   ipcMain.handle('desktop:window-is-maximized', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender)

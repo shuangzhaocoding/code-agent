@@ -23,6 +23,7 @@ import {
 } from '@/preview/classify'
 import { gitMarkKind, gitMarkLetter, gitMarkTitle, type GitMarkKind, type GitPathMark } from '@/utils/gitStatus'
 import { draftCommitFromPaths } from '@/utils/gitCommitDraft'
+import { notifyDesktop } from '@/utils/desktop'
 import { notifyApprovalRequired, playTaskCompleteSound } from '@/utils/notificationSound'
 import { pendingApprovalsFromMessages, settleUndecidedApprovals } from '@/utils/approvals'
 import { parseChatFileRef } from '@/utils/chatFileLinks'
@@ -2333,20 +2334,21 @@ export const useAppStore = defineStore('app', () => {
           sessionTreeMarks.value = { ...sessionTreeMarks.value, [changedPath]: 'added' }
         }
       }
-      if (
-        type === 'file.diff' &&
-        changedPath &&
-        (runStatus.value === 'running' || runStatus.value === 'queued')
-      ) {
-        window.dispatchEvent(new CustomEvent('ca-follow-editor', { detail: { path: changedPath } }))
-      }
+      // Do not auto-open agent-written files in the editor; user opens from chat/tree.
     }
     if (event.type === 'run.started') {
       runStatus.value = 'running'
       syncCurrentConversationStatus({ awaiting_approval: false })
     }
     if (event.type === 'block.started' && type === 'approval') {
-      notifyApprovalRequired(String(meta.approval_id || blockId || ''))
+      const approvalId = String(meta.approval_id || blockId || '')
+      if (notifyApprovalRequired(approvalId)) {
+        const summary = String(meta.summary || meta.tool || '').trim()
+        notifyDesktop({
+          title: t('desktop.approvalRequired'),
+          body: summary && summary !== t('desktop.approvalRequired') ? summary : '',
+        })
+      }
       syncCurrentConversationStatus({ awaiting_approval: true })
     }
     if (event.type === 'block.started' && type === 'terminal.launch') {
@@ -2366,6 +2368,12 @@ export const useAppStore = defineStore('app', () => {
     }
     if (event.type === 'run.completed') {
       playTaskCompleteSound()
+      const conv = conversations.value.find((c) => c.id === conversationId.value)
+      const body = (conv?.title || '').trim()
+      notifyDesktop({
+        title: t('desktop.taskComplete'),
+        body: body && body !== 'New chat' ? body : '',
+      })
     }
     if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
       runStatus.value = event.type.replace('run.', '')

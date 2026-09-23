@@ -12,7 +12,9 @@
     "minimize": "Minimieren",
     "maximize": "Maximieren",
     "restore": "Wiederherstellen",
-    "close": "Schließen"
+    "close": "Schließen",
+    "taskComplete": "Aufgabe abgeschlossen",
+    "approvalRequired": "Bestätigung erforderlich"
   },
   "common": {
     "open": "Öffnen",

@@ -18,6 +18,7 @@ deps = [
     "langgraph-checkpoint-sqlite>=2.0.0",
     "langchain-core>=0.3.0",
     "langchain-openai>=0.2.0",
+    "langsmith>=0.3.0",
     "httpx>=0.27.0",
     "pyyaml>=6.0.2",
     "cryptography>=43.0.0",

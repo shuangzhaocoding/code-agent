@@ -29,6 +29,15 @@ storage:
 #   # dir: /custom/path/uploads        # 绝对路径
 # 也可用环境变量：CODE_AGENT_UPLOADS_DIR
 
+# LangSmith：打开后 Agent / 工具 / 模型调用会上报到 smith.langchain.com
+# 密钥放 LANGSMITH_API_KEY，或写在 api_key（不要提交到仓库）
+# observability:
+#   langsmith:
+#     enabled: true
+#     project: code-agent
+#     api_key: ""
+#     endpoint: ""
+
 # ssh:
 #   login_timeout: 20
 #   known_hosts: null  # null | auto | /path/to/known_hosts

@@ -19,6 +19,8 @@ export type CodeAgentDesktop = {
   windowMaximizeToggle?: () => Promise<boolean>
   windowClose?: () => Promise<void>
   isMaximized?: () => Promise<boolean>
+  /** OS notification (Windows: bottom-right toast). */
+  notify?: (payload: { title: string; body?: string }) => Promise<boolean>
 }
 
 export const DESKTOP_TITLEBAR_HEIGHT = 38
@@ -64,6 +66,16 @@ export function initDesktopChrome() {
       `${desktop.titleBarHeight || DESKTOP_TITLEBAR_HEIGHT}px`,
     )
   }
+}
+
+/** Native system notification. No-op in the browser. */
+export function notifyDesktop(payload: { title: string; body?: string }): void {
+  const desktop = getDesktopBridge()
+  if (!desktop?.isDesktop || typeof desktop.notify !== 'function') return
+  const title = payload.title.trim()
+  const body = (payload.body || '').trim()
+  if (!title && !body) return
+  void desktop.notify({ title, body }).catch(() => {})
 }
 
 /** Open another desktop window (shared local backend). */

@@ -35,7 +35,9 @@
     "minimize": "Minimize",
     "maximize": "Maximize",
     "restore": "Restore",
-    "close": "Close"
+    "close": "Close",
+    "taskComplete": "Task complete",
+    "approvalRequired": "Confirmation needed"
   },
   "common": {
     "open": "Open",

@@ -35,7 +35,10 @@ async def _worker_loop(stop: asyncio.Event) -> None:
 
 
 async def run_worker() -> None:
+    from code_agent.config import apply_langsmith
+
     stop = asyncio.Event()
+    logger.info("LangSmith %s", apply_langsmith())
     async with bootstrap(with_checkpointer=True):
         logger.info("Agent worker started (max_concurrent=%s)", max_concurrent_runs())
         try:

@@ -35,7 +35,9 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "restore": "还原",
-    "close": "关闭"
+    "close": "关闭",
+    "taskComplete": "任务已完成",
+    "approvalRequired": "需要确认"
   },
   "common": {
     "open": "打开",

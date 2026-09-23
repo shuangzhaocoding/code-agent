@@ -129,6 +129,13 @@ async def run_agent_graph(
             "messages": [],
         }
         config = {
+            "run_name": "code-agent",
+            "tags": ["code-agent", str(run.mode or "agent")],
+            "metadata": {
+                "workspace_id": str(workspace.id),
+                "conversation_id": str(conv.id),
+                "run_id": run_id,
+            },
             "configurable": {
                 "thread_id": thread,
                 "model": model,

@@ -12,7 +12,9 @@
     "minimize": "最小化",
     "maximize": "最大化",
     "restore": "元に戻す",
-    "close": "閉じる"
+    "close": "閉じる",
+    "taskComplete": "タスクが完了しました",
+    "approvalRequired": "確認が必要です"
   },
   "common": {
     "open": "開く",

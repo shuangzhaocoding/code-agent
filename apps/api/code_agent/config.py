@@ -1,11 +1,25 @@
 from __future__ import annotations
 
+import logging
 import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+logger = logging.getLogger("code_agent.langsmith")
+
+_LANGSMITH_ENV_KEYS = (
+    "LANGSMITH_TRACING",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_ENDPOINT",
+    "LANGCHAIN_TRACING_V2",
+    "LANGCHAIN_API_KEY",
+    "LANGCHAIN_PROJECT",
+    "LANGCHAIN_ENDPOINT",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_YAML = REPO_ROOT / "config" / "default.yaml"
@@ -75,6 +89,83 @@ def _apply_env(cfg: dict[str, Any]) -> dict[str, Any]:
         cfg.setdefault("storage", {})["redis_url"] = redis
         cfg.setdefault("storage", {})["events"] = "redis"
     return cfg
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_langsmith_dotenv() -> None:
+    """Pick up LangSmith variables from dotenv files without loading other secrets."""
+    paths = [REPO_ROOT / ".env", Path.home() / ".code-agent" / ".env"]
+    for path in paths:
+        if not path.is_file():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            text = line.strip()
+            if not text or text.startswith("#") or "=" not in text:
+                continue
+            key, _, raw = text.partition("=")
+            key = key.strip()
+            if key not in _LANGSMITH_ENV_KEYS or key in os.environ:
+                continue
+            value = raw.strip().strip('"').strip("'")
+            if value:
+                os.environ[key] = value
+
+
+def apply_langsmith(cfg: dict[str, Any] | None = None) -> str:
+    """Turn LangSmith tracing on from config or the process environment.
+
+    LangChain reads these variables when a run starts, so this must run before
+    the first graph invocation in each process (API and agent worker).
+    """
+    _load_langsmith_dotenv()
+    source = cfg if cfg is not None else settings._cfg
+    obs = source.get("observability") if isinstance(source.get("observability"), dict) else {}
+    smith = obs.get("langsmith") if isinstance(obs.get("langsmith"), dict) else {}
+    env_on = _truthy(
+        os.environ.get("LANGSMITH_TRACING")
+        or os.environ.get("LANGCHAIN_TRACING_V2")
+        or os.environ.get("CODE_AGENT_LANGSMITH")
+    )
+    enabled = env_on or _truthy(smith.get("enabled"))
+    project = (
+        os.environ.get("LANGSMITH_PROJECT")
+        or os.environ.get("LANGCHAIN_PROJECT")
+        or str(smith.get("project") or "code-agent")
+    ).strip() or "code-agent"
+    endpoint = (
+        os.environ.get("LANGSMITH_ENDPOINT")
+        or os.environ.get("LANGCHAIN_ENDPOINT")
+        or str(smith.get("endpoint") or "")
+    ).strip()
+    key = (
+        os.environ.get("LANGSMITH_API_KEY")
+        or os.environ.get("LANGCHAIN_API_KEY")
+        or str(smith.get("api_key") or "")
+    ).strip()
+    if not enabled:
+        return "off"
+    os.environ["LANGSMITH_TRACING"] = "true"
+    os.environ["LANGCHAIN_TRACING_V2"] = "true"
+    os.environ["LANGSMITH_PROJECT"] = project
+    os.environ["LANGCHAIN_PROJECT"] = project
+    if key:
+        os.environ["LANGSMITH_API_KEY"] = key
+        os.environ["LANGCHAIN_API_KEY"] = key
+    if endpoint:
+        os.environ["LANGSMITH_ENDPOINT"] = endpoint
+        os.environ["LANGCHAIN_ENDPOINT"] = endpoint
+    label = f"on project={project}" if key else f"on project={project} (API key missing)"
+    logger.info("LangSmith tracing %s", label)
+    return label
 
 
 def _resolve_uploads_dir(cfg: dict[str, Any], data_dir: Path) -> Path:
@@ -166,6 +257,7 @@ class Settings:
         self.refresh_uploads_dir()
         (self.data_dir.parent / "plugins").mkdir(parents=True, exist_ok=True)
         (self.data_dir.parent / "skills").mkdir(parents=True, exist_ok=True)
+        apply_langsmith(self._cfg)
 
     def refresh_uploads_dir(self) -> Path:
         """Re-resolve uploads_dir from live _cfg (hot-reload, no process restart)."""
